@@ -29,7 +29,45 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
 const port = process.env.PORT || 3000;
 
+/** Timeweb/Docker: фронт может быть в server/public или client/dist — ищем оба */
+function resolveClientDist() {
+  const candidates = [
+    path.join(__dirname, 'public'),
+    path.join(__dirname, '../client/dist'),
+  ];
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, 'index.html'))) {
+      return dir;
+    }
+  }
+  return candidates[0];
+}
+
+const clientDist = resolveClientDist();
+const hasIndex = fs.existsSync(path.join(clientDist, 'index.html'));
+
+if (isProd) {
+  console.log('NODE_ENV=production, static dir:', clientDist, 'index.html:', hasIndex);
+  if (!hasIndex) {
+    console.error('FATAL: index.html not found. Run build in Docker/Build step: npm run build');
+  }
+}
+
 const app = express();
+
+app.get('/api/health', (req, res) => {
+  const publicDir = path.join(__dirname, 'public');
+  const legacyDist = path.join(__dirname, '../client/dist');
+  res.json({
+    ok: true,
+    nodeEnv: process.env.NODE_ENV || 'development',
+    staticDir: clientDist,
+    hasClientDist: hasIndex,
+    hasServerPublic: fs.existsSync(path.join(publicDir, 'index.html')),
+    hasClientDistLegacy: fs.existsSync(path.join(legacyDist, 'index.html')),
+    hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
+  });
+});
 
 app.use(cors({
   origin: isProd ? undefined : true,
@@ -66,9 +104,14 @@ app.use('/api/card-uid', cardUid);
 app.use('/api/attendance', attendance);
 
 if (isProd) {
-  app.use(express.static(path.join(__dirname, '../client/dist')));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../client/dist/index.html'));
+  app.use(express.static(clientDist));
+  app.get('*', (req, res, next) => {
+    res.sendFile(path.join(clientDist, 'index.html'), (err) => {
+      if (err) {
+        console.error('sendFile index.html:', err.message);
+        next(err);
+      }
+    });
   });
 }
 
