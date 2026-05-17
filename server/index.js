@@ -104,15 +104,23 @@ app.use('/api/card-uid', cardUid);
 app.use('/api/attendance', attendance);
 
 if (isProd) {
-  app.use(express.static(clientDist));
-  app.get('*', (req, res, next) => {
-    res.sendFile(path.join(clientDist, 'index.html'), (err) => {
-      if (err) {
-        console.error('sendFile index.html:', err.message);
-        next(err);
-      }
+  if (hasIndex) {
+    app.use(express.static(clientDist));
+    app.get('*', (req, res, next) => {
+      res.sendFile(path.join(clientDist, 'index.html'), (err) => {
+        if (err) {
+          console.error('sendFile index.html:', err.message);
+          next(err);
+        }
+      });
     });
-  });
+  } else {
+    app.get('*', (req, res) => {
+      res.status(503).type('text/plain').send(
+        'Фронт не собран. В Timeweb Start: cd client && npm run build && cd .. && npm start'
+      );
+    });
+  }
 }
 
 app.use((err, req, res, next) => {
