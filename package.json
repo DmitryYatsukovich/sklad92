@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "cd client && npm ci --include=dev && npm run build",
-    "start": "node server/index.js",
+    "start": "node scripts/ensure-client-built.mjs && node server/index.js",
     "dev": "node server/index.js",
     "dev:client": "cd client && npm run dev",
     "dev:client:https": "cd client && DEV_HTTPS=1 npx vite --host",
