@@ -2,34 +2,32 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
-function buildPoolConfig() {
-  const connectionString = process.env.DATABASE_URL;
-  const config = { connectionString };
+const connectionString = process.env.DATABASE_URL || '';
+const sslMode = (
+  process.env.PGSSLMODE ||
+  process.env.DATABASE_SSLMODE ||
+  connectionString.match(/[?&]sslmode=([^&]+)/i)?.[1] ||
+  ''
+).toLowerCase();
 
-  const sslMode =
-    process.env.PGSSLMODE ||
-    process.env.DATABASE_SSLMODE ||
-    (connectionString?.match(/[?&]sslmode=([^&]+)/i)?.[1] ?? '');
+/** @type {import('pg').PoolConfig} */
+const poolConfig = { connectionString };
 
-  if (sslMode === 'disable' || process.env.DATABASE_SSL === 'false') {
-    config.ssl = false;
-    return config;
-  }
-
-  const useSsl =
-    process.env.DATABASE_SSL === 'true' ||
-    ['require', 'verify-ca', 'verify-full', 'prefer'].includes(sslMode);
-
-  if (useSsl) {
-    // Timeweb/managed PG: verify-full без root.crt в контейнере → self-signed in chain
-    config.ssl = {
-      rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED === 'true',
-    };
-  }
-
-  return config;
+// Локально (docker): без sslmode или sslmode=disable
+if (sslMode === 'disable' || process.env.DATABASE_SSL === 'false') {
+  poolConfig.ssl = false;
+} else if (
+  sslMode === 'require' ||
+  sslMode === 'verify-full' ||
+  sslMode === 'verify-ca' ||
+  sslMode === 'prefer' ||
+  process.env.DATABASE_SSL === 'true' ||
+  connectionString.includes('twc1.net')
+) {
+  // Timeweb Cloud: шифрование без проверки цепочки (нет root.crt в контейнере)
+  poolConfig.ssl = { rejectUnauthorized: false };
 }
 
-const pool = new Pool(buildPoolConfig());
+const pool = new Pool(poolConfig);
 
 export default pool;
