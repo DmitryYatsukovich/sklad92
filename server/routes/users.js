@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import pool from '../db/pool.js';
 import { requireAuth, loadUser, requirePermission } from '../middleware/auth.js';
+import { PERMISSIONS_SELECT } from '../lib/permissions-sql.js';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -33,11 +34,7 @@ router.get('/', async (req, res) => {
   const r = await pool.query(
     `SELECT ${userColumns},
             (u.face_descriptor IS NOT NULL) AS has_face,
-            COALESCE(p.can_warehouse, r.can_warehouse, true) AS can_warehouse,
-            COALESCE(p.can_issuance, r.can_issuance, true) AS can_issuance,
-            COALESCE(p.can_production, r.can_production, true) AS can_production,
-            (u.role = 'admin' OR COALESCE(p.can_users, r.can_users, false)) AS can_users,
-            (u.role = 'admin' OR COALESCE(p.can_attendance, r.can_attendance, false)) AS can_attendance
+            ${PERMISSIONS_SELECT}
      FROM users u
      LEFT JOIN user_permissions p ON p.user_id = u.id
      LEFT JOIN roles r ON r.id = u.role_id
@@ -87,10 +84,12 @@ router.post('/', async (req, res) => {
     login, password, first_name, last_name, birth_date, passport_number, snils, inn, employment_date, employment_org, phone,
     role, role_id, can_warehouse, can_issuance, can_production, can_users, can_attendance, internal_uid, face_descriptor,
   } = req.body || {};
-  if (!login?.trim() || !password) {
+  const loginTrim = login?.trim();
+  const passwordRaw = typeof password === 'string' ? password : '';
+  if (!loginTrim || !passwordRaw) {
     return res.status(400).json({ error: 'Укажите логин и пароль' });
   }
-  const hash = await bcrypt.hash(password, 10);
+  const hash = await bcrypt.hash(passwordRaw, 10);
   const displayName = [first_name, last_name].filter(Boolean).join(' ').trim() || null;
   let faceJson = null;
   if (Array.isArray(face_descriptor) && face_descriptor.length >= 128) {
@@ -103,7 +102,7 @@ router.post('/', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb)
        RETURNING id, login, display_name, first_name, last_name, birth_date, passport_number, snils, inn, employment_date, employment_org, phone, role, role_id, internal_uid, created_at`,
       [
-        login.trim(), hash, displayName,
+        loginTrim, hash, displayName,
         (first_name || '').trim() || null, (last_name || '').trim() || null,
         birth_date || null, (passport_number || '').trim() || null, (snils || '').trim() || null, (inn || '').trim() || null,
         employment_date || null, (employment_org || '').trim() || null, (phone || '').trim() || null,
