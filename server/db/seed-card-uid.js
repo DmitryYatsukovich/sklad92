@@ -1,0 +1,115 @@
+/**
+ * Импорт соответствия «номер карты → внутренний UID» из отчёта ПИК (формат: "card_number → uid").
+ * Запуск: node server/db/seed-card-uid.js [путь_к_файлу]
+ * Без аргумента использует встроенные данные из PIK454_report.
+ */
+import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
+import pool from './pool.js';
+
+const BUILTIN_REPORT = `
+01193315368729728 → 09820541
+01239336077524096 → 10611111
+01182281597746304 → 09818227
+01289033144106112 → 10624212
+01235290352548992 → 11432099
+01254789235637376 → 09814709
+01261283763059840 → 13008571
+01233928847916160 → 11416482
+01218441195846784 → 11410836
+01283535585967232 → 10624207
+01183179514346624 → 11406196
+01233701483084928 → 13002914
+01286619506703488 → 11411410
+01220597940518016 → 15408278
+01233164612172928 → 13036449
+01233185415920768 → 09037729
+01266846148361344 → 15412416
+01266833263459456 → 15411648
+01167777627405440 → 10605670
+01177733764250752 → 13009263
+01220996701387904 → 11432086
+01158985829350528 → 10605918
+01152805371411584 → 10630744
+01162619505900672 → 11425889
+01154944265124992 → 10627162
+01169976784878720 → 11405672
+01286658161409152 → 11413714
+01173773133315200 → 09035371
+01200157385849984 → 10635139
+01279958012427392 → 11407564
+01275642241383552 → 15412424
+01271518133255296 → 09828804
+01182071278566528 → 10605683
+01234860587383936 → 09806499
+01207295353060480 → 09001866
+01192306319850624 → 11425916
+01189728936819840 → 09003386
+01248028822895744 → 09004975
+01240714627808384 → 09827752
+01255919080471680 → 11416502
+01270044959472768 → 09806531
+01250747671411840 → 09835953
+01209898505895040 → 11425932
+01181152289782912 → 11416434
+01232713640606848 → 13009569
+01289097434397824 → 09828052
+01238085973605504 → 09002150
+01152844428770432 → 13033048
+01201841818336384 → 15404421
+01256254356356224 → 13036470
+`.trim();
+
+function parseReport(content) {
+  const pairs = [];
+  for (const line of content.split('\n')) {
+    const m = line.trim().match(/^(\d+)\s*→\s*(\d+)\s*$/);
+    if (m) pairs.push({ card_number: m[1], internal_uid: m[2] });
+  }
+  return pairs;
+}
+
+async function seed() {
+  let content = BUILTIN_REPORT;
+  const filePath = process.argv[2];
+  if (filePath) {
+    const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
+    if (!fs.existsSync(resolved)) {
+      console.error('File not found:', resolved);
+      process.exit(1);
+    }
+    content = fs.readFileSync(resolved, 'utf8');
+    console.log('Using file:', resolved);
+  } else {
+    console.log('Using built-in PIK454 report data.');
+  }
+
+  const pairs = parseReport(content);
+  if (pairs.length === 0) {
+    console.log('No card→uid pairs found.');
+    await pool.end();
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    for (const { card_number, internal_uid } of pairs) {
+      await client.query(
+        `INSERT INTO card_uid_mapping (card_number, internal_uid)
+         VALUES ($1, $2)
+         ON CONFLICT (card_number) DO UPDATE SET internal_uid = EXCLUDED.internal_uid`,
+        [card_number, internal_uid]
+      );
+    }
+    console.log('Seed completed. Loaded', pairs.length, 'card→uid mappings.');
+  } finally {
+    client.release();
+    await pool.end();
+  }
+}
+
+seed().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
