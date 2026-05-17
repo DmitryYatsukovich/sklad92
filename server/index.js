@@ -24,6 +24,7 @@ import stats from './routes/stats.js';
 import cardUid from './routes/card-uid.js';
 import attendance from './routes/attendance.js';
 import { loadUser } from './middleware/auth.js';
+import { ensureAdminUser } from './db/ensure-admin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
@@ -133,18 +134,25 @@ const certPath = path.join(__dirname, 'certs', 'cert.pem');
 const keyPath = path.join(__dirname, 'certs', 'key.pem');
 const hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
 
-if (useHttps && hasCerts) {
-  const server = https.createServer(
-    { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) },
-    app
-  );
-  server.listen(port, () => {
-    console.log('HTTPS Server on port', port);
-    console.log('С телефона: https://<IP-компьютера>:' + port);
-  });
-} else {
-  app.listen(port, () => {
-    console.log('Server on port', port);
-    if (!useHttps && !hasCerts) console.log('HTTPS: npm run generate-certs && HTTPS=true npm run prod:https');
-  });
+async function startServer() {
+  if (isProd) await ensureAdminUser();
+
+  if (useHttps && hasCerts) {
+    const server = https.createServer(
+      { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) },
+      app
+    );
+    server.listen(port, () => {
+      console.log('HTTPS Server on port', port);
+    });
+  } else {
+    app.listen(port, () => {
+      console.log('Server on port', port);
+    });
+  }
 }
+
+startServer().catch((err) => {
+  console.error('Failed to start:', err);
+  process.exit(1);
+});
