@@ -11,8 +11,10 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 import cors from 'cors';
 import session from 'express-session';
+import connectPgSimple from 'connect-pg-simple';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import pool from './db/pool.js';
 
 import auth from './routes/auth.js';
 import users from './routes/users.js';
@@ -55,6 +57,11 @@ if (isProd) {
 }
 
 const app = express();
+const useSecureCookies = process.env.HTTPS === 'true';
+
+if (isProd) {
+  app.set('trust proxy', 1);
+}
 
 app.get('/api/health', (req, res) => {
   const publicDir = path.join(__dirname, 'public');
@@ -81,16 +88,27 @@ app.use((req, res, next) => {
   express.json()(req, res, next);
 });
 
-app.use(session({
+const PgSession = connectPgSimple(session);
+const sessionOptions = {
   secret: process.env.SESSION_SECRET || 'dev-secret',
   resave: false,
   saveUninitialized: false,
+  proxy: useSecureCookies,
   cookie: {
-    secure: process.env.HTTPS === 'true',
+    secure: useSecureCookies,
     httpOnly: true,
+    sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000,
   },
-}));
+};
+if (isProd && process.env.DATABASE_URL) {
+  sessionOptions.store = new PgSession({
+    pool,
+    createTableIfMissing: true,
+    tableName: 'session',
+  });
+}
+app.use(session(sessionOptions));
 
 app.use(loadUser);
 
