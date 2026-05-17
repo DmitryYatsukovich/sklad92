@@ -14,7 +14,6 @@ import session from 'express-session';
 import connectPgSimple from 'connect-pg-simple';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import pool from './db/pool.js';
 
 import auth from './routes/auth.js';
 import users from './routes/users.js';
@@ -90,6 +89,7 @@ app.use((req, res, next) => {
 
 const PgSession = connectPgSimple(session);
 const sessionOptions = {
+  name: 'warehouse.sid',
   secret: process.env.SESSION_SECRET || 'dev-secret',
   resave: false,
   saveUninitialized: false,
