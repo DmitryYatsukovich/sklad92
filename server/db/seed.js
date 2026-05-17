@@ -12,7 +12,10 @@ async function seed() {
     await client.query(
       `INSERT INTO users (login, password_hash, display_name, role)
        VALUES ($1, $2, 'Администратор', 'admin')
-       ON CONFLICT (login) DO NOTHING`,
+       ON CONFLICT (login) DO UPDATE SET
+         password_hash = EXCLUDED.password_hash,
+         display_name = EXCLUDED.display_name,
+         role = 'admin'`,
       [adminLogin, hash]
     );
 
@@ -35,7 +38,9 @@ async function seed() {
     await client.query(
       `INSERT INTO users (login, password_hash, display_name, role)
        VALUES ($1, $2, 'Менеджер', 'admin')
-       ON CONFLICT (login) DO NOTHING`,
+       ON CONFLICT (login) DO UPDATE SET
+         password_hash = EXCLUDED.password_hash,
+         role = 'admin'`,
       [managerLogin, managerHash]
     );
     const { rows: [manager] } = await client.query('SELECT id FROM users WHERE login = $1', [managerLogin]);
@@ -52,7 +57,7 @@ async function seed() {
     await client.query(
       `INSERT INTO users (login, password_hash, display_name, first_name, last_name, role)
        VALUES ('test', $1, 'Тестовый пользователь', 'Тест', 'Тестов', 'user')
-       ON CONFLICT (login) DO NOTHING`,
+       ON CONFLICT (login) DO UPDATE SET password_hash = EXCLUDED.password_hash`,
       [testHash]
     );
     const { rows: [testUser] } = await client.query("SELECT id FROM users WHERE login = 'test'");
