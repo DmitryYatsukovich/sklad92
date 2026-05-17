@@ -25,6 +25,10 @@ if (devHttps) {
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    outDir: '../server/public',
+    emptyOutDir: true,
+  },
   server: {
     port: 5173,
     host: devHttps ? true : undefined,
