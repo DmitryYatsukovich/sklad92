@@ -17,8 +17,12 @@ const statements = [
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_users BOOLEAN DEFAULT false`,
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS role_id INTEGER REFERENCES roles(id) ON DELETE SET NULL`,
-  // Синхронизировать sequence на случай рассинхронизации
-  `SELECT setval(pg_get_serial_sequence('roles', 'id'), COALESCE((SELECT MAX(id) FROM roles), 0))`,
+  // Синхронизировать sequence (0 недопустим для setval; пустая таблица → следующий id = 1)
+  `SELECT setval(
+    pg_get_serial_sequence('roles', 'id'),
+    COALESCE((SELECT MAX(id) FROM roles), 1),
+    (SELECT MAX(id) FROM roles) IS NOT NULL
+  )`,
   `INSERT INTO roles (name, can_warehouse, can_issuance, can_production, can_users)
    SELECT 'Администратор', true, true, true, true
    WHERE NOT EXISTS (SELECT 1 FROM roles WHERE name = 'Администратор')`,
