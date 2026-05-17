@@ -2,28 +2,26 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import pool from '../db/pool.js';
 import { loadUser } from '../middleware/auth.js';
+import { PERMISSIONS_SELECT } from '../lib/permissions-sql.js';
 
 const router = Router();
 
 router.post('/login', async (req, res) => {
-  const { login, password } = req.body || {};
+  const login = (req.body?.login || '').trim();
+  const password = req.body?.password ?? '';
   if (!login || !password) {
     return res.status(400).json({ error: 'Укажите логин и пароль' });
   }
   const r = await pool.query(
     'SELECT id, login, password_hash, display_name, role FROM users WHERE login = $1',
-    [login.trim()]
+    [login]
   );
   const user = r.rows[0];
   if (!user || !(await bcrypt.compare(password, user.password_hash))) {
     return res.status(401).json({ error: 'Неверный логин или пароль' });
   }
   const perm = await pool.query(
-    `SELECT COALESCE(p.can_warehouse, r.can_warehouse, true) AS can_warehouse,
-            COALESCE(p.can_issuance, r.can_issuance, true) AS can_issuance,
-            COALESCE(p.can_production, r.can_production, true) AS can_production,
-            (u.role = 'admin' OR COALESCE(p.can_users, r.can_users, false)) AS can_users,
-            (u.role = 'admin' OR COALESCE(p.can_attendance, r.can_attendance, false)) AS can_attendance
+    `SELECT ${PERMISSIONS_SELECT}
      FROM users u
      LEFT JOIN user_permissions p ON p.user_id = u.id
      LEFT JOIN roles r ON r.id = u.role_id
@@ -31,22 +29,39 @@ router.post('/login', async (req, res) => {
     [user.id]
   );
   const p = perm.rows[0] || {};
-  req.session.userId = user.id;
-  req.session.save((err) => {
-    if (err) return res.status(500).json({ error: 'Ошибка сессии' });
-    res.json({
-      user: {
-        id: user.id,
-        login: user.login,
-        display_name: user.display_name,
-        role: user.role,
-        can_warehouse: !!p.can_warehouse,
-        can_issuance: !!p.can_issuance,
-        can_production: !!p.can_production,
-        can_users: !!p.can_users,
-        can_attendance: !!p.can_attendance,
-      },
+  const hasAnyAccess =
+    user.role === 'admin' ||
+    p.can_warehouse ||
+    p.can_issuance ||
+    p.can_production ||
+    p.can_users ||
+    p.can_attendance;
+  if (!hasAnyAccess) {
+    return res.status(403).json({
+      error: 'Нет назначенных прав доступа. Обратитесь к администратору.',
     });
+  }
+  req.session.userId = user.id;
+  try {
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => (err ? reject(err) : resolve()));
+    });
+  } catch (err) {
+    console.error('session.save:', err);
+    return res.status(500).json({ error: 'Ошибка сессии' });
+  }
+  res.json({
+    user: {
+      id: user.id,
+      login: user.login,
+      display_name: user.display_name,
+      role: user.role,
+      can_warehouse: !!p.can_warehouse,
+      can_issuance: !!p.can_issuance,
+      can_production: !!p.can_production,
+      can_users: !!p.can_users,
+      can_attendance: !!p.can_attendance,
+    },
   });
 });
 
