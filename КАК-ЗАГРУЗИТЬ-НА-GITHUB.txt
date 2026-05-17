@@ -1,8 +1,0 @@
-GitHub через сайт: максимум 100 файлов за раз.
-В этой папке 79 файлов — всё для Timeweb.
-
-1. github.com → sklad92 → Upload files
-2. Перетащите папки client, server, scripts и файлы из корня
-3. Commit → Redeploy в Timeweb
-
-Без лимита: git push из этой папки.
