@@ -7,9 +7,8 @@ const router = Router();
 
 router.use(requireAuth);
 router.use(loadUser);
-router.use(requirePermission('can_warehouse'));
 
-router.get('/', async (req, res) => {
+router.get('/', requirePermission('can_warehouse'), async (req, res) => {
   const r = await pool.query(
     'SELECT id, code, name, unit, price, quantity, created_at, updated_at FROM materials ORDER BY name'
   );
@@ -17,7 +16,7 @@ router.get('/', async (req, res) => {
 });
 
 // Поиск по коду (для QR)
-router.get('/by-code/:code', async (req, res) => {
+router.get('/by-code/:code', requirePermission('can_warehouse'), async (req, res) => {
   const code = (req.params.code || '').trim();
   const r = await pool.query(
     'SELECT id, code, name, unit, price, quantity FROM materials WHERE code = $1',
@@ -31,7 +30,7 @@ function generateCode() {
   return 'MAT-' + Date.now().toString(36).toUpperCase() + '-' + crypto.randomBytes(4).toString('hex').toUpperCase();
 }
 
-router.post('/', async (req, res) => {
+router.post('/', requirePermission('can_warehouse'), async (req, res) => {
   const { name, unit, price, quantity } = req.body || {};
   if (!name?.trim()) {
     return res.status(400).json({ error: 'Укажите наименование' });
@@ -59,7 +58,7 @@ router.post('/', async (req, res) => {
 });
 
 // Добавить количество на склад (поступление)
-router.post('/:id/add', async (req, res) => {
+router.post('/:id/add', requirePermission('can_warehouse'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const amount = parseFloat(req.body?.amount) || 0;
   if (id <= 0 || amount <= 0) return res.status(400).json({ error: 'Укажите количество' });
