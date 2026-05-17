@@ -9,6 +9,7 @@ export function requireAuth(req, res, next) {
 
 export async function loadUser(req, res, next) {
   if (!req.session?.userId) return next();
+  try {
   const r = await pool.query(
     `SELECT u.id, u.login, u.display_name, u.role, u.role_id,
             COALESCE(p.can_warehouse, r.can_warehouse, true) AS can_warehouse,
@@ -24,6 +25,11 @@ export async function loadUser(req, res, next) {
   );
   req.user = r.rows[0] || null;
   next();
+  } catch (err) {
+    console.error('loadUser DB error:', err.message);
+    req.session?.destroy?.(() => {});
+    next();
+  }
 }
 
 export function requirePermission(permission) {
