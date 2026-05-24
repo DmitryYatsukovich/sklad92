@@ -1,0 +1,26 @@
+Загрузка на Timeweb (Node.js)
+=============================
+
+1. Загрузите ВСЁ содержимое этой папки в корень приложения на Timeweb.
+   (или распакуйте warehouse-timeweb-full.zip в корень)
+
+2. Не загружайте node_modules — на сервере:
+   npm install
+   npm start
+
+3. Переменные (.env):
+   NODE_ENV=production
+   DATABASE_URL=postgresql://...
+   SESSION_SECRET=случайная_длинная_строка
+   PORT= (часто задаёт панель)
+
+4. Распознавание лиц:
+   - В архиве уже есть server/public/models/*.bin (~13 МБ)
+   - После npm install: npm start (скрипт server/ensure-face-models.mjs)
+   - Проверка: https://ваш-домен/api/health → "hasFaceModels": true
+   - Проверка: https://ваш-домен/models/face_recognition_model.bin (~6 МБ, не HTML)
+
+5. Запуск только через: npm start
+   (не node server/index.js). Postinstall в package.json нет — npm ci на Timeweb не падает.
+
+Подробнее: TIMEWEB.md
