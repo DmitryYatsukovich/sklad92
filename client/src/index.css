@@ -1,0 +1,301 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply text-zinc-100 font-sans antialiased min-h-screen text-sm;
+    background-color: #000000;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+
+  ::selection {
+    @apply bg-white/20 text-white;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-lg border border-white/10 bg-surface-850 shadow-card;
+  }
+
+  .input {
+    @apply w-full px-2.5 py-1.5 rounded-md bg-black border border-white/15 text-white text-sm
+      placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-white/30
+      focus:border-white/30 transition-colors;
+  }
+
+  .select {
+    @apply w-full px-2.5 py-1.5 rounded-md bg-black border border-white/15 text-white text-sm
+      focus:outline-none focus:ring-1 focus:ring-white/30 focus:border-white/30
+      transition-colors cursor-pointer;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center px-3 py-1.5 rounded-md text-xs font-semibold
+      bg-white text-black hover:bg-zinc-200 active:scale-[0.98] transition-all
+      disabled:opacity-40 disabled:pointer-events-none;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center px-3 py-1.5 rounded-md text-xs font-medium
+      text-zinc-200 bg-transparent border border-white/20 hover:bg-white/5 hover:border-white/35
+      active:scale-[0.98] transition-all;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center px-2 py-1 rounded text-xs text-zinc-400
+      hover:text-white hover:bg-white/5 transition-colors;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center px-2 py-1 rounded text-xs text-zinc-400
+      hover:text-white hover:bg-white/10 transition-colors;
+  }
+
+  .page-title {
+    @apply text-base font-semibold tracking-tight text-white;
+  }
+
+  .page-subtitle {
+    @apply text-zinc-500 text-xs mt-0.5;
+  }
+
+  .table-wrap {
+    @apply rounded-lg border border-white/10 bg-surface-900 overflow-hidden shadow-card;
+  }
+
+  .table-compact {
+    @apply w-full text-left text-xs;
+  }
+
+  .table-compact thead tr {
+    @apply border-b border-white/10 text-zinc-400;
+  }
+
+  .table-compact th {
+    @apply px-1.5 py-1 font-medium whitespace-nowrap;
+  }
+
+  .table-compact td {
+    @apply px-1.5 py-1 text-zinc-300 align-middle;
+  }
+
+  .table-compact tbody tr {
+    @apply border-b border-white/[0.04] hover:bg-white/[0.03] transition-colors;
+  }
+
+  .timesheet-table {
+    @apply w-full table-fixed text-[10px] leading-none;
+  }
+
+  .timesheet-table th,
+  .timesheet-table td {
+    @apply px-0 py-0.5 align-middle;
+  }
+
+  .timesheet-table .timesheet-name {
+    @apply w-[5.5rem] max-w-[5.5rem] min-w-[5.5rem] px-1.5 text-[11px];
+  }
+
+  .timesheet-table .timesheet-org {
+    @apply w-[6.5rem] max-w-[6.5rem] min-w-[6.5rem] px-1 text-[10px] text-zinc-400;
+  }
+
+  .timesheet-table .timesheet-day {
+    @apply w-[1.35rem] max-w-[1.35rem] text-center;
+  }
+
+  .timesheet-table .timesheet-total {
+    @apply w-[2.75rem] max-w-[2.75rem] px-0.5 text-right text-[10px];
+  }
+
+  .timesheet-table .timesheet-rate {
+    @apply w-[4.25rem] max-w-[4.25rem] px-0.5 text-right;
+  }
+
+  .timesheet-table .timesheet-earned {
+    @apply w-[3.25rem] max-w-[3.25rem] px-0.5 text-right text-emerald-400/90 font-medium;
+  }
+
+  .timesheet-table .timesheet-bonus-rate {
+    @apply w-[5.25rem] max-w-[5.25rem] px-0.5 text-right;
+  }
+
+  .timesheet-table .timesheet-bonus {
+    @apply w-[3.25rem] max-w-[3.25rem] px-0.5 text-right text-violet-300/90 font-medium;
+  }
+
+  .timesheet-table .timesheet-total-all {
+    @apply w-[3.75rem] max-w-[3.75rem] px-0.5 text-right text-emerald-300 font-semibold;
+  }
+
+  .timesheet-rate-editor {
+    @apply flex items-stretch gap-0.5 w-full min-w-0;
+  }
+
+  .timesheet-rate-arrows {
+    @apply flex flex-col shrink-0 gap-px;
+  }
+
+  .timesheet-rate-arrow {
+    @apply flex-1 min-h-0 w-3.5 px-0 rounded border border-white/15 bg-black/80 text-zinc-300
+      text-[7px] leading-none hover:bg-white/10 hover:text-white disabled:opacity-40;
+  }
+
+  .timesheet-rate-input {
+    @apply flex-1 min-w-0 px-0.5 py-0.5 rounded border border-white/10 bg-black text-white
+      text-[9px] text-right tabular-nums focus:outline-none focus:border-white/30;
+  }
+
+  .timesheet-day-modal {
+    @apply max-w-sm w-full overflow-hidden p-0 border-0 shadow-none bg-transparent;
+  }
+
+  .timesheet-day-modal__shell {
+    @apply table-wrap;
+  }
+
+  .timesheet-day-modal__header {
+    @apply flex items-start justify-between gap-2 px-2 py-2 border-b border-white/10 bg-surface-850;
+  }
+
+  .timesheet-day-modal__body {
+    @apply p-0;
+  }
+
+  .timesheet-day-modal__footer {
+    @apply flex justify-end gap-2 px-2 py-2 border-t border-white/10 bg-surface-850;
+  }
+
+  .timesheet-day-detail-table {
+    @apply text-[10px] leading-tight;
+  }
+
+  .timesheet-day-detail-table th {
+    @apply w-[5.5rem] text-zinc-500 font-medium text-left align-top py-1.5;
+  }
+
+  .timesheet-day-detail-table td {
+    @apply py-1.5 align-top;
+  }
+
+  .timesheet-day-detail-table .timesheet-day-detail-time {
+    @apply text-sm font-semibold tabular-nums leading-none;
+  }
+
+  .timesheet-day-detail-table .timesheet-day-detail-meta {
+    @apply block text-2xs text-zinc-500 mt-0.5 font-normal;
+  }
+
+  .timesheet-day-detail-row--clickable {
+    @apply cursor-pointer;
+  }
+
+  .timesheet-day-detail-row--clickable:hover td,
+  .timesheet-day-detail-row--clickable:hover th {
+    @apply bg-white/[0.04];
+  }
+
+  .timesheet-day-legend {
+    @apply px-2 py-1.5 border-b border-white/10 text-2xs text-zinc-500 leading-relaxed space-y-0.5 bg-black/30;
+  }
+
+  .timesheet-day-legend strong {
+    @apply text-zinc-400 font-medium;
+  }
+
+  .timesheet-day-edit-panel {
+    @apply border-t border-white/10 bg-black/40 px-2 py-2 space-y-2 text-[10px];
+  }
+
+  .timesheet-day-edit-panel .filter-input {
+    @apply text-[10px] py-1;
+  }
+
+  .filter-input {
+    @apply w-full min-w-0 px-1.5 py-0.5 rounded border border-white/[0.12] bg-black text-white
+      text-2xs placeholder:text-zinc-600 focus:outline-none focus:border-white/30;
+  }
+
+  .filter-date-input {
+    color-scheme: dark;
+    cursor: pointer;
+    min-height: 1.625rem;
+  }
+
+  .filter-date-input::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.85;
+    filter: invert(1);
+  }
+
+  .filter-toolbar {
+    @apply flex flex-wrap items-end gap-1.5 p-2 border-b border-white/10 bg-surface-850;
+  }
+
+  .filter-field {
+    @apply flex flex-col gap-0.5 min-w-[4.5rem];
+  }
+
+  .filter-label {
+    @apply text-2xs text-zinc-500 uppercase tracking-wide;
+  }
+
+  .modal-backdrop {
+    @apply fixed inset-0 z-40 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 overflow-y-auto;
+  }
+
+  .modal-panel {
+    @apply rounded-lg border border-white/10 bg-surface-850 shadow-card
+      w-full max-w-lg my-4 max-h-[92vh] overflow-y-auto p-4;
+  }
+
+  .nav-pill-active {
+    @apply px-2 py-1 rounded text-xs font-medium whitespace-nowrap bg-white text-black;
+  }
+
+  .nav-pill-inactive {
+    @apply px-2 py-1 rounded text-xs font-medium whitespace-nowrap text-zinc-400
+      hover:text-white hover:bg-white/5 transition-colors;
+  }
+
+  .label {
+    @apply block text-xs font-medium text-zinc-400 mb-1;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-1.5 py-0 rounded text-2xs font-medium
+      bg-white/10 text-zinc-200 ring-1 ring-white/15;
+  }
+
+  .link-action {
+    @apply text-xs font-medium text-white underline-offset-2 hover:underline transition-colors;
+  }
+
+  .alert-error {
+    @apply text-zinc-200 text-xs bg-white/10 border border-white/20 rounded-md px-2 py-1;
+  }
+
+  .alert-info {
+    @apply text-zinc-300 text-xs bg-white/5 border border-white/10 rounded-md px-2 py-1;
+  }
+
+  .sort-btn {
+    @apply flex items-center gap-0.5 hover:text-white text-left;
+  }
+}
+
+.scanner-wrap video {
+  @apply rounded-lg object-cover max-h-[60vh] ring-1 ring-white/15;
+}
+
+/* Зеркало превью фронтальной камеры (детекция — по исходному кадру) */
+.face-camera-video {
+  transform: scaleX(-1);
+}
