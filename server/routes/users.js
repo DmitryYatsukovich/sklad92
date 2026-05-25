@@ -74,7 +74,7 @@ router.use(requirePermission('can_users'));
 
 const userColumns = `u.id, u.login, u.password_plain, u.display_name, u.first_name, u.last_name, u.birth_date,
   u.passport_number, u.snils, u.inn, u.employment_date, u.organization_id, u.employment_org, u.phone, u.hourly_rate,
-  u.avatar, u.face_photo, u.role, u.role_id, u.internal_uid, u.created_at,
+  u.avatar, u.face_photo, u.role, u.role_id, u.internal_uid, u.kig_card_number, u.kig_card_expires_at, u.created_at,
   COALESCE(u.profile_active, true) AS profile_active,
   COALESCE(u.employment_status, 'working') AS employment_status`;
 
@@ -347,7 +347,7 @@ router.post('/', async (req, res) => {
   const {
     login, password, first_name, last_name, birth_date, passport_number, snils, inn, employment_date, organization_id, employment_org, phone, hourly_rate,
     role, role_id,
-    internal_uid, face_descriptor,
+    internal_uid, kig_card_number, kig_card_expires_at, face_descriptor,
     profile_active, employment_status,
   } = req.body || {};
   const loginTrim = login?.trim();
@@ -376,9 +376,9 @@ router.post('/', async (req, res) => {
       orgName = employment.employment_org;
     }
     const u = await client.query(
-      `INSERT INTO users (login, password_hash, password_plain, display_name, first_name, last_name, birth_date, passport_number, snils, inn, employment_date, organization_id, employment_org, phone, hourly_rate, role, role_id, internal_uid, face_descriptor, profile_active, employment_status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21)
-       RETURNING id, login, password_plain, display_name, first_name, last_name, birth_date, passport_number, snils, inn, employment_date, organization_id, employment_org, phone, hourly_rate, role, role_id, internal_uid, created_at, profile_active, employment_status`,
+      `INSERT INTO users (login, password_hash, password_plain, display_name, first_name, last_name, birth_date, passport_number, snils, inn, employment_date, organization_id, employment_org, phone, hourly_rate, role, role_id, internal_uid, kig_card_number, kig_card_expires_at, face_descriptor, profile_active, employment_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21::jsonb, $22, $23)
+       RETURNING id, login, password_plain, display_name, first_name, last_name, birth_date, passport_number, snils, inn, employment_date, organization_id, employment_org, phone, hourly_rate, role, role_id, internal_uid, kig_card_number, kig_card_expires_at, created_at, profile_active, employment_status`,
       [
         loginTrim, hash, passwordRaw, displayName,
         (first_name || '').trim() || null, (last_name || '').trim() || null,
@@ -388,6 +388,8 @@ router.post('/', async (req, res) => {
         role === 'admin' ? 'admin' : 'user',
         role_id && !isNaN(role_id) ? parseInt(role_id, 10) : null,
         (internal_uid || '').toString().trim() || null,
+        (kig_card_number || '').toString().trim() || null,
+        kig_card_expires_at || null,
         faceJson,
         normalizeProfileActive(profile_active),
         normalizeEmploymentStatus(employment_status),
@@ -423,7 +425,7 @@ router.put('/:id', async (req, res) => {
     const {
       login, password, first_name, last_name, birth_date, passport_number, snils, inn, employment_date, organization_id, employment_org, phone, hourly_rate,
       role, role_id,
-      internal_uid, face_descriptor,
+      internal_uid, kig_card_number, kig_card_expires_at, face_descriptor,
       profile_active, employment_status,
     } = body;
     if (!id) return res.status(400).json({ error: 'Неверный id' });
@@ -483,6 +485,18 @@ router.put('/:id', async (req, res) => {
     }
     if (internal_uid !== undefined) {
       await client.query('UPDATE users SET internal_uid = $2 WHERE id = $1', [id, (internal_uid || '').toString().trim() || null]);
+    }
+    if (kig_card_number !== undefined) {
+      await client.query(
+        'UPDATE users SET kig_card_number = $2 WHERE id = $1',
+        [id, (kig_card_number || '').toString().trim() || null],
+      );
+    }
+    if (kig_card_expires_at !== undefined) {
+      await client.query(
+        'UPDATE users SET kig_card_expires_at = $2 WHERE id = $1',
+        [id, kig_card_expires_at || null],
+      );
     }
     if (profile_active !== undefined) {
       const nextActive = normalizeProfileActive(profile_active);

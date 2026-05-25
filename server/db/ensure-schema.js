@@ -223,6 +223,8 @@ const statements = [
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS labor_contract_data BYTEA`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS labor_contract_mime VARCHAR(128)`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS labor_contract_filename VARCHAR(255)`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS kig_card_number VARCHAR(128)`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS kig_card_expires_at DATE`,
   `CREATE TABLE IF NOT EXISTS user_labor_contract_files (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

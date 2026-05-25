@@ -26,6 +26,8 @@ function buildUserPayload(form, extras = {}, { omitPassword } = {}) {
     employment_date: form.employment_date || null,
     organization_id: form.organization_id || null,
     internal_uid: form.internal_uid,
+    kig_card_number: form.kig_card_number,
+    kig_card_expires_at: form.kig_card_expires_at || null,
     phone: form.phone,
     role: form.role,
     role_id: form.role_id || null,
@@ -49,6 +51,8 @@ const emptyForm = () => ({
   employment_date: '',
   organization_id: '',
   internal_uid: '',
+  kig_card_number: '',
+  kig_card_expires_at: '',
   phone: '',
   role: 'user',
   role_id: '',
@@ -256,6 +260,8 @@ const emptyFilters = () => ({
   employment_date: '',
   employment_org: '',
   internal_uid: '',
+  kig_card_number: '',
+  kig_card_expires_at: '',
   profile_active: '',
   employment_status: '',
   has_labor_contract: '',
@@ -654,6 +660,8 @@ export default function Users({ user, embedded = false }) {
       employment_date: u.employment_date ? u.employment_date.slice(0, 10) : '',
       organization_id: u.organization_id ? String(u.organization_id) : '',
       internal_uid: u.internal_uid || '',
+      kig_card_number: u.kig_card_number || '',
+      kig_card_expires_at: u.kig_card_expires_at ? String(u.kig_card_expires_at).slice(0, 10) : '',
       phone: u.phone || '',
       role: u.role || 'user',
       role_id: u.role_id ? String(u.role_id) : '',
@@ -929,6 +937,8 @@ export default function Users({ user, embedded = false }) {
     if (!textMatch(u.employment_date?.slice?.(0, 10) ?? u.employment_date, filters.employment_date)) return false;
     if (!textMatch(u.employment_org, filters.employment_org)) return false;
     if (!digitsMatch(u.internal_uid, filters.internal_uid)) return false;
+    if (!textMatch(u.kig_card_number, filters.kig_card_number)) return false;
+    if (!textMatch(u.kig_card_expires_at?.slice?.(0, 10) ?? u.kig_card_expires_at, filters.kig_card_expires_at)) return false;
     if (filters.profile_active === 'active' && u.profile_active === false) return false;
     if (filters.profile_active === 'inactive' && u.profile_active !== false) return false;
     if (filters.employment_status && u.employment_status !== filters.employment_status) return false;
@@ -1176,6 +1186,23 @@ export default function Users({ user, embedded = false }) {
           onChange={(e) => setForm((f) => ({ ...f, internal_uid: e.target.value }))}
           className="input"
           placeholder="Напр. 09820541"
+        />
+      </CopyFieldRow>
+      <CopyFieldRow label="Карта КИГ" copyValue={form.kig_card_number}>
+        <input
+          type="text"
+          value={form.kig_card_number}
+          onChange={(e) => setForm((f) => ({ ...f, kig_card_number: e.target.value }))}
+          className="input"
+          placeholder="Номер карты КИГ"
+        />
+      </CopyFieldRow>
+      <CopyFieldRow label="Срок действия карты КИГ" copyValue={form.kig_card_expires_at}>
+        <input
+          type="date"
+          value={form.kig_card_expires_at}
+          onChange={(e) => setForm((f) => ({ ...f, kig_card_expires_at: e.target.value }))}
+          className="input"
         />
       </CopyFieldRow>
       <CopyFieldRow label="ИНН" copyValue={form.inn}>
@@ -1703,6 +1730,14 @@ export default function Users({ user, embedded = false }) {
             <span className="filter-label">UID</span>
             <input type="text" value={filters.internal_uid} onChange={(e) => setFilters((f) => ({ ...f, internal_uid: e.target.value }))} className={filterInputCls} />
           </div>
+          <div className="filter-field w-24">
+            <span className="filter-label">Карта КИГ</span>
+            <input type="text" value={filters.kig_card_number} onChange={(e) => setFilters((f) => ({ ...f, kig_card_number: e.target.value }))} className={filterInputCls} />
+          </div>
+          <div className="filter-field w-24">
+            <span className="filter-label">Срок КИГ</span>
+            <input type="date" value={filters.kig_card_expires_at} onChange={(e) => setFilters((f) => ({ ...f, kig_card_expires_at: e.target.value }))} className={filterInputCls} />
+          </div>
         </div>
         <div className="overflow-x-auto max-h-[calc(100vh-7.5rem)] overflow-y-auto">
           <table className="table-compact">
@@ -1726,6 +1761,8 @@ export default function Users({ user, embedded = false }) {
                 <th><button type="button" onClick={() => toggleSort('employment_date')} className="sort-btn">Труд. <SortIcon column="employment_date" /></button></th>
                 <th><button type="button" onClick={() => toggleSort('employment_org')} className="sort-btn">Организ. <SortIcon column="employment_org" /></button></th>
                 <th><button type="button" onClick={() => toggleSort('internal_uid')} className="sort-btn">UID <SortIcon column="internal_uid" /></button></th>
+                <th><button type="button" onClick={() => toggleSort('kig_card_number')} className="sort-btn">Карта КИГ <SortIcon column="kig_card_number" /></button></th>
+                <th className="whitespace-nowrap"><button type="button" onClick={() => toggleSort('kig_card_expires_at')} className="sort-btn">Срок КИГ <SortIcon column="kig_card_expires_at" /></button></th>
                 <th className="w-20" />
               </tr>
             </thead>
@@ -1803,6 +1840,8 @@ export default function Users({ user, embedded = false }) {
                   <CopyTableCell value={u.employment_date ? u.employment_date.slice(0, 10) : ''} className="text-zinc-500 tabular-nums whitespace-nowrap" />
                   <CopyTableCell value={u.employment_org} className="text-zinc-500 max-w-[120px] truncate" title={u.employment_org} />
                   <CopyTableCell value={u.internal_uid} className="font-mono text-zinc-500 text-2xs" />
+                  <CopyTableCell value={u.kig_card_number} className="font-mono text-zinc-500 text-2xs" />
+                  <CopyTableCell value={u.kig_card_expires_at ? String(u.kig_card_expires_at).slice(0, 10) : ''} className="text-zinc-500 tabular-nums whitespace-nowrap" />
                   <td className="whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                     {editing === u.id ? (
                       <span className="text-brand-400 text-2xs">…</span>
@@ -1819,7 +1858,7 @@ export default function Users({ user, embedded = false }) {
               ))}
               {sortedList.length === 0 && (
                 <tr>
-                  <td colSpan={19} className="p-4 text-center text-zinc-500 text-xs">
+                  <td colSpan={21} className="p-4 text-center text-zinc-500 text-xs">
                     {list.length === 0 ? 'Нет пользователей' : 'Нет данных по фильтрам'}
                   </td>
                 </tr>
