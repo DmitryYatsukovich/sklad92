@@ -37,6 +37,10 @@ function asText(value) {
   return '';
 }
 
+function normalizeFilterValue(value) {
+  return typeof value === 'string' ? value : '';
+}
+
 function formatDateInput(d) {
   const x = new Date(d);
   const y = x.getFullYear();
@@ -259,9 +263,11 @@ export default function Production({ user }) {
   }, [load, productionCacheKey, productionOfflinePath]);
 
   const hasActiveFilters = Boolean(
-    filters.material || filters.user || filters.status
-    || (filters.date_from && filters.date_from !== periodFrom)
-    || (filters.date_to && filters.date_to !== periodTo),
+    normalizeFilterValue(filters.material)
+    || normalizeFilterValue(filters.user)
+    || normalizeFilterValue(filters.status)
+    || (normalizeFilterValue(filters.date_from) && normalizeFilterValue(filters.date_from) !== periodFrom)
+    || (normalizeFilterValue(filters.date_to) && normalizeFilterValue(filters.date_to) !== periodTo),
   );
 
   const displayRows = useMemo(
@@ -278,16 +284,23 @@ export default function Production({ user }) {
   );
 
   const filteredList = useMemo(() => {
-    const fromD = parseFilterDate(filters.date_from || periodFrom);
-    const toD = parseFilterDate(filters.date_to || periodTo);
+    const filtersSafe = {
+      date_from: normalizeFilterValue(filters.date_from),
+      date_to: normalizeFilterValue(filters.date_to),
+      material: normalizeFilterValue(filters.material),
+      user: normalizeFilterValue(filters.user),
+      status: normalizeFilterValue(filters.status),
+    };
+    const fromD = parseFilterDate(filtersSafe.date_from || periodFrom);
+    const toD = parseFilterDate(filtersSafe.date_to || periodTo);
     return displayRows.filter((r) => {
       const day = issuanceLocalDay(r.issued_at);
       if (fromD && day && day < fromD) return false;
       if (toD && day && day > toD) return false;
-      if (filters.material && !r._materialSearch.includes(filters.material.trim().toLowerCase())) return false;
-      if (isAdmin && filters.user && !r._userSearch.includes(filters.user.trim().toLowerCase())) return false;
-      if (filters.status === 'confirmed' && !r._confirmed) return false;
-      if (filters.status === 'pending' && r._confirmed) return false;
+      if (filtersSafe.material && !r._materialSearch.includes(filtersSafe.material.trim().toLowerCase())) return false;
+      if (isAdmin && filtersSafe.user && !r._userSearch.includes(filtersSafe.user.trim().toLowerCase())) return false;
+      if (filtersSafe.status === 'confirmed' && !r._confirmed) return false;
+      if (filtersSafe.status === 'pending' && r._confirmed) return false;
       return true;
     });
   }, [displayRows, filters, periodFrom, periodTo, isAdmin]);
@@ -355,7 +368,15 @@ export default function Production({ user }) {
   }, [sortedList]);
 
   const paginationResetKey = useMemo(
-    () => `${periodFrom}|${periodTo}|${JSON.stringify(filters)}`,
+    () => `${periodFrom}|${periodTo}|${
+      [
+        normalizeFilterValue(filters.date_from),
+        normalizeFilterValue(filters.date_to),
+        normalizeFilterValue(filters.material),
+        normalizeFilterValue(filters.user),
+        normalizeFilterValue(filters.status),
+      ].join('|')
+    }`,
     [periodFrom, periodTo, filters],
   );
   const pagination = useListPagination(sortedList, 'production-page-size', paginationResetKey);
@@ -579,7 +600,7 @@ export default function Production({ user }) {
             <span className="filter-label">С</span>
             <FilterDateInput
               value={filters.date_from}
-              onChange={(v) => setFilters((f) => ({ ...f, date_from: v }))}
+              onChange={(e) => setFilters((f) => ({ ...f, date_from: e.target.value }))}
               placeholder={periodFrom}
             />
           </div>
@@ -587,7 +608,7 @@ export default function Production({ user }) {
             <span className="filter-label">По</span>
             <FilterDateInput
               value={filters.date_to}
-              onChange={(v) => setFilters((f) => ({ ...f, date_to: v }))}
+              onChange={(e) => setFilters((f) => ({ ...f, date_to: e.target.value }))}
               placeholder={periodTo}
             />
           </div>
