@@ -15,7 +15,7 @@ import session from 'express-session';
 import connectPgSimple from 'connect-pg-simple';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import pool from './db/pool.js';
+import pool, { databaseConfigSource, isDatabaseConfigured } from './db/pool.js';
 
 import auth from './routes/auth.js';
 import users from './routes/users.js';
@@ -35,6 +35,18 @@ import { ensureSchema } from './db/ensure-schema.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
 const port = process.env.PORT || 3000;
+const dbStartupRetries = Math.max(
+  1,
+  Number.parseInt(process.env.DB_STARTUP_RETRIES || '20', 10) || 20,
+);
+const dbStartupRetryDelayMs = Math.max(
+  1000,
+  Number.parseInt(process.env.DB_STARTUP_RETRY_DELAY_MS || '3000', 10) || 3000,
+);
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /** Timeweb/Docker: фронт может быть в server/public или client/dist — ищем оба */
 function resolveClientDist() {
@@ -85,6 +97,8 @@ app.get('/api/health', (req, res) => {
     hasServerPublic: fs.existsSync(path.join(publicDir, 'index.html')),
     hasClientDistLegacy: fs.existsSync(path.join(legacyDist, 'index.html')),
     hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
+    databaseConfigured: isDatabaseConfigured,
+    databaseConfigSource,
     hasFaceModels: faceModelsReady(),
     modelsDir: faceModelsReady() ? modelsDir : null,
   });
@@ -117,7 +131,7 @@ const sessionOptions = {
     maxAge: 7 * 24 * 60 * 60 * 1000,
   },
 };
-if (isProd && process.env.DATABASE_URL) {
+if (isProd && isDatabaseConfigured) {
   sessionOptions.store = new PgSession({
     pool,
     createTableIfMissing: true,
@@ -221,9 +235,30 @@ async function startServer() {
     console.log('face-models: готовы (server/public/models)');
   }
 
-  await ensureSchema();
-  if (isProd) {
-    await ensureAdminUser();
+  if (isDatabaseConfigured) {
+    for (let attempt = 1; attempt <= dbStartupRetries; attempt += 1) {
+      try {
+        await ensureSchema();
+        if (isProd) {
+          await ensureAdminUser();
+        }
+        break;
+      } catch (err) {
+        const isLastAttempt = attempt === dbStartupRetries;
+        console.error(
+          `Database startup failed (${attempt}/${dbStartupRetries}):`,
+          err?.message || err,
+        );
+        if (isLastAttempt) {
+          throw err;
+        }
+        await sleep(dbStartupRetryDelayMs);
+      }
+    }
+  } else {
+    console.warn(
+      'WARN: параметры БД не заданы (DATABASE_URL или PG*/DB*/POSTGRES*). Запуск без инициализации схемы.',
+    );
   }
 
   if (useHttps && hasCerts) {
