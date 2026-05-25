@@ -227,14 +227,7 @@ function ensureFaceModelsOnDisk() {
   return faceModelsReady();
 }
 
-async function startServer() {
-  const modelsOk = ensureFaceModelsOnDisk();
-  if (!modelsOk) {
-    console.warn('WARN: отметка по лицу недоступна — нет server/public/models/*.bin');
-  } else {
-    console.log('face-models: готовы (server/public/models)');
-  }
-
+async function initializeDatabaseWithRetry() {
   if (isDatabaseConfigured) {
     let dbReady = false;
     for (let attempt = 1; attempt <= dbStartupRetries; attempt += 1) {
@@ -266,20 +259,46 @@ async function startServer() {
       'WARN: параметры БД не заданы (DATABASE_URL или PG*/DB*/POSTGRES*). Запуск без инициализации схемы.',
     );
   }
+}
 
+function listenServer() {
   if (useHttps && hasCerts) {
     const server = https.createServer(
       { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) },
       app
     );
-    server.listen(port, () => {
-      console.log('HTTPS Server on port', port);
-    });
-  } else {
-    app.listen(port, () => {
-      console.log('Server on port', port);
+    return new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(port, () => {
+        console.log('HTTPS Server on port', port);
+        resolve();
+      });
     });
   }
+
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port, () => {
+      console.log('Server on port', port);
+      resolve();
+    });
+    server.once('error', reject);
+  });
+}
+
+async function startServer() {
+  const modelsOk = ensureFaceModelsOnDisk();
+  if (!modelsOk) {
+    console.warn('WARN: отметка по лицу недоступна — нет server/public/models/*.bin');
+  } else {
+    console.log('face-models: готовы (server/public/models)');
+  }
+
+  await listenServer();
+
+  // Не блокируем startup healthcheck длительной инициализацией БД.
+  initializeDatabaseWithRetry().catch((err) => {
+    console.error('Database init background task failed:', err?.message || err);
+  });
 }
 
 startServer().catch((err) => {

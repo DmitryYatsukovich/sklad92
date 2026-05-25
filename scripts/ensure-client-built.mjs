@@ -9,6 +9,7 @@ const candidates = [
   path.join(root, 'client/dist/index.html'),
 ];
 const strictMode = process.env.CLIENT_BUILD_STRICT === 'true';
+const buildOnStart = process.env.CLIENT_BUILD_ON_START === 'true';
 
 function warnAndExit(message, error) {
   console.warn(message);
@@ -34,7 +35,14 @@ if (!fs.existsSync(path.join(root, 'client/package.json'))) {
   );
 }
 
-console.log('Client build missing — building (node_modules from Build step)...');
+if (!buildOnStart) {
+  warnAndExit(
+    'Client build missing; skip build during startup to keep container healthy. '
+    + 'Set CLIENT_BUILD_ON_START=true to allow building at runtime.',
+  );
+}
+
+console.log('Client build missing — building on startup...');
 try {
   execSync('npm run build --prefix client', { cwd: root, stdio: 'inherit' });
 } catch (error) {
