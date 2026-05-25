@@ -134,6 +134,16 @@ export default function App() {
       m.deleteCachedResponse('/api/materials/users-for-issuance'),
     ])).catch(() => {});
   }, []);
+  const recoverProductionTabCache = useCallback(() => {
+    import('./lib/pageCache').then((m) => m.invalidatePageCache()).catch(() => {});
+    import('./lib/offlineCache').then((m) => Promise.allSettled([
+      m.deleteCachedResponsesByPathPrefix('/api/reports/production'),
+      m.deleteCachedResponse('/api/reports/production/locations'),
+      m.deleteCachedResponse('/api/operations/issuances'),
+      m.deleteCachedResponse('/api/materials'),
+      m.deleteCachedResponse('/api/materials/users-for-issuance'),
+    ])).catch(() => {});
+  }, []);
   const onLogout = async () => {
     await clearOfflineSession();
     try {
@@ -197,7 +207,9 @@ export default function App() {
           path="production"
           element={(
             <ProtectedRoute user={user} perm="can_production">
-              <Production user={user} />
+              <RecoverableErrorBoundary onError={recoverProductionTabCache}>
+                <Production user={user} />
+              </RecoverableErrorBoundary>
             </ProtectedRoute>
           )}
         />

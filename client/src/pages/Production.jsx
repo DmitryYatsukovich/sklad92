@@ -22,6 +22,21 @@ const EMPTY_FILTERS = {
   status: '',
 };
 
+function isObjectRow(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function asArrayOfObjects(value) {
+  return Array.isArray(value) ? value.filter(isObjectRow) : [];
+}
+
+function asText(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
+}
+
 function formatDateInput(d) {
   const x = new Date(d);
   const y = x.getFullYear();
@@ -62,37 +77,53 @@ function formatSumQty(n) {
 }
 
 function userLabel(r) {
-  return r.display_name || [r.first_name, r.last_name].filter(Boolean).join(' ') || r.login || '—';
+  const displayName = asText(r?.display_name);
+  const first = asText(r?.first_name);
+  const last = asText(r?.last_name);
+  const login = asText(r?.login);
+  return displayName || [first, last].filter(Boolean).join(' ') || login || '—';
 }
 
 function enrichRow(r) {
-  const row = r?._pending != null || r?._pendingCreate != null
-    ? (({ _pending, _pendingCreate, ...rest }) => rest)(r)
-    : r;
+  const source = isObjectRow(r) ? r : {};
+  const row = source?._pending != null || source?._pendingCreate != null
+    ? (({ _pending, _pendingCreate, ...rest }) => rest)(source)
+    : source;
   const produced = Number(row.produced) || 0;
   const unitSmr = Number(row.production_price) || 0;
-  const smrTotal = Number(row.smr_total) ?? produced * unitSmr;
+  const computedSmr = produced * unitSmr;
+  const rawSmr = Number(row.smr_total);
+  const smrTotal = Number.isFinite(rawSmr) ? rawSmr : computedSmr;
+  const materialName = asText(row.material_name);
+  const workLocation = asText(row.work_location_label);
   return {
     ...row,
+    material_name: materialName,
+    unit: asText(row.unit) || 'шт',
+    login: asText(row.login),
+    display_name: asText(row.display_name),
+    first_name: asText(row.first_name),
+    last_name: asText(row.last_name),
+    work_location_label: workLocation,
     _produced: produced,
     _unitSmr: unitSmr,
     _smrTotal: smrTotal,
     _userSearch: userLabel(row).toLowerCase(),
-    _materialSearch: (row.material_name || '').toLowerCase(),
+    _materialSearch: materialName.toLowerCase(),
     _confirmed: !!row.production_confirmed,
-    _workLocation: row.work_location_label || '',
+    _workLocation: workLocation,
   };
 }
 
 function normalizeProductionRows(data) {
-  if (!Array.isArray(data)) return [];
-  return data
+  return asArrayOfObjects(data)
     .filter((row) => Number(row?.issuance_id) > 0)
     .map((row) => {
       const issued = Number(row.total_issued) || 0;
       const returned = Number(row.total_returned) || 0;
       return {
         ...row,
+        issuance_id: Number(row.issuance_id),
         produced: Math.max(issued - returned, 0),
       };
     });
@@ -105,6 +136,17 @@ const EMPTY_LOCATIONS = {
   work_apartments: [],
   work_rooms: [],
 };
+
+function normalizeLocations(value) {
+  const src = isObjectRow(value) ? value : {};
+  return {
+    objects: asArrayOfObjects(src.objects),
+    work_entrances: asArrayOfObjects(src.work_entrances),
+    work_floors: asArrayOfObjects(src.work_floors),
+    work_apartments: asArrayOfObjects(src.work_apartments),
+    work_rooms: asArrayOfObjects(src.work_rooms),
+  };
+}
 
 function ThWithSum({ label, column, sortBy, sortDir, onSort, sum, align = 'right' }) {
   const SortIcon = () => {
@@ -154,7 +196,7 @@ export default function Production({ user }) {
   const [locations, setLocations] = useState(EMPTY_LOCATIONS);
 
   const loadLocations = useCallback(() => {
-    reports.productionLocations().then(setLocations).catch(() => {});
+    reports.productionLocations().then((data) => setLocations(normalizeLocations(data))).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -163,8 +205,8 @@ export default function Production({ user }) {
       materialsApi.list().catch(() => []),
       materialsApi.usersForIssuance().catch(() => []),
     ]).then(([mats, users]) => {
-      setMaterials(mats);
-      setIssueUsers(users);
+      setMaterials(asArrayOfObjects(mats));
+      setIssueUsers(asArrayOfObjects(users));
     });
   }, [loadLocations]);
 
@@ -177,7 +219,7 @@ export default function Production({ user }) {
     reports
       .production(periodFrom, periodTo)
       .then((data) => {
-        const mapped = normalizeProductionRows(data).map(enrichRow);
+        const mapped = asArrayOfObjects(normalizeProductionRows(data).map(enrichRow));
         setRows(mapped);
         setPageCache(productionCacheKey, mapped);
       })
@@ -190,27 +232,29 @@ export default function Production({ user }) {
 
   useReloadOnSyncComplete(() => {
     load(true);
-    materialsApi.list().then(setMaterials).catch(() => {});
+    materialsApi.list().then((mats) => setMaterials(asArrayOfObjects(mats))).catch(() => {});
   });
 
   useEffect(() => {
     let cancelled = false;
     const mem = peekPageCache(productionCacheKey);
-    if (mem?.length) {
-      setRows(mem);
+    const memRows = asArrayOfObjects(mem);
+    if (memRows.length) {
+      setRows(memRows.map(enrichRow));
       setLoading(false);
     } else if (isQuickDeviceEnabled()) {
       import('../lib/offlineCache/store.js').then((m) => (
         m.getCachedResponse(productionOfflinePath)
       )).then((cached) => {
-        if (cancelled || !Array.isArray(cached) || !cached.length) return;
-        const mapped = normalizeProductionRows(cached).map(enrichRow);
+        const safeCached = asArrayOfObjects(cached);
+        if (cancelled || !safeCached.length) return;
+        const mapped = asArrayOfObjects(normalizeProductionRows(safeCached).map(enrichRow));
         setRows(mapped);
         setPageCache(productionCacheKey, mapped);
         setLoading(false);
       });
     }
-    load(Boolean(mem?.length));
+    load(Boolean(memRows.length));
     return () => { cancelled = true; };
   }, [load, productionCacheKey, productionOfflinePath]);
 
@@ -221,7 +265,7 @@ export default function Production({ user }) {
   );
 
   const displayRows = useMemo(
-    () => applyPendingToProduction(rows, pendingMutations, {
+    () => asArrayOfObjects(applyPendingToProduction(rows, pendingMutations, {
       materials: applyPendingToMaterials(materials, pendingMutations, {}),
       issueUsers,
       locations,
@@ -229,7 +273,7 @@ export default function Production({ user }) {
       periodTo,
       currentUser: user,
       isAdmin,
-    }).map((r) => enrichRow(r)),
+    }).map((r) => enrichRow(r))),
     [rows, pendingMutations, materials, issueUsers, locations, periodFrom, periodTo, user, isAdmin],
   );
 

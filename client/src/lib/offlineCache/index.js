@@ -8,6 +8,7 @@ export {
   getCachedResponse,
   setCachedResponse,
   deleteCachedResponse,
+  deleteCachedResponsesByPathPrefix,
   getCachedUser,
   setCachedUser,
   getCacheMeta,

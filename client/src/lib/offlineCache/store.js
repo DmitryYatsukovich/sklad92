@@ -1,4 +1,4 @@
-import { idbGet, idbPut, idbDelete } from './db.js';
+import { idbGet, idbPut, idbDelete, idbGetAllKeys } from './db.js';
 import { META_ID } from './constants.js';
 
 export function cacheKeyForPath(path) {
@@ -34,6 +34,15 @@ export async function deleteCachedResponse(path) {
   await idbDelete('entries', cacheKeyForPath(path));
 }
 
+export async function deleteCachedResponsesByPathPrefix(pathPrefix) {
+  if (!pathPrefix) return 0;
+  const allKeys = await idbGetAllKeys('entries');
+  const keyPrefix = cacheKeyForPath(pathPrefix);
+  const toDelete = allKeys.filter((k) => String(k).startsWith(keyPrefix));
+  await Promise.all(toDelete.map((k) => idbDelete('entries', k)));
+  return toDelete.length;
+}
+
 export async function getCachedUser() {
   const meta = await idbGet('meta', META_ID);
   return meta?.user ?? null;
@@ -59,7 +68,6 @@ export async function setCacheMeta(patch) {
 }
 
 export async function clearOfflineCache() {
-  const { idbGetAllKeys } = await import('./db.js');
   const keys = await idbGetAllKeys('entries');
   const datasetKeys = await idbGetAllKeys('datasets');
   await Promise.all(keys.map((k) => idbDelete('entries', k)));
