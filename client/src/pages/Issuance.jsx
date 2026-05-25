@@ -60,26 +60,46 @@ function asArrayOfObjects(value) {
     : [];
 }
 
+function asText(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
+}
+
 function remainingQty(i) {
   return parseFloat(i.quantity) - parseFloat(i.returned_quantity || 0);
 }
 
 function enrichRow(i, materialPrices) {
-  const qty = Number(i.quantity) || 0;
-  const returned = Number(i.returned_quantity || 0);
-  const netQty = Math.max(remainingQty(i), 0);
-  const mp = materialPrices.get(i.material_id);
-  const unitPrice = mp?.price ?? Number(i.price ?? 0);
-  const unitSmr = mp?.production_price ?? Number(i.production_price ?? 0);
+  const row = (i && typeof i === 'object' && !Array.isArray(i)) ? i : {};
+  const qty = Number(row.quantity) || 0;
+  const returned = Number(row.returned_quantity || 0);
+  const netQty = Math.max(remainingQty(row), 0);
+  const materialId = Number(row.material_id) || row.material_id;
+  const mp = materialPrices.get(materialId);
+  const unitPrice = mp?.price ?? Number(row.price ?? 0);
+  const unitSmr = mp?.production_price ?? Number(row.production_price ?? 0);
+  const issuedToName = asText(row.issued_to_name);
+  const issuedToLogin = asText(row.issued_to_login);
+  const materialName = asText(row.material_name);
+  const materialCode = asText(row.material_code);
+  const unit = asText(row.unit) || 'шт';
   return {
-    ...i,
+    ...row,
+    material_id: materialId,
+    material_name: materialName,
+    material_code: materialCode,
+    issued_to_name: issuedToName,
+    issued_to_login: issuedToLogin,
+    unit,
     _qty: qty,
     _returned: returned,
     _netQty: netQty,
     _cost: netQty * unitPrice,
     _smr: netQty * unitSmr,
-    _recipient: (i.issued_to_name || i.issued_to_login || '').toLowerCase(),
-    _materialSearch: `${i.material_name || ''} ${i.material_code || ''}`.toLowerCase(),
+    _recipient: (issuedToName || issuedToLogin).toLowerCase(),
+    _materialSearch: `${materialName} ${materialCode}`.toLowerCase(),
   };
 }
 
@@ -206,11 +226,11 @@ export default function Issuance({ user }) {
   useReloadOnSyncComplete(() => load(true));
 
   const mergedIssuances = useMemo(
-    () => applyPendingToIssuances(issuances, pendingMutations, {
+    () => asArrayOfObjects(applyPendingToIssuances(issuances, pendingMutations, {
       materials: applyPendingToMaterials(materials, pendingMutations, {}),
       issueUsers,
       currentUser: user,
-    }),
+    })),
     [issuances, pendingMutations, materials, issueUsers, user],
   );
 

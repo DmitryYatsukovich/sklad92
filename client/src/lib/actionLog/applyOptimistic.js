@@ -209,7 +209,7 @@ export function applyPendingToMaterials(materials, entries, ctx = {}) {
     }
   }
 
-  return list.filter((m) => !hidden.has(m.id));
+  return list.filter((m) => isRowObject(m) && !hidden.has(m.id));
 }
 
 function buildIssuanceFromIssue(entry, body, ctx) {
@@ -290,7 +290,7 @@ export function applyPendingToIssuances(issuances, entries, ctx = {}) {
     }
   }
 
-  return list.filter((i) => !removed.has(i.id));
+  return list.filter((i) => isRowObject(i) && !removed.has(i.id));
 }
 
 function buildProductionRowFromIssue(entry, body, ctx) {
@@ -458,5 +458,5 @@ export function applyPendingToProduction(rows, entries, ctx = {}) {
     }
   }
 
-  return list.filter((r) => !removed.has(r.issuance_id));
+  return list.filter((r) => isRowObject(r) && !removed.has(r.issuance_id));
 }
