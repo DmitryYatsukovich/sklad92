@@ -28,6 +28,7 @@ const Actions = lazy(() => import('./pages/Actions'));
 
 const STRICT_LOGOUT_ON_CLOSE = true;
 const ACTIVE_SESSION_KEY = 'warehouse-active-session';
+const PENDING_SERVER_LOGOUT_KEY = 'warehouse-pending-server-logout';
 
 function HomeRedirect({ user }) {
   return <Navigate to={getDefaultRoute(user)} replace />;
@@ -56,6 +57,23 @@ export default function App() {
     }
   }, []);
 
+  const setPendingServerLogout = useCallback((pending) => {
+    try {
+      if (pending) localStorage.setItem(PENDING_SERVER_LOGOUT_KEY, '1');
+      else localStorage.removeItem(PENDING_SERVER_LOGOUT_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const hasPendingServerLogout = useCallback(() => {
+    try {
+      return localStorage.getItem(PENDING_SERVER_LOGOUT_KEY) === '1';
+    } catch {
+      return false;
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -70,9 +88,11 @@ export default function App() {
 
     (async () => {
       if (STRICT_LOGOUT_ON_CLOSE && !hasActiveSessionMarker()) {
+        setPendingServerLogout(true);
         await clearOfflineSession().catch(() => {});
         if (navigator.onLine) {
           await auth.logout().catch(() => {});
+          setPendingServerLogout(false);
         }
         if (!cancelled) {
           setUser(null);
@@ -107,12 +127,25 @@ export default function App() {
     })();
 
     return () => { cancelled = true; };
-  }, [hasActiveSessionMarker]);
+  }, [hasActiveSessionMarker, setPendingServerLogout]);
+
+  useEffect(() => {
+    if (!STRICT_LOGOUT_ON_CLOSE) return undefined;
+    const flushPendingLogout = async () => {
+      if (!hasPendingServerLogout() || !navigator.onLine) return;
+      await auth.logout().catch(() => {});
+      setPendingServerLogout(false);
+    };
+    flushPendingLogout();
+    window.addEventListener('online', flushPendingLogout);
+    return () => window.removeEventListener('online', flushPendingLogout);
+  }, [hasPendingServerLogout, setPendingServerLogout]);
 
   useEffect(() => {
     if (!STRICT_LOGOUT_ON_CLOSE) return undefined;
     const onTerminate = () => {
       markActiveSession(false);
+      setPendingServerLogout(true);
       clearOfflineSession().catch(() => {});
       const body = '{}';
       try {
@@ -137,7 +170,7 @@ export default function App() {
       window.removeEventListener('pagehide', onTerminate);
       window.removeEventListener('beforeunload', onTerminate);
     };
-  }, [markActiveSession]);
+  }, [markActiveSession, setPendingServerLogout]);
 
   useEffect(() => {
     if (!user) return undefined;
@@ -211,6 +244,7 @@ export default function App() {
   }, []);
   const onLogout = async () => {
     markActiveSession(false);
+    setPendingServerLogout(false);
     await clearOfflineSession();
     try {
       await auth.logout();
