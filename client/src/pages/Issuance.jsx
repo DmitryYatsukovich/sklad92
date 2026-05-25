@@ -9,6 +9,7 @@ import { useListPagination } from '../hooks/useListPagination';
 import { usePendingMutations } from '../hooks/usePendingMutations';
 import { useReloadOnSyncComplete } from '../hooks/useReloadOnSyncComplete';
 import { applyPendingToIssuances, applyPendingToMaterials, withPendingRowClass } from '../lib/actionLog/applyOptimistic';
+import { clearPendingMutationsForDeleteAll } from '../lib/actionLog';
 import { peekPageCache, setPageCache } from '../lib/pageCache';
 import { isQuickDeviceEnabled } from '../lib/offlineCache';
 
@@ -384,7 +385,9 @@ export default function Issuance({ user }) {
     setError('');
     try {
       await operationsApi.deleteAllIssuances();
+      await clearPendingMutationsForDeleteAll();
       closeReturn();
+      setIssuances([]);
       load();
     } catch (err) {
       if (isOfflineQueuedError(err)) {

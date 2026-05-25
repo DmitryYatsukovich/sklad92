@@ -4,6 +4,7 @@ import {
   listPendingMutations,
   addPendingMutation,
   removePendingMutation,
+  removePendingMutationsByPathPrefixes,
   countUnsyncedActions,
   countPendingMutations,
   newClientId,
@@ -276,6 +277,17 @@ export function initActionLogSync() {
   window.addEventListener('online', run);
   run();
   return () => window.removeEventListener('online', run);
+}
+
+export async function clearPendingMutationsForDeleteAll() {
+  const removed = await removePendingMutationsByPathPrefixes([
+    '/api/operations/issue',
+    '/api/operations/return',
+    '/api/operations/issuances/',
+    '/api/reports/production/issuances/',
+  ]);
+  if (removed > 0) notify();
+  return removed;
 }
 
 export async function recordActionAfterSuccess(path, method, bodyText) {

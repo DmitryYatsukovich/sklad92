@@ -48,6 +48,14 @@ export async function removePendingMutation(id) {
   await idbDelete('mutations', id);
 }
 
+export async function removePendingMutationsByPathPrefixes(prefixes = []) {
+  if (!Array.isArray(prefixes) || !prefixes.length) return 0;
+  const queue = await listPendingMutations();
+  const toDelete = queue.filter((item) => prefixes.some((p) => item.path?.startsWith(p)));
+  await Promise.all(toDelete.map((item) => idbDelete('mutations', item.id)));
+  return toDelete.length;
+}
+
 export async function countUnsyncedActions() {
   const all = await idbGetAll('actions');
   return all.filter((a) => !a.synced).length;

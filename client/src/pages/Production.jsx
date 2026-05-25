@@ -8,6 +8,7 @@ import { useListPagination } from '../hooks/useListPagination';
 import { usePendingMutations } from '../hooks/usePendingMutations';
 import { useReloadOnSyncComplete } from '../hooks/useReloadOnSyncComplete';
 import { applyPendingToProduction, applyPendingToMaterials, withPendingRowClass } from '../lib/actionLog/applyOptimistic';
+import { clearPendingMutationsForDeleteAll } from '../lib/actionLog';
 import { formatWorkLocationFromSelection } from '../lib/workLocationLabel';
 import { materials as materialsApi } from '../api';
 import { peekPageCache, setPageCache } from '../lib/pageCache';
@@ -450,10 +451,16 @@ export default function Production({ user }) {
     setError('');
     try {
       await reports.deleteAllProduction(periodFrom, periodTo);
+      await clearPendingMutationsForDeleteAll();
       setHistoryRow(null);
       setLocationModal(null);
+      setRows([]);
       load();
     } catch (e) {
+      if (isOfflineQueuedError(e)) {
+        setRows([]);
+        return;
+      }
       setError(e.message || 'Ошибка удаления выработки');
     } finally {
       setDeletingAll(false);

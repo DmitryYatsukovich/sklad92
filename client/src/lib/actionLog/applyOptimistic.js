@@ -28,6 +28,19 @@ function parseBody(bodyText) {
   }
 }
 
+function parseDeletePeriod(path, body = {}) {
+  const fromBody = body?.from;
+  const toBody = body?.to;
+  if (fromBody || toBody) return { from: fromBody || null, to: toBody || null };
+  const query = path?.split('?')[1];
+  if (!query) return { from: null, to: null };
+  const params = new URLSearchParams(query);
+  return {
+    from: params.get('from') || null,
+    to: params.get('to') || null,
+  };
+}
+
 function markPending(row, extra = {}) {
   return { ...row, ...extra, _pending: true };
 }
@@ -250,6 +263,12 @@ export function applyPendingToIssuances(issuances, entries, ctx = {}) {
       removed.clear();
       continue;
     }
+    if (path?.startsWith('/api/reports/production') && method === 'DELETE') {
+      const { from, to } = parseDeletePeriod(path, body);
+      list = list.filter((row) => !inDateRange(row.issued_at, from, to));
+      removed.clear();
+      continue;
+    }
 
     if (kind === 'return' && path === '/api/operations/return') {
       const row = findIssuance(list, body.issuance_id);
@@ -367,6 +386,12 @@ export function applyPendingToProduction(rows, entries, ctx = {}) {
     }
     if (path === '/api/operations/issuances/all' && method === 'DELETE') {
       list = [];
+      removed.clear();
+      continue;
+    }
+    if (path?.startsWith('/api/reports/production') && method === 'DELETE') {
+      const { from, to } = parseDeletePeriod(path, body);
+      list = list.filter((row) => !inDateRange(row.issued_at, from, to));
       removed.clear();
       continue;
     }
