@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(serverDir, '..');
 const dst = path.join(serverDir, 'public/models');
+const strictMode = process.env.FACE_MODELS_STRICT === 'true';
 
 const REQUIRED = [
   'ssd_mobilenetv1_model.bin',
@@ -50,6 +51,14 @@ function copyFrom(src) {
   fs.cpSync(src, dst, { recursive: true });
 }
 
+function warnAndExit(message) {
+  console.warn(message);
+  if (strictMode) {
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
 const src = findModelSource();
 if (modelsOk()) {
   console.log('face-models: OK (server/public/models)');
@@ -57,20 +66,22 @@ if (modelsOk()) {
 }
 
 if (!src) {
-  console.error(
+  warnAndExit(
     'face-models: не найден @vladmandic/face-api/model.\n'
     + '  Выполните npm install в корне проекта (зависимость @vladmandic/face-api).\n'
-    + '  Либо загрузите готовый пакет с server/public/models/*.bin',
+    + '  Либо загрузите готовый пакет с server/public/models/*.bin.\n'
+    + '  Запуск продолжается без моделей (для строгого режима установите FACE_MODELS_STRICT=true).',
   );
-  process.exit(1);
 }
 
 console.log('face-models: копирование из', src);
 copyFrom(src);
 
 if (!modelsOk()) {
-  console.error('face-models: после копирования файлы .bin неполные или отсутствуют');
-  process.exit(1);
+  warnAndExit(
+    'face-models: после копирования файлы .bin неполные или отсутствуют. '
+    + 'Запуск продолжается без моделей (FACE_MODELS_STRICT=true для аварийного завершения).',
+  );
 }
 
 console.log('face-models: скопировано в server/public/models');

@@ -236,24 +236,30 @@ async function startServer() {
   }
 
   if (isDatabaseConfigured) {
+    let dbReady = false;
     for (let attempt = 1; attempt <= dbStartupRetries; attempt += 1) {
       try {
         await ensureSchema();
         if (isProd) {
           await ensureAdminUser();
         }
+        dbReady = true;
         break;
       } catch (err) {
-        const isLastAttempt = attempt === dbStartupRetries;
         console.error(
           `Database startup failed (${attempt}/${dbStartupRetries}):`,
           err?.message || err,
         );
-        if (isLastAttempt) {
-          throw err;
+        if (attempt < dbStartupRetries) {
+          await sleep(dbStartupRetryDelayMs);
         }
-        await sleep(dbStartupRetryDelayMs);
       }
+    }
+    if (!dbReady) {
+      console.error(
+        'ERROR: инициализация БД не выполнена, но сервер продолжает работать. '
+        + 'Проверьте DATABASE_URL/PG* и доступность PostgreSQL.',
+      );
     }
   } else {
     console.warn(
