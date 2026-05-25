@@ -245,6 +245,11 @@ export function applyPendingToIssuances(issuances, entries, ctx = {}) {
       removed.add(Number(issDel[1]));
       continue;
     }
+    if (path === '/api/operations/issuances/all' && method === 'DELETE') {
+      list = [];
+      removed.clear();
+      continue;
+    }
 
     if (kind === 'return' && path === '/api/operations/return') {
       const row = findIssuance(list, body.issuance_id);
@@ -358,6 +363,11 @@ export function applyPendingToProduction(rows, entries, ctx = {}) {
     const issDel = path.match(/^\/api\/operations\/issuances\/(\d+)$/);
     if (issDel && method === 'DELETE') {
       removed.add(Number(issDel[1]));
+      continue;
+    }
+    if (path === '/api/operations/issuances/all' && method === 'DELETE') {
+      list = [];
+      removed.clear();
       continue;
     }
 

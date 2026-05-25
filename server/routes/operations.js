@@ -212,7 +212,7 @@ router.patch('/issuances/:id/returned', async (req, res) => {
   }
 });
 
-router.delete('/issuances/:id', requireAdmin, async (req, res) => {
+router.delete('/issuances/:id(\\d+)', requireAdmin, async (req, res) => {
   const issuanceId = parseInt(req.params.id, 10);
   if (!issuanceId) return res.status(400).json({ error: 'Неверный id' });
 
@@ -257,6 +257,62 @@ router.delete('/issuances/:id', requireAdmin, async (req, res) => {
     await client.query('DELETE FROM issuances WHERE id = $1', [issuanceId]);
     await client.query('COMMIT');
     res.json({ ok: true });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+});
+
+router.delete('/issuances/all', requireAdmin, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: issuances } = await client.query(
+      'SELECT id, material_id, quantity, returned_quantity FROM issuances FOR UPDATE',
+    );
+
+    if (!issuances.length) {
+      await client.query('COMMIT');
+      return res.json({ ok: true, deleted: 0, restored: 0 });
+    }
+
+    const restoreByMaterial = new Map();
+    for (const iss of issuances) {
+      const issued = parseFloat(iss.quantity) || 0;
+      const returned = parseFloat(iss.returned_quantity || 0) || 0;
+      const restore = issued - returned;
+      if (restore <= 1e-9) continue;
+      restoreByMaterial.set(
+        iss.material_id,
+        (restoreByMaterial.get(iss.material_id) || 0) + restore,
+      );
+    }
+
+    let restored = 0;
+    for (const [materialId, delta] of restoreByMaterial.entries()) {
+      const upd = await client.query(
+        `UPDATE materials SET quantity = quantity + $1, updated_at = NOW()
+         WHERE id = $2 RETURNING quantity`,
+        [delta, materialId],
+      );
+      if (!upd.rowCount) continue;
+      const qtyAfter = parseFloat(upd.rows[0].quantity);
+      restored += delta;
+      await logQuantityChange(client, {
+        materialId,
+        userId: req.session.userId,
+        delta,
+        quantityAfter: qtyAfter,
+        kind: 'issuance_delete_all',
+        note: 'Удаление всех выдач',
+      });
+    }
+
+    await client.query('DELETE FROM issuances');
+    await client.query('COMMIT');
+    res.json({ ok: true, deleted: issuances.length, restored });
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
     throw e;

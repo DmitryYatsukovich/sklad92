@@ -373,6 +373,7 @@ export const operations = {
       body: JSON.stringify({ returned_quantity }),
     }),
   issuances: () => request('/api/operations/issuances'),
+  deleteAllIssuances: () => request('/api/operations/issuances/all', { method: 'DELETE' }),
   deleteIssuance: (id) => request(`/api/operations/issuances/${id}`, { method: 'DELETE' }),
   exportExcel: (rows, meta) =>
     exportDownloadFile('/api/operations/export', { format: 'xlsx', rows, meta }, 'issuances.xlsx'),

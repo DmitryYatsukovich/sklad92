@@ -115,6 +115,14 @@ export function buildActionFromRequest(path, method, bodyText) {
       payload: { issuanceId: Number(issDel[1]) },
     };
   }
+  if (path === '/api/operations/issuances/all' && m === 'DELETE') {
+    return {
+      kind: 'issuance_delete_all',
+      title: 'Удаление всех выдач',
+      description: 'Массовое удаление выдач',
+      payload: {},
+    };
+  }
 
   if (path === '/api/attendance/register-face' && m === 'POST') {
     return {

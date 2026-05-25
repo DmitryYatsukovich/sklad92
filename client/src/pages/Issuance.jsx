@@ -112,6 +112,7 @@ export default function Issuance({ user }) {
   const [returnRow, setReturnRow] = useState(null);
   const [returnQuantity, setReturnQuantity] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [qrMaterial, setQrMaterial] = useState(null);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -368,6 +369,35 @@ export default function Issuance({ user }) {
     }
   };
 
+  const handleDeleteAllIssuances = async () => {
+    if (user?.role !== 'admin') return;
+    if (!mergedIssuances.length) {
+      setError('Выдач для удаления нет');
+      return;
+    }
+    const ok = window.confirm(
+      `Удалить все выдачи (${mergedIssuances.length})? Невозвращённое количество по всем выдачам вернётся на склад.`,
+    );
+    if (!ok) return;
+
+    setDeletingAll(true);
+    setError('');
+    try {
+      await operationsApi.deleteAllIssuances();
+      closeReturn();
+      load();
+    } catch (err) {
+      if (isOfflineQueuedError(err)) {
+        closeReturn();
+        setIssuances([]);
+        return;
+      }
+      setError(err.message);
+    } finally {
+      setDeletingAll(false);
+    }
+  };
+
   const handleReturn = async (e) => {
     e.preventDefault();
     if (!returnRow) return;
@@ -425,6 +455,17 @@ export default function Issuance({ user }) {
           <button type="button" onClick={() => load()} className="btn-ghost text-2xs">
             Обновить
           </button>
+          {user?.role === 'admin' && (
+            <button
+              type="button"
+              onClick={handleDeleteAllIssuances}
+              disabled={deletingAll || !mergedIssuances.length}
+              className="btn-ghost text-2xs text-red-400 hover:text-red-300 disabled:text-zinc-600"
+              title="Удалить все выдачи с возвратом остатка на склад"
+            >
+              {deletingAll ? 'Удаление…' : 'Удалить все'}
+            </button>
+          )}
         </div>
       </div>
 
