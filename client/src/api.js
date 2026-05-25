@@ -11,6 +11,8 @@ import {
   isQuickDeviceEnabled,
   getCachedResponse,
   setCachedResponse,
+  getOfflineResponseForPath,
+  updateOfflineDatasetsForPath,
   getCachedUser,
   setCachedUser,
   shouldCacheGetPath,
@@ -42,6 +44,9 @@ async function fetchWithTimeout(url, options = {}, timeout = REQUEST_TIMEOUT) {
 async function readFromOfflineCache(path) {
   const cached = await getCachedResponse(path);
   if (cached != null) return cached;
+  const user = await getCachedUser().catch(() => null);
+  const datasetFallback = await getOfflineResponseForPath(path, user);
+  if (datasetFallback != null) return datasetFallback;
   return null;
 }
 
@@ -74,6 +79,10 @@ async function request(path, options = {}) {
     if (!res.ok) throw new Error(data.error || res.statusText || 'Ошибка');
     if (cacheableGet && quickDevice) {
       setCachedResponse(path, data).catch(() => {});
+    }
+    if (method === 'GET' && quickDevice) {
+      const cachedUser = await getCachedUser().catch(() => null);
+      updateOfflineDatasetsForPath(path, data, cachedUser).catch(() => {});
     }
     if (shouldRecordAction(path, method)) {
       recordActionAfterSuccess(path, method, bodyText).catch(() => {});

@@ -57,6 +57,8 @@ export async function setCacheMeta(patch) {
 export async function clearOfflineCache() {
   const { idbGetAllKeys } = await import('./db.js');
   const keys = await idbGetAllKeys('entries');
+  const datasetKeys = await idbGetAllKeys('datasets');
   await Promise.all(keys.map((k) => idbDelete('entries', k)));
+  await Promise.all(datasetKeys.map((k) => idbDelete('datasets', k)));
   await idbDelete('meta', META_ID);
 }

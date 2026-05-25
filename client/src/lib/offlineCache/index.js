@@ -14,6 +14,10 @@ export {
   shouldCacheGetPath,
   clearOfflineCache,
 } from './store.js';
+export {
+  getOfflineResponseForPath,
+  updateOfflineDatasetsForPath,
+} from './offlineQueries.js';
 export { prefetchOfflineData } from './prefetch.js';
 export { formatPrefetchStatsMessage } from './prefetchStats.js';
 export { formatBytes, measureOfflineCacheSize } from './cacheSize.js';

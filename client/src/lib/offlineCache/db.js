@@ -1,5 +1,5 @@
 const DB_NAME = 'warehouse-app-offline';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise = null;
 
@@ -16,6 +16,11 @@ function openDb() {
       }
       if (!db.objectStoreNames.contains('meta')) {
         db.createObjectStore('meta', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('datasets')) {
+        const datasets = db.createObjectStore('datasets', { keyPath: 'key' });
+        datasets.createIndex('name', 'name', { unique: false });
+        datasets.createIndex('updatedAt', 'updatedAt', { unique: false });
       }
     };
   });

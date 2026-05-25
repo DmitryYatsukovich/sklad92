@@ -12,6 +12,8 @@ function monthBounds() {
 
 async function save(path, data, userId) {
   await setCachedResponse(path, data, userId);
+  const { updateOfflineDatasetsForPath } = await import('./offlineQueries.js');
+  await updateOfflineDatasetsForPath(path, data, { id: userId });
 }
 
 /** Загрузить с сервера и сохранить в IndexedDB (по правам пользователя). */

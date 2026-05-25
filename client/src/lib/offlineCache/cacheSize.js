@@ -47,9 +47,11 @@ export async function measureOfflineCacheSize({ force = false } = {}) {
     return sizeCache;
   }
   const entries = await idbGetAll('entries');
+  const datasets = await idbGetAll('datasets').catch(() => []);
   const meta = await idbGet('meta', META_ID);
   const bySection = {};
   let entriesBytes = 0;
+  let datasetsBytes = 0;
 
   for (const row of entries) {
     const bytes = estimateBytes(row);
@@ -61,6 +63,17 @@ export async function measureOfflineCacheSize({ force = false } = {}) {
   }
 
   const metaBytes = estimateBytes(meta);
+  for (const row of datasets) {
+    const bytes = estimateBytes(row);
+    datasetsBytes += bytes;
+  }
+  if (datasetsBytes > 0) {
+    bySection['локальная БД'] = {
+      label: 'локальная БД',
+      bytes: datasetsBytes,
+      count: datasets.length,
+    };
+  }
   let actionsLogBytes = 0;
   try {
     const { listLocalActions } = await import('../actionLog/store.js');
@@ -81,13 +94,15 @@ export async function measureOfflineCacheSize({ force = false } = {}) {
     .filter((i) => i.bytes > 0)
     .sort((a, b) => b.bytes - a.bytes);
 
-  const totalBytes = entriesBytes + metaBytes + actionsLogBytes;
+  const totalBytes = entriesBytes + datasetsBytes + metaBytes + actionsLogBytes;
   sizeCache = {
     totalBytes,
     entriesBytes,
+    datasetsBytes,
     metaBytes,
     actionsLogBytes,
     entriesCount: entries.length,
+    datasetsCount: datasets.length,
     items,
   };
   sizeCacheAt = Date.now();
