@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, lazy } from 'react';
+import { useState, useEffect, useRef, useCallback, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { auth } from './api';
 import Login from './pages/Login';
 import Layout from './Layout';
 import { getDefaultRoute } from './lib/defaultRoute.js';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
+import RecoverableErrorBoundary from './components/RecoverableErrorBoundary.jsx';
 import { setActionLogUser, initActionLogSync } from './lib/actionLog';
 import {
   isQuickDeviceEnabled,
@@ -125,6 +126,14 @@ export default function App() {
   }, [user?.id]);
 
   const onLogin = (u) => setUser(u);
+  const recoverIssuanceTabCache = useCallback(() => {
+    import('./lib/pageCache').then((m) => m.invalidatePageCache('issuance:bundle')).catch(() => {});
+    import('./lib/offlineCache').then((m) => Promise.allSettled([
+      m.deleteCachedResponse('/api/operations/issuances'),
+      m.deleteCachedResponse('/api/materials'),
+      m.deleteCachedResponse('/api/materials/users-for-issuance'),
+    ])).catch(() => {});
+  }, []);
   const onLogout = async () => {
     await clearOfflineSession();
     try {
@@ -178,7 +187,9 @@ export default function App() {
           path="issuance"
           element={(
             <ProtectedRoute user={user} perm="can_issuance">
-              <Issuance user={user} />
+              <RecoverableErrorBoundary onError={recoverIssuanceTabCache}>
+                <Issuance user={user} />
+              </RecoverableErrorBoundary>
             </ProtectedRoute>
           )}
         />

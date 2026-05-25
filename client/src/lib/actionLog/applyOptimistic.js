@@ -23,6 +23,17 @@ function isRowObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+function normalizeMutationEntry(entry) {
+  if (!isRowObject(entry)) return null;
+  return {
+    ...entry,
+    path: typeof entry.path === 'string' ? entry.path : '',
+    method: typeof entry.method === 'string' ? entry.method.toUpperCase() : 'GET',
+    body: isRowObject(entry.body) ? entry.body : {},
+    meta: isRowObject(entry.meta) ? entry.meta : {},
+  };
+}
+
 function parseBody(bodyText) {
   if (!bodyText) return {};
   try {
@@ -107,10 +118,14 @@ export async function loadPendingEntries() {
   if (pendingEntriesCache) return pendingEntriesCache;
   const queue = await listPendingMutations();
   pendingEntriesCache = queue.map((entry) => {
+    const safePath = typeof entry?.path === 'string' ? entry.path : '';
+    const safeMethod = typeof entry?.method === 'string' ? entry.method : 'GET';
     const body = parseBody(entry.body);
-    const meta = buildActionFromRequest(entry.path, entry.method, entry.body) || {};
+    const meta = buildActionFromRequest(safePath, safeMethod, entry.body) || {};
     return {
       ...entry,
+      path: safePath,
+      method: safeMethod,
       body,
       meta,
       kind: meta.kind || 'api_mutation',
@@ -149,10 +164,11 @@ export function applyPendingToMaterials(materials, entries, ctx = {}) {
   const hidden = new Set();
 
   for (const entry of pending) {
-    if (!isRowObject(entry)) continue;
-    const { kind, body, path, method } = entry;
-    const meta = entry.meta || {};
-    const payload = meta.payload || body;
+    const safe = normalizeMutationEntry(entry);
+    if (!safe) continue;
+    const { kind, body, path, method } = safe;
+    const meta = safe.meta || {};
+    const payload = isRowObject(meta.payload) ? meta.payload : body;
 
     if (kind === 'material_create' && path === '/api/materials' && method === 'POST') {
       const id = tempMaterialId(entry.id);
@@ -243,10 +259,11 @@ export function applyPendingToIssuances(issuances, entries, ctx = {}) {
   const removed = new Set();
 
   for (const entry of pending) {
-    if (!isRowObject(entry)) continue;
-    const { kind, body, path, method } = entry;
-    const meta = entry.meta || {};
-    const payload = meta.payload || body;
+    const safe = normalizeMutationEntry(entry);
+    if (!safe) continue;
+    const { kind, body, path, method } = safe;
+    const meta = safe.meta || {};
+    const payload = isRowObject(meta.payload) ? meta.payload : body;
 
     if (kind === 'issue' && path === '/api/operations/issue') {
       list.unshift(buildIssuanceFromIssue(entry, body, ctx));
@@ -356,10 +373,11 @@ export function applyPendingToProduction(rows, entries, ctx = {}) {
   const removed = new Set();
 
   for (const entry of pending) {
-    if (!isRowObject(entry)) continue;
-    const { kind, body, path, method } = entry;
-    const meta = entry.meta || {};
-    const payload = meta.payload || body;
+    const safe = normalizeMutationEntry(entry);
+    if (!safe) continue;
+    const { kind, body, path, method } = safe;
+    const meta = safe.meta || {};
+    const payload = isRowObject(meta.payload) ? meta.payload : body;
 
     if (kind === 'issue' && path === '/api/operations/issue') {
       const issuedAt = entry.createdAt || new Date().toISOString();

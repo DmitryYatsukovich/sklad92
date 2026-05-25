@@ -7,6 +7,7 @@ export {
 export {
   getCachedResponse,
   setCachedResponse,
+  deleteCachedResponse,
   getCachedUser,
   setCachedUser,
   getCacheMeta,

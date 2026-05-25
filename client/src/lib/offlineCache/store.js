@@ -30,6 +30,10 @@ export async function setCachedResponse(path, data, userId = null) {
   });
 }
 
+export async function deleteCachedResponse(path) {
+  await idbDelete('entries', cacheKeyForPath(path));
+}
+
 export async function getCachedUser() {
   const meta = await idbGet('meta', META_ID);
   return meta?.user ?? null;
