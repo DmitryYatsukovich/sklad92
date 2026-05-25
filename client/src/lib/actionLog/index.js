@@ -4,6 +4,7 @@ export {
   enqueueOfflineMutation,
   syncActionLogToServer,
   initActionLogSync,
+  waitForActionLogIdle,
   clearPendingMutationsForDeleteAll,
   subscribeActionLog,
   getActionLogCounts,

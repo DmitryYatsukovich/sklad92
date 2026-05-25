@@ -279,6 +279,16 @@ export function initActionLogSync() {
   return () => window.removeEventListener('online', run);
 }
 
+export async function waitForActionLogIdle(timeoutMs = 10000) {
+  const started = Date.now();
+  while (syncing) {
+    if (Date.now() - started >= timeoutMs) break;
+    // Let the currently running replay/sync cycle finish.
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 export async function clearPendingMutationsForDeleteAll() {
   const removed = await removePendingMutationsByPathPrefixes([
     '/api/operations/issue',

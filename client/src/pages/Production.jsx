@@ -8,7 +8,7 @@ import { useListPagination } from '../hooks/useListPagination';
 import { usePendingMutations } from '../hooks/usePendingMutations';
 import { useReloadOnSyncComplete } from '../hooks/useReloadOnSyncComplete';
 import { applyPendingToProduction, applyPendingToMaterials, withPendingRowClass } from '../lib/actionLog/applyOptimistic';
-import { clearPendingMutationsForDeleteAll } from '../lib/actionLog';
+import { clearPendingMutationsForDeleteAll, waitForActionLogIdle } from '../lib/actionLog';
 import { formatWorkLocationFromSelection } from '../lib/workLocationLabel';
 import { materials as materialsApi } from '../api';
 import { peekPageCache, setPageCache } from '../lib/pageCache';
@@ -450,6 +450,9 @@ export default function Production({ user }) {
     setDeletingAll(true);
     setError('');
     try {
+      await waitForActionLogIdle();
+      await clearPendingMutationsForDeleteAll();
+      await waitForActionLogIdle();
       await reports.deleteAllProduction(periodFrom, periodTo);
       await clearPendingMutationsForDeleteAll();
       setHistoryRow(null);
