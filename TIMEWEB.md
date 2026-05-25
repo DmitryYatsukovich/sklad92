@@ -48,9 +48,9 @@ npm install
 npm start
 ```
 
-Обязательно **`npm start`** (не `node server/index.js` напрямую): при старте подтягиваются модели распознавания лиц.
+Рекомендуется запуск через **`npm start`**.
 
-В `package.json` **нет postinstall** — на Timeweb/Docker `npm ci` идёт до копирования файлов проекта; скрипт установки моделей: `server/ensure-face-models.mjs` (запускается из `npm start`).
+В `package.json` **нет postinstall** — на Timeweb/Docker `npm ci` идёт до копирования файлов проекта. Проверка/восстановление моделей выполняется при старте сервера.
 
 ### Отметка по лицу (модели ~13 МБ)
 
