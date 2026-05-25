@@ -21,6 +21,32 @@ function parseId(v) {
   return n > 0 ? n : null;
 }
 
+function parseVersion(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function resolveLwwConflict(req, serverUpdatedAt) {
+  const policy = String(req.get('x-sync-policy') || '').toLowerCase();
+  if (policy !== 'lww') return null;
+  const baseVersion = parseVersion(req.get('x-sync-base-version'));
+  const clientVersion = parseVersion(req.get('x-sync-client-version'));
+  const serverVersion = parseVersion(serverUpdatedAt);
+  if (!baseVersion || !clientVersion || !serverVersion) return null;
+  if (serverVersion <= baseVersion) return null;
+  return clientVersion > serverVersion ? 'client_wins' : 'server_wins';
+}
+
+function sendServerWinsConflict(res, row) {
+  return res.status(409).json({
+    code: 'CONFLICT_SERVER_WINS',
+    error: 'Конфликт синхронизации: на сервере есть более новая версия данных',
+    server: row,
+  });
+}
+
 async function loadWorkLocationCatalog() {
   const [objects, workEntrances, workFloors, workApartments, workRooms] = await Promise.all([
     pool.query('SELECT id, name FROM warehouse_objects ORDER BY name'),
@@ -74,6 +100,7 @@ router.use(requirePermission('can_production'));
 const PRODUCTION_SELECT = `
   SELECT i.id AS issuance_id,
          i.issued_at,
+         i.updated_at AS issuance_updated_at,
          i.production_confirmed,
          i.production_confirmed_at,
          u.id AS user_id,
@@ -517,7 +544,8 @@ async function updateIssuanceWorkLocation(db, id, loc) {
        work_room_id = NULL,
        work_apartment_id = NULL,
        work_floor_id = NULL,
-       work_entrance_id = NULL
+       work_entrance_id = NULL,
+       updated_at = NOW()
      WHERE id = $1`,
     [id, loc.object_id, workLocationItemsJson(loc)],
   );
@@ -545,7 +573,7 @@ router.patch('/production/issuances/:id/location', async (req, res) => {
   if (locErr) return res.status(400).json({ error: locErr });
 
   const cur = await pool.query(
-    'SELECT id, issued_to_user_id, production_confirmed FROM issuances WHERE id = $1',
+    'SELECT id, issued_to_user_id, production_confirmed, quantity, returned_quantity, updated_at FROM issuances WHERE id = $1',
     [id],
   );
   if (!cur.rowCount) return res.status(404).json({ error: 'Выдача не найдена' });
@@ -557,10 +585,40 @@ router.patch('/production/issuances/:id/location', async (req, res) => {
   if (cur.rows[0].production_confirmed) {
     return res.status(400).json({ error: 'Выработка уже подтверждена — место изменить нельзя' });
   }
+  const conflict = resolveLwwConflict(req, cur.rows[0].updated_at);
+  if (conflict === 'server_wins') {
+    return sendServerWinsConflict(res, {
+      issuance_id: cur.rows[0].id,
+      updated_at: cur.rows[0].updated_at,
+      quantity: cur.rows[0].quantity,
+      returned_quantity: cur.rows[0].returned_quantity,
+    });
+  }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const locked = await client.query(
+      `SELECT id, quantity, returned_quantity, updated_at
+       FROM issuances
+       WHERE id = $1
+       FOR UPDATE`,
+      [id],
+    );
+    if (!locked.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Выдача не найдена' });
+    }
+    const conflictLocked = resolveLwwConflict(req, locked.rows[0].updated_at);
+    if (conflictLocked === 'server_wins') {
+      await client.query('ROLLBACK');
+      return sendServerWinsConflict(res, {
+        issuance_id: locked.rows[0].id,
+        updated_at: locked.rows[0].updated_at,
+        quantity: locked.rows[0].quantity,
+        returned_quantity: locked.rows[0].returned_quantity,
+      });
+    }
     await updateIssuanceWorkLocation(client, id, loc);
     await logProductionConfirmation(client, {
       issuanceId: id,
@@ -641,14 +699,36 @@ router.patch('/production/issuances/:id/confirm', requireAdmin, async (req, res)
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const locked = await client.query(
+      `SELECT id, quantity, returned_quantity, updated_at
+       FROM issuances
+       WHERE id = $1
+       FOR UPDATE`,
+      [id],
+    );
+    if (!locked.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Выдача не найдена' });
+    }
+    const conflict = resolveLwwConflict(req, locked.rows[0].updated_at);
+    if (conflict === 'server_wins') {
+      await client.query('ROLLBACK');
+      return sendServerWinsConflict(res, {
+        issuance_id: locked.rows[0].id,
+        updated_at: locked.rows[0].updated_at,
+        quantity: locked.rows[0].quantity,
+        returned_quantity: locked.rows[0].returned_quantity,
+      });
+    }
     await updateIssuanceWorkLocation(client, id, loc);
     const r = await client.query(
       `UPDATE issuances SET
          production_confirmed = true,
          production_confirmed_at = NOW(),
-         production_confirmed_by = $2
+         production_confirmed_by = $2,
+         updated_at = NOW()
        WHERE id = $1
-       RETURNING id, production_confirmed, production_confirmed_at`,
+       RETURNING id, production_confirmed, production_confirmed_at, updated_at`,
       [id, req.session.userId],
     );
     if (!r.rowCount) {
@@ -684,6 +764,27 @@ router.patch('/production/issuances/:id/unconfirm', requireAdmin, async (req, re
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const locked = await client.query(
+      `SELECT id, quantity, returned_quantity, updated_at
+       FROM issuances
+       WHERE id = $1
+       FOR UPDATE`,
+      [id],
+    );
+    if (!locked.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Выдача не найдена' });
+    }
+    const conflict = resolveLwwConflict(req, locked.rows[0].updated_at);
+    if (conflict === 'server_wins') {
+      await client.query('ROLLBACK');
+      return sendServerWinsConflict(res, {
+        issuance_id: locked.rows[0].id,
+        updated_at: locked.rows[0].updated_at,
+        quantity: locked.rows[0].quantity,
+        returned_quantity: locked.rows[0].returned_quantity,
+      });
+    }
     const r = await client.query(
       `UPDATE issuances SET
          production_confirmed = false,
@@ -694,9 +795,10 @@ router.patch('/production/issuances/:id/unconfirm', requireAdmin, async (req, re
          work_room_id = NULL,
          work_apartment_id = NULL,
          work_floor_id = NULL,
-         work_entrance_id = NULL
+         work_entrance_id = NULL,
+         updated_at = NOW()
        WHERE id = $1
-       RETURNING id, production_confirmed, production_confirmed_at`,
+       RETURNING id, production_confirmed, production_confirmed_at, updated_at`,
       [id, req.session.userId],
     );
     if (!r.rowCount) {

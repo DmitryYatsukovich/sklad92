@@ -88,6 +88,8 @@ const statements = [
   `ALTER TABLE issuances ADD COLUMN IF NOT EXISTS production_confirmed BOOLEAN DEFAULT false`,
   `ALTER TABLE issuances ADD COLUMN IF NOT EXISTS production_confirmed_at TIMESTAMPTZ`,
   `ALTER TABLE issuances ADD COLUMN IF NOT EXISTS production_confirmed_by INTEGER REFERENCES users(id) ON DELETE SET NULL`,
+  `ALTER TABLE issuances ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
+  `UPDATE issuances SET updated_at = COALESCE(updated_at, returned_at, issued_at, NOW()) WHERE updated_at IS NULL`,
   `CREATE TABLE IF NOT EXISTS production_confirmation_log (
     id SERIAL PRIMARY KEY,
     issuance_id INTEGER NOT NULL REFERENCES issuances(id) ON DELETE CASCADE,

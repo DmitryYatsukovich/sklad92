@@ -30,6 +30,79 @@ let currentUser = null;
 
 export const OFFLINE_QUEUED = 'OFFLINE_QUEUED';
 
+function parseBody(bodyText) {
+  if (!bodyText) return {};
+  try {
+    return JSON.parse(bodyText);
+  } catch {
+    return {};
+  }
+}
+
+function parseIssuanceId(path, method, bodyText) {
+  const m = (method || 'GET').toUpperCase();
+  const body = parseBody(bodyText);
+  if (path === '/api/operations/return' && m === 'POST') {
+    return Number(body.issuance_id) || null;
+  }
+  const returned = path.match(/^\/api\/operations\/issuances\/(-?\d+)\/returned$/);
+  if (returned) return Number(returned[1]) || null;
+  const issuanceDelete = path.match(/^\/api\/operations\/issuances\/(-?\d+)$/);
+  if (issuanceDelete) return Number(issuanceDelete[1]) || null;
+  const production = path.match(/^\/api\/reports\/production\/issuances\/(-?\d+)\/(location|confirm|unconfirm)$/);
+  if (production) return Number(production[1]) || null;
+  return null;
+}
+
+async function findIssuanceVersion(issuanceId) {
+  if (!issuanceId || issuanceId < 0) return null;
+  const { getCachedResponse } = await import('../offlineCache/store.js');
+  const { getOfflineDataset } = await import('../offlineCache/datasets.js');
+  const [cachedIssuances, datasetIssuances, datasetProduction] = await Promise.all([
+    getCachedResponse('/api/operations/issuances').catch(() => null),
+    getOfflineDataset('issuances', currentUser?.id ?? null).catch(() => null),
+    getOfflineDataset('productionRows', currentUser?.id ?? null).catch(() => null),
+  ]);
+  const fromCache = (Array.isArray(cachedIssuances) ? cachedIssuances : [])
+    .find((r) => Number(r.id) === Number(issuanceId));
+  if (fromCache?.updated_at) return fromCache.updated_at;
+  const fromDatasetIss = (Array.isArray(datasetIssuances) ? datasetIssuances : [])
+    .find((r) => Number(r.id) === Number(issuanceId));
+  if (fromDatasetIss?.updated_at) return fromDatasetIss.updated_at;
+  const fromDatasetProd = (Array.isArray(datasetProduction) ? datasetProduction : [])
+    .find((r) => Number(r.issuance_id) === Number(issuanceId));
+  return fromDatasetProd?.issuance_updated_at || fromDatasetProd?.updated_at || null;
+}
+
+async function buildMutationSyncMeta(path, method, bodyText, createdAt) {
+  const issuanceId = parseIssuanceId(path, method, bodyText);
+  if (!issuanceId || issuanceId < 0) return null;
+  const baseVersion = await findIssuanceVersion(issuanceId);
+  if (!baseVersion) return null;
+  return {
+    policy: 'lww',
+    entity: 'issuance',
+    entityId: issuanceId,
+    baseVersion,
+    clientVersion: createdAt,
+  };
+}
+
+function buildSyncHeaders(syncMeta) {
+  if (!syncMeta || syncMeta.policy !== 'lww') return {};
+  const headers = { 'X-Sync-Policy': 'lww' };
+  if (syncMeta.baseVersion) headers['X-Sync-Base-Version'] = syncMeta.baseVersion;
+  if (syncMeta.clientVersion) headers['X-Sync-Client-Version'] = syncMeta.clientVersion;
+  return headers;
+}
+
+function isServerWinsConflict(error) {
+  if (!error) return false;
+  if (error.code === 'CONFLICT_SERVER_WINS') return true;
+  if (error.status === 409 && String(error.message || '').toLowerCase().includes('конфликт')) return true;
+  return false;
+}
+
 export function setActionLogUser(user) {
   currentUser = user;
 }
@@ -93,7 +166,13 @@ async function rawFetch(path, options = {}) {
     });
     clearTimeout(t);
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || res.statusText || 'Ошибка');
+    if (!res.ok) {
+      const err = new Error(data.error || res.statusText || 'Ошибка');
+      err.status = res.status;
+      err.code = data.code || null;
+      err.payload = data;
+      throw err;
+    }
     return data;
   } catch (e) {
     clearTimeout(t);
@@ -104,16 +183,19 @@ async function rawFetch(path, options = {}) {
 
 export async function enqueueOfflineMutation(path, method, bodyText, actionMeta) {
   const clientId = newClientId();
+  const createdAt = new Date().toISOString();
   const meta = actionMeta || buildActionFromRequest(path, method, bodyText);
   if (meta) {
     await recordAction(meta, { synced: false, clientId });
   }
+  const syncMeta = await buildMutationSyncMeta(path, method, bodyText, createdAt);
   const mutationId = await addPendingMutation({
     path,
     method,
     body: bodyText || null,
     actionClientId: clientId,
-    createdAt: new Date().toISOString(),
+    createdAt,
+    syncMeta,
   });
   if (path === '/api/materials' && (method || 'GET').toUpperCase() === 'POST' && mutationId != null) {
     patchOfflineCacheForNewMaterial(bodyText, mutationId).catch(() => {});
@@ -195,10 +277,23 @@ async function replayMutations() {
       }
     }
 
-    const data = await rawFetch(path, {
-      method,
-      body: body || undefined,
-    });
+    let data;
+    try {
+      data = await rawFetch(path, {
+        method,
+        body: body || undefined,
+        headers: buildSyncHeaders(item.syncMeta),
+      });
+    } catch (e) {
+      if (isServerWinsConflict(e)) {
+        await removePendingMutation(item.id);
+        if (item.actionClientId) {
+          await markActionsSynced([item.actionClientId]);
+        }
+        continue;
+      }
+      throw e;
+    }
 
     if (path === '/api/materials' && method === 'POST') {
       await registerCreatedMaterialMapping(item, data, materialIdMap, issuanceIdMap);

@@ -10,6 +10,32 @@ router.use(requireAuth);
 router.use(loadUser);
 router.use(requirePermission('can_issuance'));
 
+function parseVersion(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function resolveLwwConflict(req, serverUpdatedAt) {
+  const policy = String(req.get('x-sync-policy') || '').toLowerCase();
+  if (policy !== 'lww') return null;
+  const baseVersion = parseVersion(req.get('x-sync-base-version'));
+  const clientVersion = parseVersion(req.get('x-sync-client-version'));
+  const serverVersion = parseVersion(serverUpdatedAt);
+  if (!baseVersion || !clientVersion || !serverVersion) return null;
+  if (serverVersion <= baseVersion) return null;
+  return clientVersion > serverVersion ? 'client_wins' : 'server_wins';
+}
+
+function sendServerWinsConflict(res, row) {
+  return res.status(409).json({
+    code: 'CONFLICT_SERVER_WINS',
+    error: 'Конфликт синхронизации: на сервере есть более новая версия данных',
+    server: row,
+  });
+}
+
 // Выдать материал пользователю
 router.post('/issue', async (req, res) => {
   const { material_id, issued_to_user_id, quantity, note } = req.body || {};
@@ -48,7 +74,7 @@ router.post('/issue', async (req, res) => {
     const ins = await client.query(
       `INSERT INTO issuances (material_id, issued_by_user_id, issued_to_user_id, quantity, note)
        VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, material_id, issued_to_user_id, quantity, issued_at, note`,
+       RETURNING id, material_id, issued_to_user_id, quantity, issued_at, note, updated_at`,
       [material_id, req.session.userId, issued_to_user_id, qty, note || null],
     );
 
@@ -84,12 +110,22 @@ router.post('/return', async (req, res) => {
   try {
     await client.query('BEGIN');
     const iss = (await client.query(
-      'SELECT id, material_id, quantity, returned_quantity FROM issuances WHERE id = $1 FOR UPDATE',
+      'SELECT id, material_id, quantity, returned_quantity, updated_at FROM issuances WHERE id = $1 FOR UPDATE',
       [issuance_id],
     )).rows[0];
     if (!iss) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Выдача не найдена' });
+    }
+    const conflict = resolveLwwConflict(req, iss.updated_at);
+    if (conflict === 'server_wins') {
+      await client.query('ROLLBACK');
+      return sendServerWinsConflict(res, {
+        issuance_id: iss.id,
+        updated_at: iss.updated_at,
+        quantity: iss.quantity,
+        returned_quantity: iss.returned_quantity,
+      });
     }
     const already = parseFloat(iss.returned_quantity || 0);
     const total = parseFloat(iss.quantity);
@@ -106,8 +142,13 @@ router.post('/return', async (req, res) => {
     const qtyAfter = parseFloat(upd.rows[0].quantity);
     const newReturned = already + retQty;
 
-    await client.query(
-      `UPDATE issuances SET returned_quantity = $1::numeric, returned_at = COALESCE(returned_at, NOW()) WHERE id = $2`,
+    const issUpd = await client.query(
+      `UPDATE issuances
+       SET returned_quantity = $1::numeric,
+           returned_at = COALESCE(returned_at, NOW()),
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING returned_quantity, updated_at`,
       [newReturned, issuance_id],
     );
 
@@ -122,7 +163,11 @@ router.post('/return', async (req, res) => {
     });
 
     await client.query('COMMIT');
-    res.json({ ok: true, returned_quantity: newReturned });
+    res.json({
+      ok: true,
+      returned_quantity: newReturned,
+      updated_at: issUpd.rows[0]?.updated_at || null,
+    });
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;
@@ -143,12 +188,22 @@ router.patch('/issuances/:id/returned', async (req, res) => {
   try {
     await client.query('BEGIN');
     const iss = (await client.query(
-      'SELECT id, material_id, quantity, returned_quantity FROM issuances WHERE id = $1 FOR UPDATE',
+      'SELECT id, material_id, quantity, returned_quantity, updated_at FROM issuances WHERE id = $1 FOR UPDATE',
       [issuanceId],
     )).rows[0];
     if (!iss) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Выдача не найдена' });
+    }
+    const conflict = resolveLwwConflict(req, iss.updated_at);
+    if (conflict === 'server_wins') {
+      await client.query('ROLLBACK');
+      return sendServerWinsConflict(res, {
+        issuance_id: iss.id,
+        updated_at: iss.updated_at,
+        quantity: iss.quantity,
+        returned_quantity: iss.returned_quantity,
+      });
     }
 
     const issued = parseFloat(iss.quantity);
@@ -193,16 +248,22 @@ router.patch('/issuances/:id/returned', async (req, res) => {
       });
     }
 
-    await client.query(
+    const issUpd = await client.query(
       `UPDATE issuances SET
          returned_quantity = $1::numeric,
-         returned_at = CASE WHEN $1::numeric > 0 THEN COALESCE(returned_at, NOW()) ELSE NULL END
-       WHERE id = $2`,
+         returned_at = CASE WHEN $1::numeric > 0 THEN COALESCE(returned_at, NOW()) ELSE NULL END,
+         updated_at = NOW()
+       WHERE id = $2
+       RETURNING updated_at`,
       [newReturned, issuanceId],
     );
 
     await client.query('COMMIT');
-    res.json({ ok: true, returned_quantity: newReturned });
+    res.json({
+      ok: true,
+      returned_quantity: newReturned,
+      updated_at: issUpd.rows[0]?.updated_at || null,
+    });
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('PATCH returned error:', e);
@@ -220,12 +281,22 @@ router.delete('/issuances/:id(\\d+)', requireAdmin, async (req, res) => {
   try {
     await client.query('BEGIN');
     const iss = (await client.query(
-      'SELECT id, material_id, quantity, returned_quantity FROM issuances WHERE id = $1 FOR UPDATE',
+      'SELECT id, material_id, quantity, returned_quantity, updated_at FROM issuances WHERE id = $1 FOR UPDATE',
       [issuanceId],
     )).rows[0];
     if (!iss) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Выдача не найдена' });
+    }
+    const conflict = resolveLwwConflict(req, iss.updated_at);
+    if (conflict === 'server_wins') {
+      await client.query('ROLLBACK');
+      return sendServerWinsConflict(res, {
+        issuance_id: iss.id,
+        updated_at: iss.updated_at,
+        quantity: iss.quantity,
+        returned_quantity: iss.returned_quantity,
+      });
     }
 
     const issued = parseFloat(iss.quantity);
@@ -324,7 +395,7 @@ router.delete('/issuances/all', requireAdmin, async (req, res) => {
 // Список выдач (для вкладки выдачи и возвратов)
 router.get('/issuances', async (req, res) => {
   const r = await pool.query(
-    `SELECT i.id, i.material_id, i.issued_to_user_id, i.quantity, i.issued_at, i.returned_at, i.returned_quantity, i.note,
+    `SELECT i.id, i.material_id, i.issued_to_user_id, i.quantity, i.issued_at, i.returned_at, i.returned_quantity, i.note, i.updated_at,
             m.code AS material_code, m.name AS material_name, m.unit, m.price, m.production_price,
             u.login AS issued_to_login, u.display_name AS issued_to_name
      FROM issuances i

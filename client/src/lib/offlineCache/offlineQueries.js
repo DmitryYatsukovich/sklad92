@@ -47,6 +47,7 @@ function deriveProductionRows(issuances, materials, users) {
     return {
       issuance_id: Number(iss.id),
       issued_at: iss.issued_at,
+      issuance_updated_at: iss.updated_at || null,
       production_confirmed: false,
       production_confirmed_at: null,
       user_id: userId,
@@ -79,6 +80,7 @@ function normalizeProductionRows(rows) {
       const unitSmr = toNum(row.production_price);
       return {
         ...row,
+        issuance_updated_at: row.issuance_updated_at || row.updated_at || null,
         produced,
         smr_total: produced * unitSmr,
       };
