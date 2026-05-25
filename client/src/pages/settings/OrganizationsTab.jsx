@@ -17,6 +17,16 @@ const EMPTY_FORM = {
   bank_corr_account: '',
 };
 
+function isRowObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function asArrayOfObjects(value) {
+  return Array.isArray(value)
+    ? value.filter((row) => isRowObject(row))
+    : [];
+}
+
 function orgToForm(row) {
   if (!row) return { ...EMPTY_FORM };
   return {
@@ -47,7 +57,7 @@ export default function OrganizationsTab() {
   const load = useCallback(() => {
     setLoading(true);
     settingsApi.organizations.list()
-      .then(setList)
+      .then((rows) => setList(asArrayOfObjects(rows)))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);

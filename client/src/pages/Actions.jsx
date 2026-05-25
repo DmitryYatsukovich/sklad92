@@ -9,6 +9,7 @@ import {
 import ListPagination from '../components/ListPagination';
 import { useListPagination } from '../hooks/useListPagination';
 import { peekPageCache, setPageCache } from '../lib/pageCache';
+import { withPendingRowClass } from '../lib/actionLog/applyOptimistic';
 
 function formatWhen(iso) {
   if (!iso) return '—';
@@ -235,7 +236,11 @@ export default function Actions({ user }) {
               </tr>
             ) : null}
             {pagination.paginatedItems.map((row) => (
-              <tr key={row.clientId || row.id}>
+              <tr
+                key={row.clientId || row.id}
+                className={withPendingRowClass('', { _pending: !row.synced || isConflictRow(row) })}
+                title={!row.synced || isConflictRow(row) ? 'Ожидает синхронизации с сервером' : undefined}
+              >
                 <td className="text-zinc-500 text-2xs whitespace-nowrap">{formatWhen(row.createdAt)}</td>
                 <td className="text-2xs text-zinc-400">{kindLabel(row.kind)}</td>
                 <td>

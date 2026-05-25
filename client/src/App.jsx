@@ -193,12 +193,42 @@ export default function App() {
     markActiveSession(true);
     setUser(u);
   };
+  const recoverWarehouseTabCache = useCallback(() => {
+    import('./lib/pageCache').then((m) => m.invalidatePageCache('warehouse:materials')).catch(() => {});
+    import('./lib/offlineCache').then((m) => Promise.allSettled([
+      m.deleteCachedResponse('/api/materials'),
+      m.deleteCachedResponse('/api/settings/catalog'),
+      m.deleteCachedResponse('/api/materials/users-for-issuance'),
+      m.deleteCachedResponsesByPathPrefix('/api/materials/by-code/'),
+      m.deleteCachedResponsesByPathPrefix('/api/materials/'),
+    ])).catch(() => {});
+  }, []);
   const recoverIssuanceTabCache = useCallback(() => {
     import('./lib/pageCache').then((m) => m.invalidatePageCache('issuance:bundle')).catch(() => {});
     import('./lib/offlineCache').then((m) => Promise.allSettled([
       m.deleteCachedResponse('/api/operations/issuances'),
       m.deleteCachedResponse('/api/materials'),
       m.deleteCachedResponse('/api/materials/users-for-issuance'),
+    ])).catch(() => {});
+  }, []);
+  const recoverSettingsTabCache = useCallback(() => {
+    import('./lib/pageCache').then((m) => m.invalidatePageCache()).catch(() => {});
+    import('./lib/offlineCache').then((m) => Promise.allSettled([
+      m.deleteCachedResponsesByPathPrefix('/api/settings/'),
+      m.deleteCachedResponsesByPathPrefix('/api/roles'),
+      m.deleteCachedResponse('/api/users'),
+    ])).catch(() => {});
+  }, []);
+  const recoverAttendanceTabCache = useCallback(() => {
+    import('./lib/pageCache').then((m) => m.invalidatePageCache()).catch(() => {});
+    import('./lib/offlineCache').then((m) => Promise.allSettled([
+      m.deleteCachedResponsesByPathPrefix('/api/attendance/'),
+    ])).catch(() => {});
+  }, []);
+  const recoverActionsTabCache = useCallback(() => {
+    import('./lib/pageCache').then((m) => m.invalidatePageCache('actions:list')).catch(() => {});
+    import('./lib/offlineCache').then((m) => Promise.allSettled([
+      m.deleteCachedResponsesByPathPrefix('/api/actions'),
     ])).catch(() => {});
   }, []);
   const recoverProductionTabCache = useCallback(() => {
@@ -249,7 +279,9 @@ export default function App() {
           path="warehouse"
           element={(
             <ProtectedRoute user={user} perm="can_warehouse">
-              <Warehouse user={user} />
+              <RecoverableErrorBoundary onError={recoverWarehouseTabCache}>
+                <Warehouse user={user} />
+              </RecoverableErrorBoundary>
             </ProtectedRoute>
           )}
         />
@@ -257,7 +289,9 @@ export default function App() {
           path="settings"
           element={(
             <ProtectedRoute user={user} anyPerm={['can_settings_organizations', 'can_settings_warehouses', 'can_settings_categories', 'can_settings_work', 'can_users', 'can_roles']}>
-              <Settings user={user} />
+              <RecoverableErrorBoundary onError={recoverSettingsTabCache}>
+                <Settings user={user} />
+              </RecoverableErrorBoundary>
             </ProtectedRoute>
           )}
         />
@@ -286,7 +320,9 @@ export default function App() {
           path="face"
           element={(
             <ProtectedRoute user={user} perm="can_face">
-              <FaceCheckIn user={user} />
+              <RecoverableErrorBoundary onError={recoverAttendanceTabCache}>
+                <FaceCheckIn user={user} />
+              </RecoverableErrorBoundary>
             </ProtectedRoute>
           )}
         />
@@ -294,7 +330,9 @@ export default function App() {
           path="attendance"
           element={(
             <ProtectedRoute user={user} perm="can_attendance">
-              <AttendanceAll user={user} />
+              <RecoverableErrorBoundary onError={recoverAttendanceTabCache}>
+                <AttendanceAll user={user} />
+              </RecoverableErrorBoundary>
             </ProtectedRoute>
           )}
         />
@@ -302,7 +340,9 @@ export default function App() {
           path="actions"
           element={(
             <ProtectedRoute user={user} perm="can_actions">
-              <Actions user={user} />
+              <RecoverableErrorBoundary onError={recoverActionsTabCache}>
+                <Actions user={user} />
+              </RecoverableErrorBoundary>
             </ProtectedRoute>
           )}
         />

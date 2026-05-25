@@ -42,6 +42,30 @@ const EMPTY_CATALOG = {
   work_rooms: [],
 };
 
+function isRowObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function asArrayOfObjects(value) {
+  return Array.isArray(value)
+    ? value.filter((row) => isRowObject(row))
+    : [];
+}
+
+function normalizeCatalog(value) {
+  const safe = isRowObject(value) ? value : {};
+  return {
+    objects: asArrayOfObjects(safe.objects),
+    warehouses: asArrayOfObjects(safe.warehouses),
+    racks: asArrayOfObjects(safe.racks),
+    categories: asArrayOfObjects(safe.categories),
+    work_entrances: asArrayOfObjects(safe.work_entrances),
+    work_floors: asArrayOfObjects(safe.work_floors),
+    work_apartments: asArrayOfObjects(safe.work_apartments),
+    work_rooms: asArrayOfObjects(safe.work_rooms),
+  };
+}
+
 function tabButtonClass(active, variant = 'main') {
   if (variant === 'work' || variant === 'warehouse') {
     return active
@@ -115,7 +139,9 @@ export default function Settings({ user }) {
   const [editing, setEditing] = useState(null);
 
   const load = useCallback(() => {
-    settingsApi.catalog().then(setCatalog).catch((e) => setError(e.message));
+    settingsApi.catalog()
+      .then((data) => setCatalog(normalizeCatalog(data)))
+      .catch((e) => setError(e.message));
   }, []);
 
   useEffect(() => {

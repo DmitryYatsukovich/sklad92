@@ -1,8 +1,69 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { attendance as attendanceApi } from '../api';
+import { attendance as attendanceApi, isOfflineQueuedError } from '../api';
+import { usePendingMutations } from '../hooks/usePendingMutations';
+import { withPendingRowClass } from '../lib/actionLog/applyOptimistic';
 
 const WEEKDAYS = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
 const TZ_MSK = 'Europe/Moscow';
+
+function isRowObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function asArrayOfObjects(value) {
+  return Array.isArray(value)
+    ? value.filter((row) => isRowObject(row))
+    : [];
+}
+
+function normalizeTimesheetData(value) {
+  const safe = isRowObject(value) ? value : {};
+  const days = Array.isArray(safe.days)
+    ? safe.days.filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))
+    : [];
+  const employees = asArrayOfObjects(safe.employees).map((emp) => ({
+    ...emp,
+    days: isRowObject(emp.days) ? emp.days : {},
+  }));
+  return {
+    from: typeof safe.from === 'string' ? safe.from : '',
+    to: typeof safe.to === 'string' ? safe.to : '',
+    month: typeof safe.month === 'string' ? safe.month : '',
+    days,
+    employees,
+  };
+}
+
+function parsePendingMutationBody(entry) {
+  if (isRowObject(entry?.body)) return entry.body;
+  const raw = entry?.body;
+  if (typeof raw !== 'string' || !raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return isRowObject(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function buildPendingTimesheetState(entries = []) {
+  const pendingUsers = new Set();
+  const pendingDays = new Set();
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const path = typeof entry?.path === 'string' ? entry.path : '';
+    const method = typeof entry?.method === 'string' ? entry.method.toUpperCase() : '';
+    if (!['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) continue;
+    if (!path.startsWith('/api/attendance/timesheet/')) continue;
+    const body = parsePendingMutationBody(entry);
+    const uid = Number(body.user_id);
+    if (Number.isFinite(uid) && uid > 0) pendingUsers.add(uid);
+    const date = typeof body.date === 'string' ? body.date.slice(0, 10) : '';
+    if (Number.isFinite(uid) && uid > 0 && date) {
+      pendingDays.add(`${uid}|${date}`);
+    }
+  }
+  return { pendingUsers, pendingDays };
+}
 
 function currentMonthValue() {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -504,6 +565,10 @@ function TimesheetRateStepper({
       const res = await attendanceApi.updateTimesheetRates(userId, month, { [field]: next });
       onSaved(userId, res);
     } catch (e) {
+      if (isOfflineQueuedError(e)) {
+        onSaved(userId, { [field]: next, _pending: true });
+        return;
+      }
       onError(e.message);
       setLocal(value != null ? String(value) : '');
     } finally {
@@ -638,8 +703,111 @@ function workedMinutesFromTimes(dateStr, inStr, outStr) {
   return Math.round((b.getTime() - a.getTime()) / 60000);
 }
 
+function sanitizeDayComment(value) {
+  if (value == null || value === '') return null;
+  const s = String(value).trim().slice(0, 2000);
+  return s || null;
+}
+
+function emptyTimesheetCellPending() {
+  return {
+    status: 'empty',
+    worked_minutes: null,
+    manual_worked_minutes: null,
+    manual_minutes_saved: null,
+    worked_hours: null,
+    worked_label: null,
+    cell_label: null,
+    check_in_at: null,
+    check_out_at: null,
+    check_in: null,
+    check_out: null,
+    check_in_by: null,
+    check_out_by: null,
+    edited_by: null,
+    edited_at: null,
+    edited_at_label: null,
+    day_comment: null,
+    has_day_comment: false,
+    _pending: true,
+  };
+}
+
+function buildOptimisticTimesheetPatch(date, prevCell, payload, editorName) {
+  const prev = isRowObject(prevCell) ? prevCell : EMPTY_CELL;
+  if (payload?.clear) return emptyTimesheetCellPending();
+  const hasIn = Object.prototype.hasOwnProperty.call(payload || {}, 'check_in');
+  const hasOut = Object.prototype.hasOwnProperty.call(payload || {}, 'check_out');
+  const hasWorked = Object.prototype.hasOwnProperty.call(payload || {}, 'worked_minutes');
+  const hasComment = Object.prototype.hasOwnProperty.call(payload || {}, 'day_comment');
+
+  const nextCheckIn = hasIn
+    ? (typeof payload.check_in === 'string' && payload.check_in.trim() ? payload.check_in.trim() : null)
+    : cellTimeDisplay(prev, 'in') || null;
+  const nextCheckOut = hasOut
+    ? (typeof payload.check_out === 'string' && payload.check_out.trim() ? payload.check_out.trim() : null)
+    : cellTimeDisplay(prev, 'out') || null;
+  const checkInAt = nextCheckIn ? parseTimeOnDate(date, nextCheckIn)?.toISOString() || null : null;
+  const checkOutAt = nextCheckOut ? parseTimeOnDate(date, nextCheckOut)?.toISOString() || null : null;
+
+  let workedMinutes = prev.worked_minutes != null ? Math.round(Number(prev.worked_minutes)) : null;
+  if (hasWorked) {
+    if (payload.worked_minutes === null || payload.worked_minutes === '') {
+      workedMinutes = null;
+    } else {
+      const n = Math.round(Number(payload.worked_minutes));
+      workedMinutes = Number.isNaN(n) || n < 0 ? null : n;
+    }
+  } else if (checkInAt && checkOutAt) {
+    workedMinutes = workedMinutesFromTimes(date, nextCheckIn, nextCheckOut);
+  } else if (!checkInAt && !checkOutAt) {
+    workedMinutes = null;
+  }
+
+  const comment = hasComment ? sanitizeDayComment(payload.day_comment) : sanitizeDayComment(prev.day_comment);
+  if (!checkInAt && !checkOutAt && workedMinutes == null && !comment) {
+    return emptyTimesheetCellPending();
+  }
+
+  let status = 'empty';
+  if (checkInAt) {
+    status = checkOutAt || (workedMinutes != null && workedMinutes > 0) ? 'ok' : 'partial';
+  } else if (workedMinutes != null || comment) {
+    status = 'ok';
+  }
+  const workedLabel = workedMinutes == null
+    ? null
+    : (workedMinutes <= 0 ? '0 ч' : (formatCompactMinutes(workedMinutes) || '0 ч'));
+  const editor = editorName ? { name: editorName, via: 'manual' } : null;
+  return {
+    ...prev,
+    status,
+    worked_minutes: workedMinutes,
+    manual_worked_minutes: hasWorked ? workedMinutes : prev.manual_worked_minutes ?? null,
+    manual_minutes_saved: hasWorked ? workedMinutes : prev.manual_minutes_saved ?? null,
+    worked_hours: workedMinutes != null ? Math.round((workedMinutes / 60) * 100) / 100 : null,
+    worked_label: workedLabel,
+    cell_label: cellCompactLabel({
+      status,
+      check_in: nextCheckIn,
+      worked_minutes: workedMinutes,
+    }),
+    check_in_at: checkInAt,
+    check_out_at: checkOutAt,
+    check_in: nextCheckIn,
+    check_out: nextCheckOut,
+    check_in_by: hasIn ? editor : prev.check_in_by ?? null,
+    check_out_by: hasOut ? editor : prev.check_out_by ?? null,
+    edited_by: editorName ? { name: editorName } : prev.edited_by ?? null,
+    edited_at: new Date().toISOString(),
+    day_comment: comment,
+    has_day_comment: !!comment,
+    _pending: true,
+  };
+}
+
 function TimesheetDayEditForm({
-  userId, date, cell, onSaved, onError, onReload, onCancel,
+  userId, date, cell, onSaved, onError, onReload, onCancel, editorName,
 }) {
   const [checkIn, setCheckIn] = useState('');
   const [checkOut, setCheckOut] = useState('');
@@ -679,23 +847,27 @@ function TimesheetDayEditForm({
   }, [date, checkIn, checkOut]);
 
   const resetManualHours = async () => {
+    const commentTrim = comment.trim();
+    const payload = (checkIn.trim() || cell.check_in_at)
+      ? {
+        check_in: checkIn.trim() || isoToTimeInput(cell.check_in_at) || null,
+        check_out: checkOut.trim() ? checkOut : null,
+        worked_minutes: null,
+        day_comment: commentTrim || null,
+      }
+      : { clear: true };
     setSaving(true);
     try {
-      let res;
-      const commentTrim = comment.trim();
-      if (checkIn.trim() || cell.check_in_at) {
-        res = await attendanceApi.updateTimesheetDay(userId, date, {
-          check_in: checkIn.trim() || isoToTimeInput(cell.check_in_at) || null,
-          check_out: checkOut.trim() ? checkOut : null,
-          worked_minutes: null,
-          day_comment: commentTrim || null,
-        });
-      } else {
-        res = await attendanceApi.updateTimesheetDay(userId, date, { clear: true });
-      }
+      const res = await attendanceApi.updateTimesheetDay(userId, date, payload);
       onSaved(userId, date, res);
       onReload?.();
     } catch (e) {
+      if (isOfflineQueuedError(e)) {
+        const optimistic = buildOptimisticTimesheetPatch(date, cell, payload, editorName);
+        onSaved(userId, date, optimistic);
+        onReload?.();
+        return;
+      }
       onError(e.message);
     } finally {
       setSaving(false);
@@ -703,12 +875,18 @@ function TimesheetDayEditForm({
   };
 
   const clearDay = async () => {
+    const payload = { clear: true };
     setSaving(true);
     try {
-      const res = await attendanceApi.updateTimesheetDay(userId, date, { clear: true });
+      const res = await attendanceApi.updateTimesheetDay(userId, date, payload);
       onSaved(userId, date, res);
       onReload?.();
     } catch (e) {
+      if (isOfflineQueuedError(e)) {
+        onSaved(userId, date, buildOptimisticTimesheetPatch(date, cell, payload, editorName));
+        onReload?.();
+        return;
+      }
       onError(e.message);
     } finally {
       setSaving(false);
@@ -778,6 +956,12 @@ function TimesheetDayEditForm({
       await onReload?.();
       onCancel?.();
     } catch (e) {
+      if (isOfflineQueuedError(e)) {
+        onSaved(userId, date, buildOptimisticTimesheetPatch(date, cell, payload, editorName));
+        await onReload?.();
+        onCancel?.();
+        return;
+      }
       onError(e.message);
     } finally {
       setSaving(false);
@@ -888,7 +1072,7 @@ function TimesheetDayEditForm({
 }
 
 function TimesheetDayPanel({
-  userId, date, cell, canEdit, onSaved, onError, onReload,
+  userId, date, cell, canEdit, onSaved, onError, onReload, editorName,
 }) {
   const [editing, setEditing] = useState(false);
   const isEmpty = !cell || cell.status === 'empty';
@@ -935,6 +1119,7 @@ function TimesheetDayPanel({
           onError={onError}
           onReload={onReload}
           onCancel={() => setEditing(false)}
+          editorName={editorName}
         />
       )}
     </>
@@ -1046,6 +1231,12 @@ export default function AttendanceAll({ user }) {
   const [candidates, setCandidates] = useState([]);
   const [selectedMemberId, setSelectedMemberId] = useState('');
   const [busy, setBusy] = useState(false);
+  const pendingMutations = usePendingMutations();
+
+  const pendingTimesheet = useMemo(
+    () => buildPendingTimesheetState(pendingMutations),
+    [pendingMutations],
+  );
 
   const load = useCallback(() => {
     const { from, to } = monthToRange(month);
@@ -1054,7 +1245,7 @@ export default function AttendanceAll({ user }) {
     setError('');
     attendanceApi
       .timesheet(from, to)
-      .then(setData)
+      .then((payload) => setData(normalizeTimesheetData(payload)))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [month]);
@@ -1084,7 +1275,7 @@ export default function AttendanceAll({ user }) {
         ...prev,
         employees: prev.employees.map((emp) => {
           if (Number(emp.user_id) !== Number(userId)) return emp;
-          return recalcEmployeeTotals({
+          const next = recalcEmployeeTotals({
             ...emp,
             hourly_rate: patch.hourly_rate !== undefined ? patch.hourly_rate : emp.hourly_rate,
             bonus_rate: patch.bonus_rate !== undefined ? patch.bonus_rate : emp.bonus_rate,
@@ -1093,6 +1284,8 @@ export default function AttendanceAll({ user }) {
             total_earned_all: patch.total_earned_all,
             total_minutes: patch.total_minutes ?? emp.total_minutes,
           });
+          if (patch?._pending) next._pending = true;
+          return next;
         }),
       };
     });
@@ -1100,7 +1293,7 @@ export default function AttendanceAll({ user }) {
 
   const applyDayPatch = useCallback((userId, date, patch) => {
     const uid = Number(userId);
-    const { user_id: _uid, date: _date, ...raw } = patch;
+    const { user_id: _uid, date: _date, ...raw } = isRowObject(patch) ? patch : {};
     const cTrim = raw.day_comment != null ? String(raw.day_comment).trim() : '';
     const dayPatch = {
       ...raw,
@@ -1117,7 +1310,9 @@ export default function AttendanceAll({ user }) {
             ...emp.days,
             [date]: { ...dayPatch },
           };
-          return recalcEmployeeTotals({ ...emp, days });
+          const next = recalcEmployeeTotals({ ...emp, days });
+          if (dayPatch._pending) next._pending = true;
+          return next;
         })
         .filter(employeeStaysInTimesheet);
       return { ...prev, employees };
@@ -1173,6 +1368,43 @@ export default function AttendanceAll({ user }) {
       .catch((e) => setError(e.message));
   };
 
+  const appendPendingMemberToTimesheet = useCallback((candidateId) => {
+    const uid = Number(candidateId);
+    if (!Number.isFinite(uid) || uid <= 0) return;
+    setData((prev) => {
+      if (!prev || !Array.isArray(prev.days)) return prev;
+      if (asArrayOfObjects(prev.employees).some((emp) => Number(emp.user_id) === uid)) return prev;
+      const candidate = candidates.find((row) => Number(row.id) === uid);
+      const baseDays = {};
+      for (const d of prev.days) {
+        baseDays[d] = EMPTY_CELL;
+      }
+      const nextEmployee = {
+        user_id: uid,
+        name: candidate?.name || candidate?.display_name || candidate?.login || `Сотрудник #${uid}`,
+        login: candidate?.login || '',
+        first_name: candidate?.first_name || null,
+        last_name: candidate?.last_name || null,
+        organization_id: candidate?.organization_id || null,
+        organization_name: candidate?.organization_name || null,
+        total_minutes: 0,
+        total_hours: 0,
+        total_label: '0 ч',
+        days: baseDays,
+        hourly_rate: null,
+        bonus_rate: null,
+        earned_amount: null,
+        bonus_amount: null,
+        total_earned_all: null,
+        _pending: true,
+      };
+      return {
+        ...prev,
+        employees: [...asArrayOfObjects(prev.employees), nextEmployee],
+      };
+    });
+  }, [candidates]);
+
   const handleAddMember = async () => {
     if (!selectedMemberId) return;
     setBusy(true);
@@ -1182,6 +1414,11 @@ export default function AttendanceAll({ user }) {
       setShowAddMember(false);
       load();
     } catch (e) {
+      if (isOfflineQueuedError(e)) {
+        appendPendingMemberToTimesheet(selectedMemberId);
+        setShowAddMember(false);
+        return;
+      }
       setError(e.message);
     } finally {
       setBusy(false);
@@ -1295,6 +1532,11 @@ export default function AttendanceAll({ user }) {
         <span><span className="text-zinc-600">·</span> — нет отметки</span>
         {canEditTimes && <span>Клик по ячейке — приход и уход</span>}
       </div>
+      {(pendingTimesheet.pendingUsers.size > 0 || pendingTimesheet.pendingDays.size > 0) && (
+        <p className="text-2xs text-amber-400/90 border border-amber-500/30 rounded px-2 py-1 bg-amber-500/10">
+          Несинхронизированные изменения в табеле отображаются тускло и отправятся на сервер при появлении сети.
+        </p>
+      )}
 
       {loading && !data ? (
         <p className="text-zinc-500 text-xs">Загрузка табеля…</p>
@@ -1398,8 +1640,15 @@ export default function AttendanceAll({ user }) {
               </tr>
             </thead>
             <tbody>
-              {group.employees.map((emp) => (
-                <tr key={emp.user_id} className="border-b border-white/5 hover:bg-white/[0.02]">
+              {group.employees.map((emp) => {
+                const userIdNum = Number(emp.user_id);
+                const rowPending = pendingTimesheet.pendingUsers.has(userIdNum) || emp._pending;
+                return (
+                <tr
+                  key={emp.user_id}
+                  className={withPendingRowClass('border-b border-white/5 hover:bg-white/[0.02]', { _pending: rowPending })}
+                  title={rowPending ? 'Ожидает отправки на сервер' : undefined}
+                >
                   <td
                     className="timesheet-name text-zinc-200 sticky left-0 bg-surface-900 border-r border-white/10 font-medium truncate"
                     title={emp.name}
@@ -1414,12 +1663,15 @@ export default function AttendanceAll({ user }) {
                       {orgGroupLabel(emp.organization_name)}
                     </td>
                   )}
-                  {dayMeta.map(({ date, isWeekend }) => (
+                  {dayMeta.map(({ date, isWeekend }) => {
+                    const cellPending = pendingTimesheet.pendingDays.has(`${userIdNum}|${date}`);
+                    return (
                     <td
                       key={date}
-                      className={`timesheet-day tabular-nums ${
-                        isWeekend ? 'bg-white/[0.02]' : ''
-                      }`}
+                      className={withPendingRowClass(
+                        `timesheet-day tabular-nums ${isWeekend ? 'bg-white/[0.02]' : ''}`,
+                        { _pending: rowPending || cellPending },
+                      )}
                     >
                       <TimesheetCell
                         cell={emp.days?.[date]}
@@ -1439,7 +1691,8 @@ export default function AttendanceAll({ user }) {
                         }}
                       />
                     </td>
-                  ))}
+                    );
+                  })}
                   <td className="timesheet-total text-white font-semibold tabular-nums border-l border-white/10">
                     {formatCompactMinutes(emp.total_minutes) || '0'}
                   </td>
@@ -1481,7 +1734,8 @@ export default function AttendanceAll({ user }) {
                     </>
                   )}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
               </div>
@@ -1530,6 +1784,7 @@ export default function AttendanceAll({ user }) {
                   onSaved={applyDayPatch}
                   onError={setError}
                   onReload={load}
+                  editorName={user?.display_name || user?.login || 'Вы'}
                 />
               </div>
 
