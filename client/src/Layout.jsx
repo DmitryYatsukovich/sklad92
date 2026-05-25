@@ -65,14 +65,6 @@ export default function Layout({ user, onLogout }) {
 
   useEffect(() => {
     updateCacheSizeLabel();
-    const onCacheUpdated = () => {
-      import('./lib/offlineCache/cacheSize.js').then((m) => {
-        m.invalidateOfflineCacheSizeCache?.();
-        updateCacheSizeLabel();
-      });
-    };
-    window.addEventListener('offline-cache-updated', onCacheUpdated);
-    return () => window.removeEventListener('offline-cache-updated', onCacheUpdated);
   }, [updateCacheSizeLabel]);
 
   useEffect(() => {
@@ -122,7 +114,6 @@ export default function Layout({ user, onLogout }) {
     if (serverOnline && isQuickDeviceEnabled()) {
       const t = setTimeout(() => {
         refreshOfflineCacheIfNeeded(user, { silent: true })
-          .then(() => updateCacheSizeLabel())
           .catch(() => {});
       }, 400);
       return () => clearTimeout(t);
@@ -174,22 +165,17 @@ export default function Layout({ user, onLogout }) {
                     : 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/30'
                 }`}
                 title={
-                  isQuickDeviceEnabled() && cacheSizeLabel
-                    ? `${isAppOnline ? 'Онлайн' : 'Офлайн'}. Кэш на устройстве: ${cacheSizeLabel}`
-                    : !networkOnline
-                      ? 'Нет интернета на устройстве'
-                      : !serverOnline
-                        ? 'Интернет есть, сервер недоступен — работа из кэша'
-                        : 'Связь с сервером есть'
+                  !networkOnline
+                    ? 'Нет интернета на устройстве'
+                    : !serverOnline
+                      ? 'Интернет есть, сервер недоступен — работа из кэша'
+                      : 'Связь с сервером есть'
                 }
               >
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isAppOnline ? 'bg-emerald-400' : 'bg-amber-400'}`} />
                 <span>{isAppOnline ? 'Онлайн' : 'Офлайн'}</span>
                 {isQuickDeviceEnabled() && (
-                  <>
-                    <span className="opacity-50">·</span>
-                    <span className="font-normal">{cacheSizeLabel ?? '…'}</span>
-                  </>
+                  <span className="font-normal">{cacheSizeLabel ?? '…'}</span>
                 )}
               </span>
               <span className="hidden md:inline text-2xs text-zinc-400 max-w-[5rem] truncate">
