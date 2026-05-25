@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { attendance as attendanceApi } from '../api';
+import { attendance as attendanceApi, isOfflineQueuedError } from '../api';
 import { recordAction } from '../lib/actionLog';
 import { loadFaceModels, captureFaceDescriptor } from '../lib/faceClient';
 import FaceCamera from '../components/FaceCamera';
@@ -161,6 +161,10 @@ export default function FaceCheckIn({ user }) {
       }, { synced: true }).catch(() => {});
       loadVisits();
     } catch (e) {
+      if (isOfflineQueuedError(e)) {
+        setStatus('Отметка сохранена офлайн и будет отправлена при подключении.', 'info');
+        return;
+      }
       setStatus(e.message || 'Ошибка', 'error');
     } finally {
       setBusy(false);

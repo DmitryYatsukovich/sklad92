@@ -132,6 +132,14 @@ export function buildActionFromRequest(path, method, bodyText) {
       payload: attendancePayload(body),
     };
   }
+  if (path === '/api/attendance/scan' && m === 'POST') {
+    return {
+      kind: 'attendance_face_scan',
+      title: 'Отметка по лицу',
+      description: 'Оффлайн-отметка: ожидание синхронизации',
+      payload: attendancePayload(body),
+    };
+  }
   if (path === '/api/attendance/timesheet/day' && m === 'PATCH') {
     return {
       kind: 'attendance_timesheet_day',
@@ -204,7 +212,6 @@ const OFFLINE_SKIP = [
   '/export',
   '/qr-pdf',
   '/register-face',
-  '/scan',
   '/timesheet/import',
 ];
 
@@ -229,6 +236,7 @@ export function shouldQueueOfflineMutation(path, method) {
   if (path.startsWith('/api/materials')) return true;
   if (path.startsWith('/api/reports/production/issuances/')) return true;
   if (path.startsWith('/api/attendance/timesheet/')) return true;
+  if (path === '/api/attendance/scan') return true;
   return false;
 }
 
