@@ -142,37 +142,6 @@ export default function App() {
   }, [hasPendingServerLogout, setPendingServerLogout]);
 
   useEffect(() => {
-    if (!STRICT_LOGOUT_ON_CLOSE) return undefined;
-    const onTerminate = () => {
-      markActiveSession(false);
-      setPendingServerLogout(true);
-      clearOfflineSession().catch(() => {});
-      const body = '{}';
-      try {
-        if (navigator.sendBeacon) {
-          const blob = new Blob([body], { type: 'application/json' });
-          navigator.sendBeacon('/api/auth/logout', blob);
-        }
-      } catch {
-        /* ignore */
-      }
-      fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'include',
-        keepalive: true,
-        headers: { 'Content-Type': 'application/json' },
-        body,
-      }).catch(() => {});
-    };
-    window.addEventListener('pagehide', onTerminate);
-    window.addEventListener('beforeunload', onTerminate);
-    return () => {
-      window.removeEventListener('pagehide', onTerminate);
-      window.removeEventListener('beforeunload', onTerminate);
-    };
-  }, [markActiveSession, setPendingServerLogout]);
-
-  useEffect(() => {
     if (!user) return undefined;
     setActionLogUser(user);
     if (isQuickDeviceEnabled()) {
