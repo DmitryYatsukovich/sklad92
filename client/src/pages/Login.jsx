@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { auth } from '../api';
 import {
-  getQuickDeviceEnabledFromStorage,
   setQuickDeviceEnabled,
   setCachedUser as persistCachedUser,
   getCachedUser,
@@ -19,7 +18,6 @@ export default function Login({ onLogin }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [quickDevice, setQuickDevice] = useState(() => getQuickDeviceEnabledFromStorage());
   const [prefetchStatus, setPrefetchStatus] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [offlineMode, setOfflineMode] = useState(!navigator.onLine);
@@ -35,14 +33,14 @@ export default function Login({ onLogin }) {
   }, []);
 
   useEffect(() => {
-    if (!quickDevice && !isQuickDeviceEnabled()) return;
+    if (!isQuickDeviceEnabled()) return;
     getCachedUser().then((u) => {
       if (u && !login) setLogin(u.login || '');
     });
-  }, [quickDevice, login]);
+  }, [login]);
 
   const finishLogin = async (user, { stats, withOfflineSession = false } = {}) => {
-    if (withOfflineSession || quickDevice || isQuickDeviceEnabled()) {
+    if (withOfflineSession || isQuickDeviceEnabled()) {
       await setOfflineSession(user);
     }
     if (stats) {
@@ -64,41 +62,40 @@ export default function Login({ onLogin }) {
     setLoading(true);
     try {
       if (!navigator.onLine) {
-        if (!quickDevice && !isQuickDeviceEnabled()) {
-          throw new Error('Нет сети. Включите «Устройство для быстрой работы» и сначала войдите онлайн.');
+        if (!isQuickDeviceEnabled()) {
+          throw new Error('Нет сети. Подключите интернет и войдите онлайн, чтобы загрузить данные на устройство.');
         }
         const ok = await verifyOfflinePassword(loginNorm, password);
         if (!ok) throw new Error('Неверный логин или пароль (офлайн-проверка)');
         const user = await getCachedUser();
         if (!user || user.login !== loginNorm) {
-          throw new Error('Нет данных пользователя в кэше. Войдите онлайн с включённым «Устройство для быстрой работы».');
+          throw new Error('Нет данных пользователя в кэше. Войдите онлайн и дождитесь полной загрузки данных.');
         }
         await finishLogin(user, { withOfflineSession: true });
         return;
       }
 
       const { user } = await auth.login(loginNorm, password);
-      setQuickDeviceEnabled(quickDevice);
-
-      if (quickDevice) {
-        await persistCachedUser(user);
-        await saveOfflineCredentials(loginNorm, password);
-        setPrefetchStatus('Загрузка данных на устройство…');
-        const result = await prefetchOfflineData(user, {
+      // Всегда включаем офлайн-кэш устройства: вход онлайн = полная предзагрузка данных.
+      setQuickDeviceEnabled(true);
+      await persistCachedUser(user);
+      await saveOfflineCredentials(loginNorm, password);
+      setPrefetchStatus('Загрузка данных на устройство…');
+      let result = await prefetchOfflineData(user, {
+        onProgress: (msg) => setPrefetchStatus(msg || 'Загрузка…'),
+      });
+      if (!result.ok && navigator.onLine) {
+        result = await prefetchOfflineData(user, {
           onProgress: (msg) => setPrefetchStatus(msg || 'Загрузка…'),
         });
-        if (!result.ok) {
-          setError(result.error || 'Не удалось сохранить все данные в кэш');
-          await finishLogin(user, { withOfflineSession: true });
-          onLogin(user);
-          return;
-        }
-        setSuccessMsg(formatPrefetchStatsMessage(result.stats));
-        await finishLogin(user, { stats: result.stats, withOfflineSession: true });
+      }
+      if (!result.ok) {
+        setError(result.error || 'Не удалось сохранить все данные в кэш устройства');
+        await finishLogin(user, { withOfflineSession: true });
         return;
       }
-
-      await finishLogin(user, { withOfflineSession: false });
+      setSuccessMsg(formatPrefetchStatsMessage(result.stats));
+      await finishLogin(user, { stats: result.stats, withOfflineSession: true });
     } catch (err) {
       const msg = err.message || 'Ошибка входа';
       setError(
@@ -160,18 +157,9 @@ export default function Login({ onLogin }) {
               />
             </div>
             {!offlineMode && (
-              <label className="flex items-start gap-2 p-2 rounded-lg border border-white/10 bg-white/[0.02] cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={quickDevice}
-                  onChange={(e) => setQuickDevice(e.target.checked)}
-                  className="mt-0.5 rounded border-zinc-600"
-                />
-                <span className="text-xs text-zinc-300">
-                  <span className="block text-white font-medium">Устройство для быстрой работы</span>
-                  При первом входе онлайн загрузить все доступные данные в кэш устройства
-                </span>
-              </label>
+              <p className="text-2xs text-zinc-300 border border-white/10 rounded px-2 py-1.5 bg-white/[0.02]">
+                При входе онлайн приложение автоматически загружает и сохраняет все доступные данные на устройство для офлайн-работы.
+              </p>
             )}
             {prefetchStatus && (
               <p className="text-2xs text-zinc-400 border border-white/10 rounded px-2 py-1.5">{prefetchStatus}</p>

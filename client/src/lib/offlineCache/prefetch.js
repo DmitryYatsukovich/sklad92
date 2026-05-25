@@ -22,9 +22,21 @@ export async function prefetchOfflineData(user, { onProgress } = {}) {
   const uid = user.id;
   const report = (msg) => onProgress?.(msg);
   const counts = {};
+  const canReadSettingsCatalog = !!(
+    user.role === 'admin'
+    || user.can_warehouse
+    || user.can_settings_warehouses
+    || user.can_settings_categories
+    || user.can_settings_work
+    || user.can_users
+    || user.can_roles
+  );
+  const needMaterialsDataset = !!(user.can_warehouse || user.can_issuance || user.can_production);
   const {
     materials,
     settings,
+    users,
+    roles,
     operations,
     reports,
     attendance,
@@ -35,50 +47,55 @@ export async function prefetchOfflineData(user, { onProgress } = {}) {
     await setCacheMeta({ prefetching: true, prefetchError: null });
     report('Справочники…');
 
-    if (user.can_warehouse) {
+    if (canReadSettingsCatalog) {
+      const catalog = await settings.catalog();
+      counts.catalog = catalog ? 1 : 0;
+      await save('/api/settings/catalog', catalog, uid);
+    }
+
+    if (needMaterialsDataset) {
       report('Материалы…');
-      const [list, catalog, issueUsers] = await Promise.all([
+      const [list, issueUsers] = await Promise.all([
         materials.list(),
-        settings.catalog(),
         materials.usersForIssuance(),
       ]);
       counts.materials = list?.length ?? 0;
-      counts.catalog = catalog ? 1 : 0;
       counts.issueUsers = issueUsers?.length ?? 0;
       await save('/api/materials', list, uid);
-      await save('/api/settings/catalog', catalog, uid);
       await save('/api/materials/users-for-issuance', issueUsers, uid);
 
-      report('QR и части материалов…');
-      const codes = new Set();
-      const partParents = [];
-      for (const m of list) {
-        const code = m.material_code || m.code;
-        if (code) codes.add(String(code).trim());
-        if (Number(m.parts_count) > 0) partParents.push(m);
-      }
-      let qrSaved = 0;
-      for (const code of codes) {
-        try {
-          const row = await materials.byCode(code);
-          await save(`/api/materials/by-code/${encodeURIComponent(code)}`, row, uid);
-          qrSaved += 1;
-        } catch {
-          /* skip */
+      if (user.can_warehouse) {
+        report('QR и части материалов…');
+        const codes = new Set();
+        const partParents = [];
+        for (const m of list) {
+          const code = m.material_code || m.code;
+          if (code) codes.add(String(code).trim());
+          if (Number(m.parts_count) > 0) partParents.push(m);
         }
-      }
-      counts.qrCodes = qrSaved;
-      let partsSaved = 0;
-      for (const m of partParents) {
-        try {
-          const parts = await materials.getParts(m.id);
-          await save(`/api/materials/${m.id}/parts`, parts, uid);
-          partsSaved += 1;
-        } catch {
-          /* skip */
+        let qrSaved = 0;
+        for (const code of codes) {
+          try {
+            const row = await materials.byCode(code);
+            await save(`/api/materials/by-code/${encodeURIComponent(code)}`, row, uid);
+            qrSaved += 1;
+          } catch {
+            /* skip */
+          }
         }
+        counts.qrCodes = qrSaved;
+        let partsSaved = 0;
+        for (const m of partParents) {
+          try {
+            const parts = await materials.getParts(m.id);
+            await save(`/api/materials/${m.id}/parts`, parts, uid);
+            partsSaved += 1;
+          } catch {
+            /* skip */
+          }
+        }
+        counts.materialParts = partsSaved;
       }
-      counts.materialParts = partsSaved;
     }
 
     if (user.can_issuance) {
@@ -112,12 +129,48 @@ export async function prefetchOfflineData(user, { onProgress } = {}) {
       await save(path, sheet, uid);
     }
 
+    if (user.can_face) {
+      report('Посещения (лицо)…');
+      const path = '/api/attendance/my?limit=90';
+      const visits = await attendance.my(90);
+      counts.faceVisits = Array.isArray(visits) ? visits.length : 0;
+      await save(path, visits, uid);
+    }
+
     if (user.can_actions) {
       report('Журнал действий…');
       const path = '/api/actions?limit=400';
       const log = await actions.list(400);
       counts.actions = log?.items?.length ?? 0;
       await save(path, log, uid);
+    }
+
+    if (user.can_users || user.role === 'admin') {
+      report('Пользователи…');
+      const usersList = await users.list();
+      counts.users = Array.isArray(usersList) ? usersList.length : 0;
+      await save('/api/users', usersList, uid);
+
+      const orgs = await settings.organizations.list().catch(() => []);
+      counts.organizations = Array.isArray(orgs) ? orgs.length : 0;
+      await save('/api/settings/organizations', orgs, uid);
+    } else if (user.can_settings_organizations) {
+      report('Организации…');
+      const orgs = await settings.organizations.list();
+      counts.organizations = Array.isArray(orgs) ? orgs.length : 0;
+      await save('/api/settings/organizations', orgs, uid);
+    }
+
+    if (user.can_roles || user.role === 'admin') {
+      report('Роли…');
+      const [rolesList, perms] = await Promise.all([
+        roles.list(),
+        roles.permissions(),
+      ]);
+      counts.roles = Array.isArray(rolesList) ? rolesList.length : 0;
+      counts.rolePerms = Array.isArray(perms) ? perms.length : 0;
+      await save('/api/roles', rolesList, uid);
+      await save('/api/roles/permissions', perms, uid);
     }
 
     const storage = await measureOfflineCacheSize();
