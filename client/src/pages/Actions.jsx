@@ -74,6 +74,10 @@ function mergeActions(local, serverItems) {
   );
 }
 
+function isConflictRow(row) {
+  return row?.syncConflictCode === 'CONFLICT_SERVER_WINS';
+}
+
 function canViewAllActions(user) {
   return user?.role === 'admin' || !!user?.can_actions_all;
 }
@@ -239,9 +243,20 @@ export default function Actions({ user }) {
                   {row.description ? (
                     <div className="text-2xs text-zinc-500 mt-0.5 line-clamp-2">{row.description}</div>
                   ) : null}
+                  {isConflictRow(row) ? (
+                    <div className="mt-1 inline-flex items-center gap-1 text-2xs text-red-300 bg-red-500/10 border border-red-500/30 rounded px-1.5 py-0.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-400" aria-hidden />
+                      Изменение не применено: на сервере более новая версия
+                    </div>
+                  ) : null}
                 </td>
                 <td>
-                  {row.synced ? (
+                  {isConflictRow(row) ? (
+                    <span className="inline-flex items-center gap-1 text-2xs text-red-300">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-400" aria-hidden />
+                      Конфликт
+                    </span>
+                  ) : row.synced ? (
                     <span className="inline-flex items-center gap-1 text-2xs text-emerald-400/90">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" aria-hidden />
                       Загружено

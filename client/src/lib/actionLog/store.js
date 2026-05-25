@@ -25,8 +25,29 @@ export async function markActionsSynced(clientIds) {
   await Promise.all(
     all
       .filter((a) => set.has(a.clientId))
-      .map((a) => idbPut('actions', { ...a, synced: true })),
+      .map((a) => idbPut('actions', {
+        ...a,
+        synced: true,
+        syncConflictCode: null,
+        syncConflictMessage: null,
+        syncConflictAt: null,
+        syncConflictServer: null,
+      })),
   );
+}
+
+export async function markActionConflict(clientId, { code, message, server } = {}) {
+  if (!clientId) return;
+  const row = await idbGet('actions', clientId);
+  if (!row) return;
+  await idbPut('actions', {
+    ...row,
+    synced: true,
+    syncConflictCode: code || 'CONFLICT_SERVER_WINS',
+    syncConflictMessage: message || 'Изменение не применено: на сервере более новая версия',
+    syncConflictAt: new Date().toISOString(),
+    syncConflictServer: server || null,
+  });
 }
 
 export async function listPendingMutations() {

@@ -1,6 +1,7 @@
 import {
   saveLocalAction,
   markActionsSynced,
+  markActionConflict,
   listPendingMutations,
   addPendingMutation,
   removePendingMutation,
@@ -288,7 +289,11 @@ async function replayMutations() {
       if (isServerWinsConflict(e)) {
         await removePendingMutation(item.id);
         if (item.actionClientId) {
-          await markActionsSynced([item.actionClientId]);
+          await markActionConflict(item.actionClientId, {
+            code: e.code || 'CONFLICT_SERVER_WINS',
+            message: 'Изменение не применено: на сервере более новая версия',
+            server: e.payload?.server || null,
+          });
         }
         continue;
       }
