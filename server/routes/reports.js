@@ -2,6 +2,7 @@ import { Router } from 'express';
 import pool from '../db/pool.js';
 import { requireAuth, loadUser, requirePermission, requireAdmin } from '../middleware/auth.js';
 import { logProductionConfirmation } from '../lib/production-confirmation-log.js';
+import { logQuantityChange } from '../lib/material-quantity-log.js';
 import {
   formatWorkLocationLabel,
   formatWorkLocationFromSelection,
@@ -359,6 +360,75 @@ router.get('/production', async (req, res) => {
   });
 
   res.json(rows);
+});
+
+router.delete('/production', requireAdmin, async (req, res) => {
+  const from = req.query.from || '';
+  const to = req.query.to || '';
+  if (!from || !to) {
+    return res.status(400).json({ error: 'Укажите период: from и to (YYYY-MM-DD)' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: issuances } = await client.query(
+      `SELECT id, material_id, quantity, returned_quantity
+       FROM issuances
+       WHERE issued_at::date >= $1::date AND issued_at::date <= $2::date
+       FOR UPDATE`,
+      [from, to],
+    );
+
+    if (!issuances.length) {
+      await client.query('COMMIT');
+      return res.json({ ok: true, deleted: 0, restored: 0 });
+    }
+
+    const restoreByMaterial = new Map();
+    const issuanceIds = [];
+    for (const iss of issuances) {
+      issuanceIds.push(iss.id);
+      const issued = parseFloat(iss.quantity) || 0;
+      const returned = parseFloat(iss.returned_quantity || 0) || 0;
+      const restore = issued - returned;
+      if (restore <= 1e-9) continue;
+      restoreByMaterial.set(
+        iss.material_id,
+        (restoreByMaterial.get(iss.material_id) || 0) + restore,
+      );
+    }
+
+    let restored = 0;
+    for (const [materialId, delta] of restoreByMaterial.entries()) {
+      const upd = await client.query(
+        `UPDATE materials SET quantity = quantity + $1, updated_at = NOW()
+         WHERE id = $2 RETURNING quantity`,
+        [delta, materialId],
+      );
+      if (!upd.rowCount) continue;
+      const qtyAfter = parseFloat(upd.rows[0].quantity);
+      restored += delta;
+      await logQuantityChange(client, {
+        materialId,
+        userId: req.session.userId,
+        delta,
+        quantityAfter: qtyAfter,
+        kind: 'production_delete_all',
+        note: `Удаление выработки за период ${from}..${to}`,
+      });
+    }
+
+    await client.query('DELETE FROM issuances WHERE id = ANY($1::int[])', [issuanceIds]);
+    await client.query('COMMIT');
+    res.json({ ok: true, deleted: issuanceIds.length, restored });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('DELETE /reports/production:', e.message);
+    res.status(500).json({ error: e.message || 'Ошибка удаления выработки' });
+  } finally {
+    client.release();
+  }
 });
 
 router.get('/production/locations', async (_req, res) => {

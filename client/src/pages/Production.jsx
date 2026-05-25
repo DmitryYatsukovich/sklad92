@@ -83,6 +83,20 @@ function enrichRow(r) {
   };
 }
 
+function normalizeProductionRows(data) {
+  if (!Array.isArray(data)) return [];
+  return data
+    .filter((row) => Number(row?.issuance_id) > 0)
+    .map((row) => {
+      const issued = Number(row.total_issued) || 0;
+      const returned = Number(row.total_returned) || 0;
+      return {
+        ...row,
+        produced: Math.max(issued - returned, 0),
+      };
+    });
+}
+
 const EMPTY_LOCATIONS = {
   objects: [],
   work_entrances: [],
@@ -133,6 +147,7 @@ export default function Production({ user }) {
   const [sortBy, setSortBy] = useState('issued_at');
   const [sortDir, setSortDir] = useState('desc');
   const [confirmingId, setConfirmingId] = useState(null);
+  const [deletingAll, setDeletingAll] = useState(false);
   const [locationModal, setLocationModal] = useState(null);
   const [historyRow, setHistoryRow] = useState(null);
   const [locations, setLocations] = useState(EMPTY_LOCATIONS);
@@ -161,7 +176,7 @@ export default function Production({ user }) {
     reports
       .production(periodFrom, periodTo)
       .then((data) => {
-        const mapped = data.map(enrichRow);
+        const mapped = normalizeProductionRows(data).map(enrichRow);
         setRows(mapped);
         setPageCache(productionCacheKey, mapped);
       })
@@ -188,7 +203,7 @@ export default function Production({ user }) {
         m.getCachedResponse(productionOfflinePath)
       )).then((cached) => {
         if (cancelled || !Array.isArray(cached) || !cached.length) return;
-        const mapped = cached.map(enrichRow);
+        const mapped = normalizeProductionRows(cached).map(enrichRow);
         setRows(mapped);
         setPageCache(productionCacheKey, mapped);
         setLoading(false);
@@ -419,6 +434,32 @@ export default function Production({ user }) {
     }
   };
 
+  const handleDeleteAllProduction = async () => {
+    if (!isAdmin) return;
+    if (!displayRows.length) {
+      setError('Нет выработки для удаления в выбранном периоде');
+      return;
+    }
+    const ok = window.confirm(
+      `Удалить всю выработку за период ${periodFrom} — ${periodTo}? `
+      + `Будут удалены все выдачи в этом периоде (${displayRows.length}), остатки вернутся на склад.`,
+    );
+    if (!ok) return;
+
+    setDeletingAll(true);
+    setError('');
+    try {
+      await reports.deleteAllProduction(periodFrom, periodTo);
+      setHistoryRow(null);
+      setLocationModal(null);
+      load();
+    } catch (e) {
+      setError(e.message || 'Ошибка удаления выработки');
+    } finally {
+      setDeletingAll(false);
+    }
+  };
+
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -434,6 +475,16 @@ export default function Production({ user }) {
           <span className="text-2xs text-zinc-500">
             {hasActiveFilters ? `${sortedList.length}/${displayRows.length}` : displayRows.length}
           </span>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={handleDeleteAllProduction}
+              disabled={deletingAll || !displayRows.length}
+              className="btn-ghost text-2xs text-red-400 hover:text-red-300 disabled:text-zinc-600"
+            >
+              {deletingAll ? 'Удаление…' : 'Удалить все'}
+            </button>
+          )}
           <button type="button" onClick={load} className="btn-ghost text-2xs">
             Обновить
           </button>

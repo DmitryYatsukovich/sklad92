@@ -383,6 +383,10 @@ export const operations = {
 
 export const reports = {
   production: (from, to) => request(`/api/reports/production?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+  deleteAllProduction: (from, to) =>
+    request(`/api/reports/production?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, {
+      method: 'DELETE',
+    }),
   productionHistory: (queryString) => request(`/api/reports/production/history?${queryString}`),
   productionLocations: () => request('/api/reports/production/locations'),
   addWorkEntrance: (body) =>
