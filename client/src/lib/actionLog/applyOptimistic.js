@@ -19,6 +19,10 @@ export function withPendingRowClass(baseClass, row) {
   return `${baseClass} ${PENDING_ROW_CLASS}`.trim();
 }
 
+function isRowObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
 function parseBody(bodyText) {
   if (!bodyText) return {};
   try {
@@ -118,21 +122,21 @@ export async function loadPendingEntries() {
 function prepareMaterialsBase(materials) {
   const source = Array.isArray(materials) ? materials : [];
   return source
-    .filter((m) => !isTempMaterialId(m.id))
+    .filter((m) => isRowObject(m) && !isTempMaterialId(m.id))
     .map(stripPendingMeta);
 }
 
 function prepareIssuancesBase(issuances) {
   const source = Array.isArray(issuances) ? issuances : [];
   return source
-    .filter((i) => !isTempIssuanceId(i.id))
+    .filter((i) => isRowObject(i) && !isTempIssuanceId(i.id))
     .map(stripPendingMeta);
 }
 
 function prepareProductionBase(rows) {
   const source = Array.isArray(rows) ? rows : [];
   return source
-    .filter((r) => !isTempIssuanceId(r.issuance_id))
+    .filter((r) => isRowObject(r) && !isTempIssuanceId(r.issuance_id))
     .map(stripPendingMeta);
 }
 
@@ -145,6 +149,7 @@ export function applyPendingToMaterials(materials, entries, ctx = {}) {
   const hidden = new Set();
 
   for (const entry of pending) {
+    if (!isRowObject(entry)) continue;
     const { kind, body, path, method } = entry;
     const meta = entry.meta || {};
     const payload = meta.payload || body;
@@ -238,6 +243,7 @@ export function applyPendingToIssuances(issuances, entries, ctx = {}) {
   const removed = new Set();
 
   for (const entry of pending) {
+    if (!isRowObject(entry)) continue;
     const { kind, body, path, method } = entry;
     const meta = entry.meta || {};
     const payload = meta.payload || body;
@@ -350,6 +356,7 @@ export function applyPendingToProduction(rows, entries, ctx = {}) {
   const removed = new Set();
 
   for (const entry of pending) {
+    if (!isRowObject(entry)) continue;
     const { kind, body, path, method } = entry;
     const meta = entry.meta || {};
     const payload = meta.payload || body;

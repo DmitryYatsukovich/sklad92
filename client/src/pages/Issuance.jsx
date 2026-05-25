@@ -54,6 +54,12 @@ function formatSumQty(n) {
   return x.toLocaleString('ru-RU', { maximumFractionDigits: 4 });
 }
 
+function asArrayOfObjects(value) {
+  return Array.isArray(value)
+    ? value.filter((row) => row && typeof row === 'object' && !Array.isArray(row))
+    : [];
+}
+
 function remainingQty(i) {
   return parseFloat(i.quantity) - parseFloat(i.returned_quantity || 0);
 }
@@ -122,7 +128,7 @@ export default function Issuance({ user }) {
 
   const materialPrices = useMemo(() => {
     const map = new Map();
-    for (const m of materials) {
+    for (const m of asArrayOfObjects(materials)) {
       map.set(m.id, {
         price: Number(m.price ?? 0),
         production_price: Number(m.production_price ?? 0),
@@ -133,9 +139,9 @@ export default function Issuance({ user }) {
 
   const applyBundle = useCallback((bundle) => {
     if (!bundle) return;
-    setIssuances(bundle.issuances);
-    setMaterials(bundle.materials);
-    setIssueUsers(bundle.issueUsers);
+    setIssuances(asArrayOfObjects(bundle.issuances));
+    setMaterials(asArrayOfObjects(bundle.materials));
+    setIssueUsers(asArrayOfObjects(bundle.issueUsers));
   }, []);
 
   const load = useCallback((silent = false) => {
@@ -147,9 +153,9 @@ export default function Issuance({ user }) {
     ])
       .then(([iss, mats, users]) => {
         const bundle = {
-          issuances: Array.isArray(iss) ? iss : [],
-          materials: Array.isArray(mats) ? mats : [],
-          issueUsers: Array.isArray(users) ? users : [],
+          issuances: asArrayOfObjects(iss),
+          materials: asArrayOfObjects(mats),
+          issueUsers: asArrayOfObjects(users),
         };
         setPageCache('issuance:bundle', bundle);
         applyBundle(bundle);
@@ -171,8 +177,10 @@ export default function Issuance({ user }) {
         import('../lib/offlineCache/store.js').then((m) => m.getCachedResponse('/api/materials')),
       ]).then(([iss, mats]) => {
         if (cancelled) return;
-        if (Array.isArray(iss) && iss.length) setIssuances(iss);
-        if (Array.isArray(mats) && mats.length) setMaterials(mats);
+        const safeIss = asArrayOfObjects(iss);
+        const safeMats = asArrayOfObjects(mats);
+        if (safeIss.length) setIssuances(safeIss);
+        if (safeMats.length) setMaterials(safeMats);
         if (Array.isArray(iss) || Array.isArray(mats)) setLoading(false);
       });
     }

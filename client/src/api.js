@@ -27,6 +27,38 @@ export function isOfflineQueuedError(err) {
 const base = '';
 const REQUEST_TIMEOUT = 25000;
 
+function isObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeListPayload(value) {
+  if (Array.isArray(value)) return value.filter((item) => isObject(item));
+  if (isObject(value)) {
+    if (Array.isArray(value.items)) return normalizeListPayload(value.items);
+    if (Array.isArray(value.list)) return normalizeListPayload(value.list);
+    if (Array.isArray(value.data)) return normalizeListPayload(value.data);
+  }
+  return [];
+}
+
+function normalizeOfflinePayload(path, value) {
+  if (path === '/api/operations/issuances') return normalizeListPayload(value);
+  if (path === '/api/materials') return normalizeListPayload(value);
+  if (path === '/api/materials/users-for-issuance') return normalizeListPayload(value);
+  if (path.startsWith('/api/reports/production?')) return normalizeListPayload(value);
+  if (path === '/api/reports/production/locations') {
+    const safe = isObject(value) ? value : {};
+    return {
+      objects: Array.isArray(safe.objects) ? safe.objects : [],
+      work_entrances: Array.isArray(safe.work_entrances) ? safe.work_entrances : [],
+      work_floors: Array.isArray(safe.work_floors) ? safe.work_floors : [],
+      work_apartments: Array.isArray(safe.work_apartments) ? safe.work_apartments : [],
+      work_rooms: Array.isArray(safe.work_rooms) ? safe.work_rooms : [],
+    };
+  }
+  return value;
+}
+
 async function fetchWithTimeout(url, options = {}, timeout = REQUEST_TIMEOUT) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
@@ -43,10 +75,10 @@ async function fetchWithTimeout(url, options = {}, timeout = REQUEST_TIMEOUT) {
 
 async function readFromOfflineCache(path) {
   const cached = await getCachedResponse(path);
-  if (cached != null) return cached;
+  if (cached != null) return normalizeOfflinePayload(path, cached);
   const user = await getCachedUser().catch(() => null);
   const datasetFallback = await getOfflineResponseForPath(path, user);
-  if (datasetFallback != null) return datasetFallback;
+  if (datasetFallback != null) return normalizeOfflinePayload(path, datasetFallback);
   return null;
 }
 
