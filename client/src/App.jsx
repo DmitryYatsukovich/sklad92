@@ -9,6 +9,7 @@ import RecoverableErrorBoundary from './components/RecoverableErrorBoundary.jsx'
 import { setActionLogUser, initActionLogSync } from './lib/actionLog';
 import {
   isQuickDeviceEnabled,
+  setQuickDeviceEnabled,
   getCachedUser,
   hasValidOfflineSession,
   clearOfflineSession,
@@ -109,10 +110,15 @@ export default function App() {
       try {
         const { user: u } = await auth.me();
         if (!cancelled) {
+          if (u) {
+            setQuickDeviceEnabled(true);
+          }
           setUser(u);
-          if (u && isQuickDeviceEnabled()) {
+          if (u) {
             await setOfflineSession(u);
-            if (navigator.onLine) refreshOfflineCacheIfNeeded(u, { silent: true }).catch(() => {});
+            if (navigator.onLine) {
+              await refreshOfflineCacheIfNeeded(u, { silent: true }).catch(() => {});
+            }
           }
         }
       } catch {
@@ -190,6 +196,7 @@ export default function App() {
   }, [user?.id]);
 
   const onLogin = (u) => {
+    setQuickDeviceEnabled(true);
     markActiveSession(true);
     setUser(u);
   };

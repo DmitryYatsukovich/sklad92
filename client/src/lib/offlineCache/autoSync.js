@@ -1,4 +1,4 @@
-import { isQuickDeviceEnabled } from './prefs.js';
+import { isQuickDeviceEnabled, setQuickDeviceEnabled } from './prefs.js';
 import { prefetchOfflineData } from './prefetch.js';
 import { setPrefetchNotice } from './notice.js';
 import { formatPrefetchStatsMessage } from './prefetchStats.js';
@@ -7,7 +7,11 @@ let syncing = false;
 
 /** Обновить кэш при появлении сети (без дублирования параллельных запусков). */
 export async function refreshOfflineCacheIfNeeded(user, { silent = false } = {}) {
-  if (!user?.id || !isQuickDeviceEnabled() || !navigator.onLine) return null;
+  if (!user?.id || !navigator.onLine) return null;
+  if (!isQuickDeviceEnabled()) {
+    // Обязательный офлайн-режим: как только есть онлайн-пользователь, включаем кэш устройства.
+    setQuickDeviceEnabled(true);
+  }
   if (syncing) return null;
   syncing = true;
   try {
