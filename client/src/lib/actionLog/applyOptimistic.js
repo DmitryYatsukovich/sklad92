@@ -116,19 +116,22 @@ export async function loadPendingEntries() {
 }
 
 function prepareMaterialsBase(materials) {
-  return (materials || [])
+  const source = Array.isArray(materials) ? materials : [];
+  return source
     .filter((m) => !isTempMaterialId(m.id))
     .map(stripPendingMeta);
 }
 
 function prepareIssuancesBase(issuances) {
-  return (issuances || [])
+  const source = Array.isArray(issuances) ? issuances : [];
+  return source
     .filter((i) => !isTempIssuanceId(i.id))
     .map(stripPendingMeta);
 }
 
 function prepareProductionBase(rows) {
-  return (rows || [])
+  const source = Array.isArray(rows) ? rows : [];
+  return source
     .filter((r) => !isTempIssuanceId(r.issuance_id))
     .map(stripPendingMeta);
 }
@@ -136,11 +139,12 @@ function prepareProductionBase(rows) {
 export function applyPendingToMaterials(materials, entries, ctx = {}) {
   const { catalog } = ctx;
   const list = prepareMaterialsBase(materials);
-  if (!entries.length) return list;
+  const pending = Array.isArray(entries) ? entries : [];
+  if (!pending.length) return list;
 
   const hidden = new Set();
 
-  for (const entry of entries) {
+  for (const entry of pending) {
     const { kind, body, path, method } = entry;
     const meta = entry.meta || {};
     const payload = meta.payload || body;
@@ -228,11 +232,12 @@ function buildIssuanceFromIssue(entry, body, ctx) {
 
 export function applyPendingToIssuances(issuances, entries, ctx = {}) {
   let list = prepareIssuancesBase(issuances);
-  if (!entries.length) return list;
+  const pending = Array.isArray(entries) ? entries : [];
+  if (!pending.length) return list;
 
   const removed = new Set();
 
-  for (const entry of entries) {
+  for (const entry of pending) {
     const { kind, body, path, method } = entry;
     const meta = entry.meta || {};
     const payload = meta.payload || body;
@@ -339,11 +344,12 @@ export function applyPendingToProduction(rows, entries, ctx = {}) {
   } = ctx;
 
   let list = prepareProductionBase(rows);
-  if (!entries.length) return list;
+  const pending = Array.isArray(entries) ? entries : [];
+  if (!pending.length) return list;
 
   const removed = new Set();
 
-  for (const entry of entries) {
+  for (const entry of pending) {
     const { kind, body, path, method } = entry;
     const meta = entry.meta || {};
     const payload = meta.payload || body;

@@ -134,16 +134,25 @@ export async function getOfflineResponseForPath(path, currentUser = null) {
   const userId = currentUser?.id ? Number(currentUser.id) : null;
 
   if (pathname === '/api/materials') {
-    return getOfflineDataset('materials', userId);
+    const rows = await getOfflineDataset('materials', userId);
+    return asArray(rows);
   }
   if (pathname === '/api/materials/users-for-issuance') {
-    return getOfflineDataset('issueUsers', userId);
+    const rows = await getOfflineDataset('issueUsers', userId);
+    return asArray(rows);
   }
   if (pathname === '/api/operations/issuances') {
-    return getOfflineDataset('issuances', userId);
+    const rows = await getOfflineDataset('issuances', userId);
+    return asArray(rows);
   }
   if (pathname === '/api/reports/production/locations') {
-    return getOfflineDataset('productionLocations', userId);
+    return (await getOfflineDataset('productionLocations', userId)) || {
+      objects: [],
+      work_entrances: [],
+      work_floors: [],
+      work_apartments: [],
+      work_rooms: [],
+    };
   }
   if (pathname === '/api/reports/production') {
     const from = params.get('from') || '';

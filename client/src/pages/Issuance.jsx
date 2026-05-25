@@ -146,7 +146,11 @@ export default function Issuance({ user }) {
       materialsApi.usersForIssuance().catch(() => []),
     ])
       .then(([iss, mats, users]) => {
-        const bundle = { issuances: iss, materials: mats, issueUsers: users };
+        const bundle = {
+          issuances: Array.isArray(iss) ? iss : [],
+          materials: Array.isArray(mats) ? mats : [],
+          issueUsers: Array.isArray(users) ? users : [],
+        };
         setPageCache('issuance:bundle', bundle);
         applyBundle(bundle);
       })
