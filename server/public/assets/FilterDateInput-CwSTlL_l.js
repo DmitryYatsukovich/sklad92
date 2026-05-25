@@ -1,0 +1,1 @@
+import{j as r}from"./index-DrHXK2W8.js";function n(e){const t=e.currentTarget;if(typeof t.showPicker=="function")try{t.showPicker()}catch{}}function c({value:e,onChange:t,className:i=""}){return r.jsx("input",{type:"date",value:e,onChange:t,onClick:n,className:`filter-input filter-date-input ${i}`.trim()})}export{c as F};
