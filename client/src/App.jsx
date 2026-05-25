@@ -1,8 +1,16 @@
-import { useState, useEffect, useRef, useCallback, lazy } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { auth } from './api';
 import Login from './pages/Login';
 import Layout from './Layout';
+import Warehouse from './pages/Warehouse';
+import Issuance from './pages/Issuance';
+import Production from './pages/Production';
+import Users from './pages/Users';
+import FaceCheckIn from './pages/FaceCheckIn';
+import AttendanceAll from './pages/AttendanceAll';
+import Settings from './pages/Settings';
+import Actions from './pages/Actions';
 import { getDefaultRoute } from './lib/defaultRoute.js';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import RecoverableErrorBoundary from './components/RecoverableErrorBoundary.jsx';
@@ -18,15 +26,6 @@ import {
   initOfflineCacheAutoSync,
 } from './lib/offlineCache';
 
-const Warehouse = lazy(() => import('./pages/Warehouse'));
-const Issuance = lazy(() => import('./pages/Issuance'));
-const Production = lazy(() => import('./pages/Production'));
-const Users = lazy(() => import('./pages/Users'));
-const FaceCheckIn = lazy(() => import('./pages/FaceCheckIn'));
-const AttendanceAll = lazy(() => import('./pages/AttendanceAll'));
-const Settings = lazy(() => import('./pages/Settings'));
-const Actions = lazy(() => import('./pages/Actions'));
-
 const STRICT_LOGOUT_ON_CLOSE = true;
 const ACTIVE_SESSION_KEY = 'warehouse-active-session';
 const PENDING_SERVER_LOGOUT_KEY = 'warehouse-pending-server-logout';
@@ -39,7 +38,6 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const userRef = useRef(null);
-  const warmedBundleKeyRef = useRef('');
   userRef.current = user;
 
   const markActiveSession = useCallback((active) => {
@@ -74,47 +72,6 @@ export default function App() {
     } catch {
       return false;
     }
-  }, []);
-
-  const prewarmTabBundles = useCallback((u) => {
-    if (!u || !navigator.onLine) return;
-    const canSettings = !!(
-      u.can_settings_organizations
-      || u.can_settings_warehouses
-      || u.can_settings_categories
-      || u.can_settings_work
-      || u.can_users
-      || u.can_roles
-    );
-    const warmKey = [
-      u.id,
-      u.can_warehouse ? 'w' : '',
-      u.can_issuance ? 'i' : '',
-      u.can_production ? 'p' : '',
-      u.can_actions ? 'a' : '',
-      u.can_face ? 'f' : '',
-      u.can_attendance ? 't' : '',
-      canSettings ? 's' : '',
-    ].join('|');
-    if (warmedBundleKeyRef.current === warmKey) return;
-    warmedBundleKeyRef.current = warmKey;
-
-    const jobs = [];
-    if (u.can_warehouse) jobs.push(import('./pages/Warehouse'));
-    if (u.can_issuance) jobs.push(import('./pages/Issuance'));
-    if (u.can_production) jobs.push(import('./pages/Production'));
-    if (u.can_actions) jobs.push(import('./pages/Actions'));
-    if (u.can_face) jobs.push(import('./pages/FaceCheckIn'));
-    if (u.can_attendance) jobs.push(import('./pages/AttendanceAll'));
-    if (canSettings) jobs.push(import('./pages/Settings'));
-    if (u.can_users) jobs.push(import('./pages/Users'));
-
-    Promise.allSettled(jobs).then((results) => {
-      if (results.some((r) => r.status === 'rejected')) {
-        // Разрешаем повторить прогрев при следующем online-событии.
-        warmedBundleKeyRef.current = '';
-      }
-    });
   }, []);
 
   useEffect(() => {
@@ -215,14 +172,12 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     const onOnline = () => {
-      prewarmTabBundles(userRef.current);
       if (isQuickDeviceEnabled()) refreshOfflineCacheIfNeeded(user, { silent: false }).catch(() => {});
       auth.me().then(({ user: u }) => { if (u) setUser(u); }).catch(() => {});
     };
-    prewarmTabBundles(user);
     window.addEventListener('online', onOnline);
     return () => window.removeEventListener('online', onOnline);
-  }, [user?.id, prewarmTabBundles]);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user || !navigator.onLine) return;
