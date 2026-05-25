@@ -128,7 +128,6 @@ const sessionOptions = {
     secure: useSecureCookies,
     httpOnly: true,
     sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
   },
 };
 if (isProd && isDatabaseConfigured) {

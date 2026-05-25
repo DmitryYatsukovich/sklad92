@@ -26,6 +26,9 @@ const AttendanceAll = lazy(() => import('./pages/AttendanceAll'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Actions = lazy(() => import('./pages/Actions'));
 
+const STRICT_LOGOUT_ON_CLOSE = true;
+const ACTIVE_SESSION_KEY = 'warehouse-active-session';
+
 function HomeRedirect({ user }) {
   return <Navigate to={getDefaultRoute(user)} replace />;
 }
@@ -35,6 +38,23 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const userRef = useRef(null);
   userRef.current = user;
+
+  const markActiveSession = useCallback((active) => {
+    try {
+      if (active) sessionStorage.setItem(ACTIVE_SESSION_KEY, '1');
+      else sessionStorage.removeItem(ACTIVE_SESSION_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const hasActiveSessionMarker = useCallback(() => {
+    try {
+      return sessionStorage.getItem(ACTIVE_SESSION_KEY) === '1';
+    } catch {
+      return false;
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,6 +69,18 @@ export default function App() {
     }
 
     (async () => {
+      if (STRICT_LOGOUT_ON_CLOSE && !hasActiveSessionMarker()) {
+        await clearOfflineSession().catch(() => {});
+        if (navigator.onLine) {
+          await auth.logout().catch(() => {});
+        }
+        if (!cancelled) {
+          setUser(null);
+          setLoading(false);
+        }
+        return;
+      }
+
       if (await restoreFromOfflineSession()) {
         if (!cancelled) setLoading(false);
         return;
@@ -75,7 +107,37 @@ export default function App() {
     })();
 
     return () => { cancelled = true; };
-  }, []);
+  }, [hasActiveSessionMarker]);
+
+  useEffect(() => {
+    if (!STRICT_LOGOUT_ON_CLOSE) return undefined;
+    const onTerminate = () => {
+      markActiveSession(false);
+      clearOfflineSession().catch(() => {});
+      const body = '{}';
+      try {
+        if (navigator.sendBeacon) {
+          const blob = new Blob([body], { type: 'application/json' });
+          navigator.sendBeacon('/api/auth/logout', blob);
+        }
+      } catch {
+        /* ignore */
+      }
+      fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+        keepalive: true,
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      }).catch(() => {});
+    };
+    window.addEventListener('pagehide', onTerminate);
+    window.addEventListener('beforeunload', onTerminate);
+    return () => {
+      window.removeEventListener('pagehide', onTerminate);
+      window.removeEventListener('beforeunload', onTerminate);
+    };
+  }, [markActiveSession]);
 
   useEffect(() => {
     if (!user) return undefined;
@@ -125,7 +187,10 @@ export default function App() {
     return () => clearInterval(t);
   }, [user?.id]);
 
-  const onLogin = (u) => setUser(u);
+  const onLogin = (u) => {
+    markActiveSession(true);
+    setUser(u);
+  };
   const recoverIssuanceTabCache = useCallback(() => {
     import('./lib/pageCache').then((m) => m.invalidatePageCache('issuance:bundle')).catch(() => {});
     import('./lib/offlineCache').then((m) => Promise.allSettled([
@@ -145,6 +210,7 @@ export default function App() {
     ])).catch(() => {});
   }, []);
   const onLogout = async () => {
+    markActiveSession(false);
     await clearOfflineSession();
     try {
       await auth.logout();

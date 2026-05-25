@@ -55,6 +55,6 @@ export async function hasValidOfflineSession() {
   if (!user?.id) return false;
   const meta = await getCacheMeta();
   const session = meta?.offlineSession;
-  if (session?.active && session.userId === user.id) return true;
-  return Boolean(meta?.offlineLogin && meta?.offlinePasswordHash);
+  if (!session?.active || session.userId !== user.id) return false;
+  return true;
 }
