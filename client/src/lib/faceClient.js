@@ -2,8 +2,9 @@ import * as faceapi from '@vladmandic/face-api';
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgl';
 import { isAndroid, isMobileDevice } from './device';
+import { FACE_MODEL_BASE_PATH } from './faceModelFiles.js';
 
-const MODEL = '/models';
+const MODEL = FACE_MODEL_BASE_PATH;
 
 let loadPromise = null;
 let useTinyDetector = false;
@@ -41,7 +42,12 @@ async function assertModelFiles(base) {
     const url = `${base}/${name}`;
     let res;
     try {
-      res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        // В офлайне проверяем через GET, чтобы сработал кэш (HEAD не матчится на cached GET).
+        res = await fetch(url, { method: 'GET', cache: 'force-cache' });
+      } else {
+        res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+      }
     } catch (e) {
       throw new Error(`Нет доступа к ${url}: ${e.message || e}`);
     }
@@ -110,7 +116,10 @@ export function loadFaceModels() {
         await initTfBackend(true);
         await loadNetsFromUri();
       }
-    })();
+    })().catch((err) => {
+      loadPromise = null;
+      throw err;
+    });
   }
   return loadPromise;
 }

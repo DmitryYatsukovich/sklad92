@@ -64,7 +64,7 @@ async function networkFirstShell(request) {
     const cached = await cache.match('/index.html');
     if (cached) return cached;
     return new Response(
-      'Нет сети. Откройте приложение онлайн хотя бы один раз с включённым «Устройство для быстрой работы».',
+      'Нет сети. Откройте приложение онлайн хотя бы один раз, чтобы прогреть офлайн-кэш.',
       { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
     );
   }

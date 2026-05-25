@@ -72,7 +72,7 @@ function formatWorkedDuration(checkIn, checkOut) {
 export default function FaceCheckIn({ user }) {
   const isAdmin = user?.role === 'admin';
   const [videoEl, setVideoEl] = useState(null);
-  const [modelsOk, setModelsOk] = useState(false);
+  const [modelsState, setModelsState] = useState('loading'); // loading | ready | error
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [msgKind, setMsgKind] = useState('');
@@ -85,24 +85,41 @@ export default function FaceCheckIn({ user }) {
     loadVisits();
   }, []);
 
-  useEffect(() => {
-    loadFaceModels()
-      .then(() => setModelsOk(true))
-      .catch((e) => setMsg(`Модели: ${e.message || e}`));
-  }, []);
-
-  const onVideoReady = useCallback((el) => {
-    setVideoEl(el);
-  }, []);
-
   const setStatus = (text, kind = '') => {
     setMsg(text);
     setMsgKind(kind);
   };
 
+  const loadModels = useCallback(() => {
+    setModelsState('loading');
+    loadFaceModels()
+      .then(() => {
+        setModelsState('ready');
+      })
+      .catch((e) => {
+        setModelsState('error');
+        setStatus(`Модели: ${e.message || e}`, 'error');
+      });
+  }, []);
+
+  useEffect(() => {
+    loadModels();
+  }, [loadModels]);
+
+  const onVideoReady = useCallback((el) => {
+    setVideoEl(el);
+  }, []);
+
+  const modelsOk = modelsState === 'ready';
+
   const scan = async () => {
     if (!modelsOk) {
-      setStatus('Загрузка моделей… Подождите.', 'info');
+      setStatus(
+        modelsState === 'loading'
+          ? 'Загрузка моделей… Подождите.'
+          : 'Модели не готовы. Подключите сеть и нажмите «Обновить модели».',
+        modelsState === 'loading' ? 'info' : 'error',
+      );
       return;
     }
     if (!videoEl) {
@@ -177,8 +194,18 @@ export default function FaceCheckIn({ user }) {
             >
               {busy ? 'Обработка…' : 'Отметиться'}
             </button>
+            {!modelsOk && (
+              <button
+                type="button"
+                disabled={busy || modelsState === 'loading'}
+                onClick={loadModels}
+                className="btn-ghost w-full sm:w-auto min-h-[2.25rem] text-sm px-4"
+              >
+                {modelsState === 'loading' ? 'Загрузка…' : 'Обновить модели'}
+              </button>
+            )}
           </div>
-          {!modelsOk && (
+          {modelsState === 'loading' && (
             <p className="text-zinc-500 text-2xs">Загрузка нейросети…</p>
           )}
           {msg && (

@@ -1,6 +1,11 @@
 import { setCachedResponse, setCacheMeta } from './store.js';
 import { buildPrefetchStatsFromStorage } from './prefetchStats.js';
 import { measureOfflineCacheSize } from './cacheSize.js';
+import {
+  FACE_MODEL_BASE_PATH,
+  FACE_MODEL_CACHE_NAME,
+  FACE_MODEL_FILES,
+} from '../faceModelFiles.js';
 
 function monthBounds() {
   const d = new Date();
@@ -14,6 +19,29 @@ async function save(path, data, userId) {
   await setCachedResponse(path, data, userId);
   const { updateOfflineDatasetsForPath } = await import('./offlineQueries.js');
   await updateOfflineDatasetsForPath(path, data, { id: userId });
+}
+
+async function prefetchFaceModelsToCache() {
+  if (typeof window === 'undefined' || !navigator.onLine) return 0;
+  let cache = null;
+  if ('caches' in window) {
+    cache = await caches.open(FACE_MODEL_CACHE_NAME).catch(() => null);
+  }
+  let saved = 0;
+  for (const file of FACE_MODEL_FILES) {
+    const url = `${FACE_MODEL_BASE_PATH}/${file}`;
+    try {
+      const res = await fetch(url, { method: 'GET', cache: 'no-store' });
+      if (!res.ok) continue;
+      if (cache) {
+        await cache.put(url, res.clone());
+      }
+      saved += 1;
+    } catch {
+      /* skip отдельные файлы, чтобы не ронять весь prefetch */
+    }
+  }
+  return saved;
 }
 
 /** Загрузить с сервера и сохранить в IndexedDB (по правам пользователя). */
@@ -135,6 +163,8 @@ export async function prefetchOfflineData(user, { onProgress } = {}) {
       const visits = await attendance.my(90);
       counts.faceVisits = Array.isArray(visits) ? visits.length : 0;
       await save(path, visits, uid);
+      report('Модели распознавания…');
+      counts.faceModelFiles = await prefetchFaceModelsToCache();
     }
 
     if (user.can_actions) {
