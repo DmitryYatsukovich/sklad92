@@ -1,6 +1,20 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { roles as rolesApi } from '../api';
 
+function isRowObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function asArrayOfObjects(value) {
+  return Array.isArray(value)
+    ? value.filter((row) => isRowObject(row))
+    : [];
+}
+
+function normalizePermissionDefs(value) {
+  return asArrayOfObjects(value).filter((row) => typeof row.key === 'string' && row.key);
+}
+
 const emptyPerms = (permissionDefs = []) => Object.fromEntries(
   permissionDefs.map((p) => [p.key, false]),
 );
@@ -29,8 +43,8 @@ export default function RolesTab() {
     setLoading(true);
     Promise.all([rolesApi.list(), rolesApi.permissions()])
       .then(([roles, perms]) => {
-        setList(roles);
-        setPermissionDefs(perms);
+        setList(asArrayOfObjects(roles));
+        setPermissionDefs(normalizePermissionDefs(perms));
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));

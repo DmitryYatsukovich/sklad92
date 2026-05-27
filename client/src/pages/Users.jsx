@@ -14,6 +14,20 @@ import CopyButton, { CopyFieldRow, CopyTableCell } from '../components/CopyButto
 import { parseExcelBlobForPreview, isExcelLaborContract } from '../lib/excelPreview';
 import { parseWordBlobForPreview, isWordLaborContract } from '../lib/wordPreview';
 
+function isRowObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function asArrayOfObjects(value) {
+  return Array.isArray(value)
+    ? value.filter((row) => isRowObject(row))
+    : [];
+}
+
+function asLaborContractFiles(value) {
+  return asArrayOfObjects(value).filter((row) => row.id != null);
+}
+
 function buildUserPayload(form, extras = {}, { omitPassword } = {}) {
   const payload = {
     login: form.login,
@@ -323,12 +337,14 @@ export default function Users({ user, embedded = false }) {
   const [roles, setRoles] = useState([]);
 
   const loadRoles = useCallback(() => {
-    rolesApi.list().then(setRoles).catch(() => setRoles([]));
+    rolesApi.list()
+      .then((rows) => setRoles(asArrayOfObjects(rows)))
+      .catch(() => setRoles([]));
   }, []);
 
   const load = () =>
     usersApi.list()
-      .then((data) => { setList(data); setListKey((k) => k + 1); })
+      .then((data) => { setList(asArrayOfObjects(data)); setListKey((k) => k + 1); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
 
@@ -336,11 +352,11 @@ export default function Users({ user, embedded = false }) {
     setLoading(true);
     load();
     loadRoles();
-    settingsApi.organizations.list().then(setOrganizations).catch(() => {});
+    settingsApi.organizations.list().then((rows) => setOrganizations(asArrayOfObjects(rows))).catch(() => {});
   }, [loadRoles]);
 
   useEffect(() => {
-    const t = setInterval(() => usersApi.list().then((data) => { setList(data); setListKey((k) => k + 1); }).catch(() => {}), 5000);
+    const t = setInterval(() => usersApi.list().then((data) => { setList(asArrayOfObjects(data)); setListKey((k) => k + 1); }).catch(() => {}), 5000);
     return () => clearInterval(t);
   }, []);
 
@@ -355,7 +371,7 @@ export default function Users({ user, embedded = false }) {
   };
 
   const refreshOrganizations = () => {
-    settingsApi.organizations.list().then(setOrganizations).catch(() => {});
+    settingsApi.organizations.list().then((rows) => setOrganizations(asArrayOfObjects(rows))).catch(() => {});
   };
 
   const openCreate = () => {
@@ -466,7 +482,7 @@ export default function Users({ user, embedded = false }) {
     }
     try {
       const data = await usersApi.listLaborContracts(userId);
-      setLaborContracts(data.files || []);
+      setLaborContracts(asLaborContractFiles(data?.files));
     } catch {
       setLaborContracts([]);
     }
@@ -483,7 +499,7 @@ export default function Users({ user, embedded = false }) {
       load();
       if (contractsListModal?.user?.id === editing) {
         const data = await usersApi.listLaborContracts(editing);
-        setContractsListModal((m) => (m ? { ...m, files: data.files || [], loading: false } : m));
+        setContractsListModal((m) => (m ? { ...m, files: asLaborContractFiles(data?.files), loading: false } : m));
       }
     } catch (err) {
       setError(err.message);
@@ -566,13 +582,13 @@ export default function Users({ user, embedded = false }) {
 
   const openContractsListModal = async (u) => {
     if (!u?.id) return;
-    setContractsListModal({ user: u, files: u.labor_contract_previews || [], loading: true });
+    setContractsListModal({ user: u, files: asLaborContractFiles(u.labor_contract_previews), loading: true });
     setError('');
     try {
       const data = await usersApi.listLaborContracts(u.id);
       setContractsListModal({
         user: u,
-        files: data.files || [],
+        files: asLaborContractFiles(data?.files),
         loading: false,
       });
     } catch (err) {
@@ -618,7 +634,7 @@ export default function Users({ user, embedded = false }) {
       load();
       if (contractsListModal?.user?.id === editing) {
         const data = await usersApi.listLaborContracts(editing);
-        setContractsListModal((m) => (m ? { ...m, files: data.files || [] } : m));
+        setContractsListModal((m) => (m ? { ...m, files: asLaborContractFiles(data?.files) } : m));
       }
     } catch (err) {
       setError(err.message);
