@@ -1,10 +1,13 @@
 /* eslint-disable no-restricted-globals */
 /** Кэш оболочки SPA для работы после обновления страницы без сети (Timeweb / PWA). */
-const CACHE_SHELL = 'warehouse-shell-v2';
+const CACHE_SHELL = 'warehouse-shell-v3';
 const CACHE_ASSETS = 'warehouse-assets-v2';
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(self.skipWaiting());
+  event.waitUntil((async () => {
+    await preCacheShellAndAssets();
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (event) => {
@@ -21,6 +24,46 @@ self.addEventListener('activate', (event) => {
 
 function sameOrigin(url) {
   return url.origin === self.location.origin;
+}
+
+function collectAssetPathsFromHtml(html) {
+  const paths = new Set();
+  const re = /(?:src|href)=["']([^"']+)["']/g;
+  let match = re.exec(html);
+  while (match) {
+    const raw = match[1] || '';
+    try {
+      const url = new URL(raw, self.location.origin);
+      if (url.origin === self.location.origin && url.pathname.startsWith('/assets/')) {
+        paths.add(url.pathname);
+      }
+    } catch {
+      /* ignore malformed URL */
+    }
+    match = re.exec(html);
+  }
+  return Array.from(paths);
+}
+
+async function preCacheShellAndAssets() {
+  const shell = await caches.open(CACHE_SHELL);
+  const assets = await caches.open(CACHE_ASSETS);
+  try {
+    const indexRes = await fetch('/index.html', { cache: 'no-store' });
+    if (!indexRes.ok) return;
+    await shell.put('/index.html', indexRes.clone());
+    await shell.put('/', indexRes.clone());
+    const html = await indexRes.text();
+    const assetPaths = collectAssetPathsFromHtml(html);
+    await Promise.allSettled(
+      assetPaths.map(async (path) => {
+        const res = await fetch(path, { cache: 'no-store' });
+        if (res.ok) await assets.put(path, res.clone());
+      }),
+    );
+  } catch {
+    /* offline/temporary errors: runtime caching will retry later */
+  }
 }
 
 self.addEventListener('fetch', (event) => {
