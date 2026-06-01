@@ -12,7 +12,9 @@ import { PERMISSION_KEYS } from './app-permissions.js';
 import { parseHourlyRate } from './hourly-rate.js';
 import {
   parseFaceImageBase64,
+  saveUserAvatarWithClient,
   saveUserFacePhotoWithClient,
+  avatarBufferFromRow,
   facePhotoBufferFromRow,
   extFromMime,
 } from './user-images.js';
@@ -43,14 +45,19 @@ export const TEMPLATE_HEADERS = [
   'Журнал посещений',
   'Настройка',
   'Отметка по лицу',
+  'Фото пользователя',
+  'Фото пользователя (base64)',
   'Фото лица',
-  'Фото (base64)',
+  'Фото лица (base64)',
   'Шаблон лица (JSON)',
   'Шаблон: чисел',
   'Шаблон: контроль',
 ];
 
+export const USER_AVATAR_HEADER = 'Фото пользователя';
 export const FACE_PHOTO_HEADER = 'Фото лица';
+export const USER_AVATAR_B64_HEADER = 'Фото пользователя (base64)';
+export const FACE_PHOTO_B64_HEADER = 'Фото лица (base64)';
 
 export const EXPORT_HEADERS = [
   'id',
@@ -84,7 +91,10 @@ const HEADER_ALIASES = {
   can_attendance: ['журнал посещений', 'can_attendance', 'посещения', 'табель'],
   can_settings: ['настройка', 'can_settings', 'settings'],
   can_face: ['отметка по лицу', 'can_face', 'лицо', 'face'],
-  face_photo_b64: ['фото (base64)', 'фото base64', 'face_photo_base64', 'face photo base64'],
+  avatar_photo: ['фото пользователя', 'avatar photo', 'avatar'],
+  avatar_photo_b64: ['фото пользователя (base64)', 'avatar base64', 'avatar_photo_base64'],
+  face_photo: ['фото лица', 'face photo'],
+  face_photo_b64: ['фото лица (base64)', 'фото (base64)', 'face_photo_base64', 'face photo base64'],
   face_descriptor: ['шаблон лица (json)', 'шаблон лица', 'face_descriptor', 'face descriptor', 'дескриптор'],
   face_descriptor_count: ['шаблон: чисел', 'шаблон чисел', 'face count', 'descriptor count'],
   face_descriptor_checksum: ['шаблон: контроль', 'шаблон контроль', 'face checksum', 'descriptor checksum'],
@@ -201,6 +211,13 @@ function photoToExportBase64(u) {
   return buf.toString('base64');
 }
 
+function avatarToExportBase64(u) {
+  const buf = avatarBufferFromRow(u);
+  if (!buf?.length) return '';
+  if (buf.length > 24000) return '';
+  return buf.toString('base64');
+}
+
 function imageExtensionFromBuffer(buf) {
   if (!buf || buf.length < 4) return 'jpeg';
   if (buf[0] === 0x89 && buf[1] === 0x50) return 'png';
@@ -291,6 +308,8 @@ export function buildTemplateBuffer() {
       '',
       '',
       '',
+      '',
+      '',
     ],
   ]);
   ws['!cols'] = TEMPLATE_HEADERS.map((h) => ({ wch: Math.max(14, h.length + 2) }));
@@ -302,8 +321,10 @@ export function buildTemplateBuffer() {
     ['Пароль', 'Обязателен для новых. При обновлении пусто = не менять'],
     ['Системная роль', 'user или admin'],
     ['Роль (справочник)', 'Название роли из настроек (необязательно)'],
+    ['Фото пользователя', 'При экспорте — миниатюра аватара. При импорте можно вставить изображение в ячейку'],
+    ['Фото пользователя (base64)', 'Резервная копия аватара (экспорт заполняет). Для импорта без картинки в ячейке'],
     ['Фото лица', 'При экспорте — миниатюра. При импорте можно вставить изображение в ячейку'],
-    ['Фото (base64)', 'Резервная копия фото (экспорт заполняет). Для импорта без картинки в ячейке'],
+    ['Фото лица (base64)', 'Резервная копия фото лица (экспорт заполняет). Для импорта без картинки в ячейке'],
     ['Шаблон лица (JSON)', 'Массив из 128 чисел — обязателен для отметки по лицу'],
     ['Шаблон: чисел / контроль', 'Служебные поля для проверки целостности шаблона'],
     ['Профиль активен', 'да / нет — доступ в приложение'],
@@ -319,7 +340,9 @@ export function buildTemplateBuffer() {
 const USERS_EXPORT_SQL = `
   SELECT u.id, u.login, u.password_plain, u.first_name, u.last_name, u.birth_date,
          u.passport_number, u.snils, u.inn, u.employment_date, u.employment_org, u.phone,
-         u.hourly_rate, u.role, u.role_id, u.internal_uid, u.face_descriptor, u.face_photo,
+         u.hourly_rate, u.role, u.role_id, u.internal_uid,
+         u.avatar, u.avatar_data, u.avatar_mime,
+         u.face_descriptor, u.face_photo,
          u.face_photo_data, u.face_photo_mime,
          COALESCE(u.profile_active, true) AS profile_active,
          COALESCE(u.employment_status, 'working') AS employment_status,
@@ -377,6 +400,8 @@ export function userToExportRow(u) {
     boolLabel(u.can_settings),
     boolLabel(u.can_face),
     '',
+    avatarToExportBase64(u),
+    '',
     photoToExportBase64(u),
     face.json,
     face.count || '',
@@ -391,12 +416,37 @@ function collectImagesBySheetRow(sheet, workbook) {
     const tl = img.range?.tl;
     if (!tl) continue;
     const sheetRow = (tl.nativeRow ?? Math.floor(tl.row ?? 0)) + 1;
+    const imageCol = tl.nativeCol ?? Math.floor(tl.col ?? 0);
     const media = workbook.getImage(img.imageId);
     if (media?.buffer?.length) {
-      map.set(sheetRow, { buffer: media.buffer, ext: imageExtensionFromBuffer(media.buffer) });
+      const rowImages = map.get(sheetRow) || [];
+      rowImages.push({
+        buffer: media.buffer,
+        ext: imageExtensionFromBuffer(media.buffer),
+        col: Number.isFinite(imageCol) ? imageCol : 0,
+      });
+      map.set(sheetRow, rowImages);
     }
   }
   return map;
+}
+
+function pickRowImage(rowImages, targetCol) {
+  if (!Array.isArray(rowImages) || rowImages.length === 0) return null;
+  if (targetCol === undefined || targetCol === null) {
+    return rowImages.length === 1 ? rowImages[0] : null;
+  }
+  let best = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const img of rowImages) {
+    const col = Number.isFinite(img?.col) ? img.col : 0;
+    const distance = Math.abs(col - targetCol);
+    if (distance < bestDistance) {
+      best = img;
+      bestDistance = distance;
+    }
+  }
+  return bestDistance <= 1 ? best : null;
 }
 
 function excelRowToArray(row) {
@@ -420,9 +470,23 @@ function buildItemFromRow(row, colMap, rowNum, imagesBySheetRow) {
   const login = cellVal(row, colMap.login);
   if (!login) return null;
 
-  const img = imagesBySheetRow.get(rowNum);
-  let facePhotoBuffer = img?.buffer ?? null;
-  let facePhotoExt = img?.ext ?? 'jpeg';
+  const rowImages = imagesBySheetRow.get(rowNum) || [];
+  const avatarImage = pickRowImage(rowImages, colMap.avatar_photo);
+  const faceImage = pickRowImage(rowImages, colMap.face_photo);
+
+  let avatarPhotoBuffer = avatarImage?.buffer ?? null;
+  let avatarPhotoExt = avatarImage?.ext ?? 'jpeg';
+  if (!avatarPhotoBuffer && colMap.avatar_photo_b64 !== undefined) {
+    const b64 = cellVal(row, colMap.avatar_photo_b64);
+    avatarPhotoBuffer = parseFaceImageBase64(b64);
+  }
+
+  let facePhotoBuffer = faceImage?.buffer ?? null;
+  let facePhotoExt = faceImage?.ext ?? 'jpeg';
+  if (!facePhotoBuffer && !avatarImage && colMap.face_photo === undefined && rowImages.length === 1) {
+    facePhotoBuffer = rowImages[0]?.buffer ?? null;
+    facePhotoExt = rowImages[0]?.ext ?? 'jpeg';
+  }
   if (!facePhotoBuffer && colMap.face_photo_b64 !== undefined) {
     const b64 = cellVal(row, colMap.face_photo_b64);
     facePhotoBuffer = parseFaceImageBase64(b64);
@@ -462,6 +526,8 @@ function buildItemFromRow(row, colMap, rowNum, imagesBySheetRow) {
     face_descriptor: faceDescriptorRaw,
     face_descriptor_count: colMap.face_descriptor_count !== undefined ? cellVal(row, colMap.face_descriptor_count) : undefined,
     face_descriptor_checksum: colMap.face_descriptor_checksum !== undefined ? cellVal(row, colMap.face_descriptor_checksum) : undefined,
+    avatar_photo_buffer: avatarPhotoBuffer,
+    avatar_photo_ext: avatarPhotoExt,
     face_photo_buffer: facePhotoBuffer,
     face_photo_ext: facePhotoExt,
   };
@@ -565,11 +631,23 @@ async function applyImportedFacePhoto(client, userId, item) {
   }
 }
 
+async function applyImportedAvatarPhoto(client, userId, item) {
+  if (item.avatar_photo_buffer?.length) {
+    await saveUserAvatarWithClient(
+      client,
+      userId,
+      item.avatar_photo_buffer,
+      item.avatar_photo_ext || 'jpeg',
+    );
+  }
+}
+
 export async function buildExportBuffer(rows) {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Пользователи', {
     views: [{ state: 'frozen', ySplit: 1 }],
   });
+  const avatarColIdx = EXPORT_HEADERS.indexOf(USER_AVATAR_HEADER);
   const photoColIdx = EXPORT_HEADERS.indexOf(FACE_PHOTO_HEADER);
 
   const headerRow = sheet.addRow(EXPORT_HEADERS);
@@ -579,9 +657,18 @@ export async function buildExportBuffer(rows) {
   for (const u of rows) {
     const data = userToExportRow(u);
     const row = sheet.addRow(data);
+    const avatarBuf = avatarBufferFromRow(u);
     const faceBuf = facePhotoBufferFromRow(u);
-    row.height = faceBuf?.length ? 78 : 22;
+    row.height = avatarBuf?.length || faceBuf?.length ? 78 : 22;
 
+    if (avatarColIdx >= 0 && avatarBuf?.length) {
+      const ext = extFromMime(u.avatar_mime || 'image/jpeg');
+      const imageId = workbook.addImage({ buffer: avatarBuf, extension: ext === 'png' ? 'png' : 'jpeg' });
+      sheet.addImage(imageId, {
+        tl: { col: avatarColIdx + 0.2, row: row.number - 1 + 0.15 },
+        ext: { width: 96, height: 72 },
+      });
+    }
     if (photoColIdx >= 0 && faceBuf?.length) {
       const ext = extFromMime(u.face_photo_mime || 'image/jpeg');
       const imageId = workbook.addImage({ buffer: faceBuf, extension: ext === 'png' ? 'png' : 'jpeg' });
@@ -593,8 +680,10 @@ export async function buildExportBuffer(rows) {
   }
 
   sheet.columns = EXPORT_HEADERS.map((h) => {
+    if (h === USER_AVATAR_HEADER) return { width: 16 };
     if (h === FACE_PHOTO_HEADER) return { width: 16 };
-    if (h === 'Фото (base64)') return { width: 14 };
+    if (h === USER_AVATAR_B64_HEADER) return { width: 14 };
+    if (h === FACE_PHOTO_B64_HEADER) return { width: 14 };
     if (h === 'Шаблон лица (JSON)') return { width: 28 };
     if (h === 'id') return { width: 8 };
     return { width: Math.max(12, h.length + 2) };
@@ -602,8 +691,10 @@ export async function buildExportBuffer(rows) {
 
   const help = workbook.addWorksheet('Справка');
   help.addRow(['Поле', 'Описание']);
+  help.addRow(['Фото пользователя', 'Миниатюра аватара пользователя']);
+  help.addRow(['Фото пользователя (base64)', 'Резерв для импорта аватара, если изображение в ячейке потерялось']);
   help.addRow(['Фото лица', 'Миниатюра для просмотра']);
-  help.addRow(['Фото (base64)', 'Резерв для импорта, если изображение в ячейке потерялось']);
+  help.addRow(['Фото лица (base64)', 'Резерв для импорта фото лица, если изображение в ячейке потерялось']);
   help.addRow(['Шаблон лица (JSON)', '128 чисел — нужен для отметки по лицу после импорта']);
   help.addRow(['Профиль активен', 'да / нет']);
   help.addRow(['Статус работы', 'Работает / В отпуске / Уволен']);
@@ -728,6 +819,7 @@ async function upsertUserRow(client, item, editorSession) {
     });
     perms = mergePermsFromExcelItem(perms, item);
     await upsertUserPermissions(client, userId, perms);
+    await applyImportedAvatarPhoto(client, userId, item);
     await applyImportedFacePhoto(client, userId, item);
     return { action: 'created', userId };
   }
@@ -825,6 +917,7 @@ async function upsertUserRow(client, item, editorSession) {
   });
   perms = mergePermsFromExcelItem(perms, item);
   await upsertUserPermissions(client, userId, perms);
+  await applyImportedAvatarPhoto(client, userId, item);
 
   if (item.profile_active !== undefined && item.profile_active !== null) {
     await client.query('UPDATE users SET profile_active = $2 WHERE id = $1', [userId, item.profile_active]);

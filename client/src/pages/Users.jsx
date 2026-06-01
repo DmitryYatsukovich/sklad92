@@ -319,6 +319,7 @@ export default function Users({ user, embedded = false }) {
   const [contractDeleteConfirm, setContractDeleteConfirm] = useState(null);
   const [contractViewUserId, setContractViewUserId] = useState(null);
   const [contractsListModal, setContractsListModal] = useState(null);
+  const [avatarView, setAvatarView] = useState(null);
   const contractVideoRef = useRef(null);
   const contractStreamRef = useRef(null);
   const contractInputRef = useRef(null);
@@ -692,6 +693,15 @@ export default function Users({ user, embedded = false }) {
     setFaceImageKey(Date.now());
     setError('');
     refreshLaborContracts(u.id);
+  };
+
+  const openAvatarView = (u) => {
+    if (!u?.avatar) return;
+    setAvatarView({
+      id: u.id,
+      login: u.login || '',
+      name: [u.first_name, u.last_name].filter(Boolean).join(' ').trim(),
+    });
   };
 
   const applyFaceCapture = async (descriptor, blob) => {
@@ -1792,7 +1802,18 @@ export default function Users({ user, embedded = false }) {
                   <td className="text-center text-zinc-500 text-2xs tabular-nums">{idx + 1}</td>
                   <td onClick={(e) => e.stopPropagation()}>
                     {u.avatar ? (
-                      <img src={`${usersApi.avatarUrl(u.id)}?k=${listKey}`} alt="" className="w-8 h-8 rounded-full object-cover border border-zinc-700" />
+                      <button
+                        type="button"
+                        onClick={() => openAvatarView(u)}
+                        className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                        title="Открыть фото"
+                      >
+                        <img
+                          src={`${usersApi.avatarUrl(u.id)}?k=${listKey}`}
+                          alt={`Фото ${u.login || 'пользователя'}`}
+                          className="w-8 h-8 rounded-full object-cover border border-zinc-700"
+                        />
+                      </button>
                     ) : (
                       <span className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-600 text-2xs">—</span>
                     )}
@@ -2315,6 +2336,35 @@ export default function Users({ user, embedded = false }) {
                 onClick={confirmDeleteContractFile}
               >
                 {contractSaving ? 'Удаление…' : 'Удалить'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {avatarView && (
+        <div
+          className="modal-backdrop z-[70]"
+          onClick={() => setAvatarView(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="card p-5 max-w-2xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-white font-medium text-lg mb-1">Фото пользователя</h3>
+            <p className="text-slate-400 text-sm mb-4 font-mono">
+              {avatarView.login}
+              {avatarView.name ? ` — ${avatarView.name}` : ''}
+            </p>
+            <div className="flex-1 min-h-[220px] max-h-[65vh] overflow-auto rounded-lg bg-slate-900 border border-slate-700 p-2">
+              <img
+                src={`${usersApi.avatarUrl(avatarView.id)}?k=${listKey}`}
+                alt={`Фото ${avatarView.login || 'пользователя'}`}
+                className="max-w-full max-h-[60vh] h-auto mx-auto block rounded-lg object-contain"
+              />
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button type="button" className="btn-ghost text-sm" onClick={() => setAvatarView(null)}>
+                Закрыть
               </button>
             </div>
           </div>

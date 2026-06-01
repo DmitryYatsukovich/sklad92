@@ -119,6 +119,14 @@ export async function saveUserFacePhotoWithClient(client, userId, buffer, ext = 
   return marker;
 }
 
+export async function saveUserAvatarWithClient(client, userId, buffer, ext = 'jpg') {
+  const safeExt = (ext || 'jpg').toLowerCase().replace(/[^a-z]/g, '') || 'jpg';
+  const mime = mimeFromExt(safeExt);
+  const marker = `${userId}.${safeExt}`;
+  await saveAvatarToDb(client, userId, buffer, mime, marker);
+  return marker;
+}
+
 export async function readUserAvatar(userId) {
   const r = await pool.query(
     'SELECT avatar_data, avatar_mime, avatar FROM users WHERE id = $1',
@@ -161,6 +169,12 @@ export function facePhotoBufferFromRow(u) {
   const buf = toBuffer(u?.face_photo_data);
   if (buf?.length) return buf;
   return readLegacyFacePhotoFile(u?.face_photo);
+}
+
+export function avatarBufferFromRow(u) {
+  const buf = toBuffer(u?.avatar_data);
+  if (buf?.length) return buf;
+  return readLegacyAvatarFile(u?.avatar);
 }
 
 /** Перенос старых файлов с диска в PostgreSQL (один раз при старте) */
