@@ -228,15 +228,33 @@ function parseFaceDescriptor(str) {
 }
 
 function parseDateKey(val) {
-  const s = cellVal([val], 0);
+  if (val == null || val === '') return null;
+  if (val instanceof Date && !Number.isNaN(val.getTime())) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const s = String(val).trim();
   if (!s) return null;
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
   const dm = s.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})/);
   if (dm) {
     return `${dm[3]}-${String(dm[2]).padStart(2, '0')}-${String(dm[1]).padStart(2, '0')}`;
   }
-  return s.slice(0, 10) || null;
+  const parsed = new Date(s);
+  if (!Number.isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, '0');
+    const d = String(parsed.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return null;
+}
+
+function formatDateForExport(val) {
+  return parseDateKey(val) || '';
 }
 
 export function buildTemplateBuffer() {
@@ -337,11 +355,11 @@ export function userToExportRow(u) {
     u.password_plain || '',
     u.first_name || '',
     u.last_name || '',
-    u.birth_date ? String(u.birth_date).slice(0, 10) : '',
+    formatDateForExport(u.birth_date),
     u.passport_number || '',
     u.snils || '',
     u.inn || '',
-    u.employment_date ? String(u.employment_date).slice(0, 10) : '',
+    formatDateForExport(u.employment_date),
     u.organization_name || u.employment_org || '',
     u.phone || '',
     u.hourly_rate != null ? u.hourly_rate : '',
@@ -878,11 +896,16 @@ export async function applyUsersImport(items, editor) {
   try {
     await client.query('BEGIN');
     for (const item of items) {
+      const spName = `users_import_row_${item.rowNum || result.errors.length + 1}`;
+      await client.query(`SAVEPOINT ${spName}`);
       try {
         const r = await upsertUserRow(client, item, editor);
         if (r.action === 'created') result.created += 1;
         else result.updated += 1;
+        await client.query(`RELEASE SAVEPOINT ${spName}`);
       } catch (e) {
+        await client.query(`ROLLBACK TO SAVEPOINT ${spName}`);
+        await client.query(`RELEASE SAVEPOINT ${spName}`);
         if (e.code === '23505') {
           result.errors.push({ row: item.rowNum, error: 'Такой логин уже существует' });
         } else {
