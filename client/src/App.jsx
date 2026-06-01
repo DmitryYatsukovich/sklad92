@@ -18,6 +18,7 @@ import {
   initOfflineCacheAutoSync,
 } from './lib/offlineCache';
 import { canUseOfflineMode } from './lib/offlineCache/access.js';
+import { isMobileDevice, getAdaptivePollInterval } from './lib/device.js';
 
 const Warehouse = lazy(() => import('./pages/Warehouse'));
 const Issuance = lazy(() => import('./pages/Issuance'));
@@ -100,21 +101,47 @@ export default function App() {
     if (warmedBundleKeyRef.current === warmKey) return;
     warmedBundleKeyRef.current = warmKey;
 
-    const jobs = [];
-    if (u.can_warehouse) jobs.push(import('./pages/Warehouse'));
-    if (u.can_issuance) jobs.push(import('./pages/Issuance'));
-    if (u.can_production) jobs.push(import('./pages/Production'));
-    if (u.can_actions) jobs.push(import('./pages/Actions'));
-    if (u.can_face) jobs.push(import('./pages/FaceCheckIn'));
-    if (u.can_attendance) jobs.push(import('./pages/AttendanceAll'));
-    if (canSettings) jobs.push(import('./pages/Settings'));
-    if (u.can_users) jobs.push(import('./pages/Users'));
+    const loaders = [];
+    if (u.can_warehouse) loaders.push(() => import('./pages/Warehouse'));
+    if (u.can_issuance) loaders.push(() => import('./pages/Issuance'));
+    if (u.can_production) loaders.push(() => import('./pages/Production'));
+    if (u.can_actions) loaders.push(() => import('./pages/Actions'));
+    if (u.can_face) loaders.push(() => import('./pages/FaceCheckIn'));
+    if (u.can_attendance) loaders.push(() => import('./pages/AttendanceAll'));
+    if (canSettings) loaders.push(() => import('./pages/Settings'));
+    if (u.can_users) loaders.push(() => import('./pages/Users'));
+    if (!loaders.length) return;
 
-    Promise.allSettled(jobs).then((results) => {
-      if (results.some((r) => r.status === 'rejected')) {
-        warmedBundleKeyRef.current = '';
+    if (!isMobileDevice()) {
+      Promise.allSettled(loaders.map((load) => load())).then((results) => {
+        if (results.some((r) => r.status === 'rejected')) {
+          warmedBundleKeyRef.current = '';
+        }
+      });
+      return;
+    }
+
+    // На мобильных прогреваем чанки в idle-режиме, чтобы не блокировать UI после входа.
+    let index = 0;
+    let failed = false;
+    const schedule = (fn, timeout = 1200) => {
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(fn, { timeout });
+      } else {
+        setTimeout(fn, 250);
       }
-    });
+    };
+    const runNext = () => {
+      if (warmedBundleKeyRef.current !== warmKey) return;
+      const load = loaders[index];
+      index += 1;
+      if (!load) {
+        if (failed) warmedBundleKeyRef.current = '';
+        return;
+      }
+      load().catch(() => { failed = true; }).finally(() => schedule(runNext, 1500));
+    };
+    setTimeout(() => schedule(runNext, 1500), 900);
   }, []);
 
   useEffect(() => {
@@ -250,7 +277,10 @@ export default function App() {
           }
         })
         .catch(() => {});
-    }, 60000);
+    }, getAdaptivePollInterval(60000, {
+      mobileMs: 120000,
+      lowPowerMs: 180000,
+    }));
     return () => clearInterval(t);
   }, [user?.id]);
 

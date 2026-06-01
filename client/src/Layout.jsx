@@ -9,6 +9,7 @@ import {
   measureOfflineCacheSize,
   getCachedUser,
 } from './lib/offlineCache';
+import { isMobileDevice, getAdaptivePollInterval } from './lib/device.js';
 
 const tabs = [
   { to: '/warehouse', label: 'Склад', perm: 'can_warehouse' },
@@ -50,6 +51,12 @@ export default function Layout({ user, onLogout }) {
   const [serverOnline, setServerOnline] = useState(true);
   const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine);
   const [cacheSizeLabel, setCacheSizeLabel] = useState(null);
+  const [showDesktopMeta, setShowDesktopMeta] = useState(() => (
+    typeof window !== 'undefined'
+      ? window.matchMedia('(min-width: 1280px)').matches
+      : true
+  ));
+  const mobileDevice = isMobileDevice();
 
   const isAppOnline = networkOnline && serverOnline;
 
@@ -78,9 +85,20 @@ export default function Layout({ user, onLogout }) {
   }, []);
 
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
+    if (typeof window === 'undefined') return undefined;
+    const mq = window.matchMedia('(min-width: 1280px)');
+    const onChange = (e) => setShowDesktopMeta(e.matches);
+    setShowDesktopMeta(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
   }, []);
+
+  useEffect(() => {
+    if (!showDesktopMeta) return undefined;
+    const tickMs = mobileDevice ? 60000 : 15000;
+    const t = setInterval(() => setNow(new Date()), tickMs);
+    return () => clearInterval(t);
+  }, [showDesktopMeta, mobileDevice]);
 
   useEffect(() => {
     const check = () => {
@@ -104,7 +122,10 @@ export default function Layout({ user, onLogout }) {
         });
     };
     check();
-    const t = setInterval(check, 15000);
+    const t = setInterval(check, getAdaptivePollInterval(15000, {
+      mobileMs: 30000,
+      lowPowerMs: 45000,
+    }));
     return () => clearInterval(t);
   }, []);
 
@@ -121,8 +142,12 @@ export default function Layout({ user, onLogout }) {
     return undefined;
   }, [networkOnline, serverOnline, user?.id]);
 
-  const dateStr = now.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const timeStr = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const dateStr = showDesktopMeta
+    ? now.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : '';
+  const timeStr = showDesktopMeta
+    ? now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+    : '';
 
   return (
     <div className="min-h-screen flex flex-col">

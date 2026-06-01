@@ -13,6 +13,7 @@ import {
 import CopyButton, { CopyFieldRow, CopyTableCell } from '../components/CopyButton';
 import { parseExcelBlobForPreview, isExcelLaborContract } from '../lib/excelPreview';
 import { parseWordBlobForPreview, isWordLaborContract } from '../lib/wordPreview';
+import { getAdaptivePollInterval } from '../lib/device.js';
 
 function isRowObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -346,7 +347,7 @@ export default function Users({ user, embedded = false }) {
 
   const load = () =>
     usersApi.list()
-      .then((data) => { setList(asArrayOfObjects(data)); setListKey((k) => k + 1); })
+      .then((data) => { setList(asArrayOfObjects(data)); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
 
@@ -358,9 +359,26 @@ export default function Users({ user, embedded = false }) {
   }, [loadRoles]);
 
   useEffect(() => {
-    const t = setInterval(() => usersApi.list().then((data) => { setList(asArrayOfObjects(data)); setListKey((k) => k + 1); }).catch(() => {}), 5000);
-    return () => clearInterval(t);
-  }, []);
+    const pollMs = getAdaptivePollInterval(5000, {
+      mobileMs: 15000,
+      lowPowerMs: 30000,
+    });
+    const tick = () => {
+      if (document.visibilityState !== 'visible' || editing) return;
+      usersApi.list().then((data) => { setList(asArrayOfObjects(data)); }).catch(() => {});
+    };
+    const t = setInterval(tick, pollMs);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [editing]);
 
   const onFaceVideoReady = useCallback((el) => {
     setFaceVideoEl(el);
