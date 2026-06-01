@@ -261,13 +261,14 @@ function ContractImageThumb({ userId, file, listKey, onOpen }) {
 }
 
 const emptyFilters = () => ({
-  login: '',
+  id: '',
+  has_avatar: '',
+  has_face: '',
   first_name: '',
   last_name: '',
   birth_date: '',
   passport_number: '',
   phone: '',
-  role: '',
   role_name: '',
   snils: '',
   inn: '',
@@ -949,14 +950,16 @@ export default function Users({ user, embedded = false }) {
   };
 
   const filteredList = list.filter((u) => {
-    if (!textMatch(u.login, filters.login)) return false;
+    if (!digitsMatch(u.id, filters.id)) return false;
+    if (filters.has_avatar === 'yes' && !u.avatar) return false;
+    if (filters.has_avatar === 'no' && !!u.avatar) return false;
+    if (filters.has_face === 'yes' && !u.has_face) return false;
+    if (filters.has_face === 'no' && !!u.has_face) return false;
     if (!textMatch(u.first_name, filters.first_name)) return false;
     if (!textMatch(u.last_name, filters.last_name)) return false;
     if (!textMatch(u.birth_date?.slice?.(0, 10) ?? u.birth_date, filters.birth_date)) return false;
     if (!textMatch(u.passport_number, filters.passport_number)) return false;
     if (!digitsMatch(u.phone, filters.phone)) return false;
-    if (filters.role === 'admin' && u.role !== 'admin') return false;
-    if (filters.role === 'user' && u.role === 'admin') return false;
     if (!textMatch(u.role === 'admin' ? 'Системный админ' : u.role_name, filters.role_name)) return false;
     if (!digitsMatch(u.snils, filters.snils)) return false;
     if (!digitsMatch(u.inn, filters.inn)) return false;
@@ -994,6 +997,14 @@ export default function Users({ user, embedded = false }) {
     if (sortBy === 'has_labor_contract') {
       va = a.has_labor_contract ? 1 : 0;
       vb = b.has_labor_contract ? 1 : 0;
+    }
+    if (sortBy === 'avatar') {
+      va = a.avatar ? 1 : 0;
+      vb = b.avatar ? 1 : 0;
+    }
+    if (sortBy === 'has_face') {
+      va = a.has_face ? 1 : 0;
+      vb = b.has_face ? 1 : 0;
     }
     if (typeof va === 'string') va = va.toLowerCase();
     if (typeof vb === 'string') vb = vb.toLowerCase();
@@ -1690,89 +1701,74 @@ export default function Users({ user, embedded = false }) {
 
 
       <div className="table-wrap">
-        <div className="filter-toolbar">
-          <div className="filter-field w-24">
-            <span className="filter-label">Логин</span>
-            <input type="text" value={filters.login} onChange={(e) => setFilters((f) => ({ ...f, login: e.target.value }))} className={filterInputCls} />
-          </div>
-          <div className="filter-field w-20">
-            <span className="filter-label">Имя</span>
-            <input type="text" value={filters.first_name} onChange={(e) => setFilters((f) => ({ ...f, first_name: e.target.value }))} className={filterInputCls} />
-          </div>
-          <div className="filter-field w-20">
-            <span className="filter-label">Фамилия</span>
-            <input type="text" value={filters.last_name} onChange={(e) => setFilters((f) => ({ ...f, last_name: e.target.value }))} className={filterInputCls} />
-          </div>
-          <div className="filter-field w-20">
-            <span className="filter-label">Телефон</span>
-            <input type="text" value={filters.phone} onChange={(e) => setFilters((f) => ({ ...f, phone: e.target.value }))} className={filterInputCls} />
-          </div>
-          <div className="filter-field w-20">
-            <span className="filter-label">Роль</span>
-            <input type="text" value={filters.role_name} onChange={(e) => setFilters((f) => ({ ...f, role_name: e.target.value }))} className={filterInputCls} />
-          </div>
-          <div className="filter-field w-20">
-            <span className="filter-label">Профиль</span>
-            <select value={filters.profile_active} onChange={(e) => setFilters((f) => ({ ...f, profile_active: e.target.value }))} className={filterInputCls}>
-              <option value="">Все</option>
-              <option value="active">Активный</option>
-              <option value="inactive">Неактивный</option>
-            </select>
-          </div>
-          <div className="filter-field w-20">
-            <span className="filter-label">Статус</span>
-            <select value={filters.employment_status} onChange={(e) => setFilters((f) => ({ ...f, employment_status: e.target.value }))} className={filterInputCls}>
-              <option value="">Все</option>
-              <option value="working">Работает</option>
-              <option value="vacation">В отпуске</option>
-              <option value="fired">Уволен</option>
-            </select>
-          </div>
-          <div className="filter-field w-16">
-            <span className="filter-label">Договор</span>
-            <select value={filters.has_labor_contract} onChange={(e) => setFilters((f) => ({ ...f, has_labor_contract: e.target.value }))} className={filterInputCls}>
-              <option value="">—</option>
-              <option value="yes">Есть</option>
-              <option value="no">Нет</option>
-            </select>
-          </div>
-          <div className="filter-field w-20">
-            <span className="filter-label">Паспорт</span>
-            <input type="text" value={filters.passport_number} onChange={(e) => setFilters((f) => ({ ...f, passport_number: e.target.value }))} className={filterInputCls} />
-          </div>
-          <div className="filter-field w-20">
-            <span className="filter-label">СНИЛС</span>
-            <input type="text" value={filters.snils} onChange={(e) => setFilters((f) => ({ ...f, snils: e.target.value }))} className={filterInputCls} />
-          </div>
-          <div className="filter-field w-16">
-            <span className="filter-label">ИНН</span>
-            <input type="text" value={filters.inn} onChange={(e) => setFilters((f) => ({ ...f, inn: e.target.value }))} className={filterInputCls} />
-          </div>
-          <div className="filter-field w-20">
-            <span className="filter-label">Организация</span>
-            <input type="text" value={filters.employment_org} onChange={(e) => setFilters((f) => ({ ...f, employment_org: e.target.value }))} className={filterInputCls} />
-          </div>
-          <div className="filter-field w-16">
-            <span className="filter-label">UID</span>
-            <input type="text" value={filters.internal_uid} onChange={(e) => setFilters((f) => ({ ...f, internal_uid: e.target.value }))} className={filterInputCls} />
-          </div>
-          <div className="filter-field w-24">
-            <span className="filter-label">Карта КИГ</span>
-            <input type="text" value={filters.kig_card_number} onChange={(e) => setFilters((f) => ({ ...f, kig_card_number: e.target.value }))} className={filterInputCls} />
-          </div>
-          <div className="filter-field w-24">
-            <span className="filter-label">Срок КИГ</span>
-            <input type="date" value={filters.kig_card_expires_at} onChange={(e) => setFilters((f) => ({ ...f, kig_card_expires_at: e.target.value }))} className={filterInputCls} />
-          </div>
-        </div>
         <div className="overflow-x-auto max-h-[calc(100vh-7.5rem)] overflow-y-auto">
           <table className="table-compact">
             <thead className="sticky top-0 bg-surface-900 z-10">
               <tr>
-                <th className="w-8 text-center text-zinc-500 text-2xs font-normal">№</th>
-                <th className="w-10">Фото</th>
-                <th className="w-8 text-center" title="Шаблон лица">Лицо</th>
-                <th><button type="button" onClick={() => toggleSort('login')} className="sort-btn">Логин <SortIcon column="login" /></button></th>
+                <th className="w-8">
+                  <input
+                    type="text"
+                    value={filters.id}
+                    onChange={(e) => setFilters((f) => ({ ...f, id: e.target.value }))}
+                    className={filterInputCls}
+                    placeholder="id"
+                  />
+                </th>
+                <th className="w-10">
+                  <select value={filters.has_avatar} onChange={(e) => setFilters((f) => ({ ...f, has_avatar: e.target.value }))} className={filterInputCls}>
+                    <option value="">Все</option>
+                    <option value="yes">Есть</option>
+                    <option value="no">Нет</option>
+                  </select>
+                </th>
+                <th className="w-8">
+                  <select value={filters.has_face} onChange={(e) => setFilters((f) => ({ ...f, has_face: e.target.value }))} className={filterInputCls}>
+                    <option value="">Все</option>
+                    <option value="yes">Есть</option>
+                    <option value="no">Нет</option>
+                  </select>
+                </th>
+                <th><input type="text" value={filters.first_name} onChange={(e) => setFilters((f) => ({ ...f, first_name: e.target.value }))} className={filterInputCls} placeholder="Имя" /></th>
+                <th><input type="text" value={filters.last_name} onChange={(e) => setFilters((f) => ({ ...f, last_name: e.target.value }))} className={filterInputCls} placeholder="Фамилия" /></th>
+                <th className="whitespace-nowrap"><input type="date" value={filters.birth_date} onChange={(e) => setFilters((f) => ({ ...f, birth_date: e.target.value }))} className={filterInputCls} /></th>
+                <th><input type="text" value={filters.passport_number} onChange={(e) => setFilters((f) => ({ ...f, passport_number: e.target.value }))} className={filterInputCls} placeholder="Паспорт" /></th>
+                <th><input type="text" value={filters.phone} onChange={(e) => setFilters((f) => ({ ...f, phone: e.target.value }))} className={filterInputCls} placeholder="Тел." /></th>
+                <th><input type="text" value={filters.role_name} onChange={(e) => setFilters((f) => ({ ...f, role_name: e.target.value }))} className={filterInputCls} placeholder="Роль" /></th>
+                <th>
+                  <select value={filters.profile_active} onChange={(e) => setFilters((f) => ({ ...f, profile_active: e.target.value }))} className={filterInputCls}>
+                    <option value="">Все</option>
+                    <option value="active">Активный</option>
+                    <option value="inactive">Неактивный</option>
+                  </select>
+                </th>
+                <th>
+                  <select value={filters.employment_status} onChange={(e) => setFilters((f) => ({ ...f, employment_status: e.target.value }))} className={filterInputCls}>
+                    <option value="">Все</option>
+                    <option value="working">Работает</option>
+                    <option value="vacation">В отпуске</option>
+                    <option value="fired">Уволен</option>
+                  </select>
+                </th>
+                <th className="min-w-[88px]">
+                  <select value={filters.has_labor_contract} onChange={(e) => setFilters((f) => ({ ...f, has_labor_contract: e.target.value }))} className={filterInputCls}>
+                    <option value="">Все</option>
+                    <option value="yes">Есть</option>
+                    <option value="no">Нет</option>
+                  </select>
+                </th>
+                <th><input type="text" value={filters.snils} onChange={(e) => setFilters((f) => ({ ...f, snils: e.target.value }))} className={filterInputCls} placeholder="СНИЛС" /></th>
+                <th><input type="text" value={filters.inn} onChange={(e) => setFilters((f) => ({ ...f, inn: e.target.value }))} className={filterInputCls} placeholder="ИНН" /></th>
+                <th className="whitespace-nowrap"><input type="date" value={filters.employment_date} onChange={(e) => setFilters((f) => ({ ...f, employment_date: e.target.value }))} className={filterInputCls} /></th>
+                <th><input type="text" value={filters.employment_org} onChange={(e) => setFilters((f) => ({ ...f, employment_org: e.target.value }))} className={filterInputCls} placeholder="Организ." /></th>
+                <th><input type="text" value={filters.internal_uid} onChange={(e) => setFilters((f) => ({ ...f, internal_uid: e.target.value }))} className={filterInputCls} placeholder="UID" /></th>
+                <th><input type="text" value={filters.kig_card_number} onChange={(e) => setFilters((f) => ({ ...f, kig_card_number: e.target.value }))} className={filterInputCls} placeholder="Карта КИГ" /></th>
+                <th className="whitespace-nowrap"><input type="date" value={filters.kig_card_expires_at} onChange={(e) => setFilters((f) => ({ ...f, kig_card_expires_at: e.target.value }))} className={filterInputCls} /></th>
+                <th className="w-20" />
+              </tr>
+              <tr>
+                <th className="w-8 text-center text-zinc-500 text-2xs font-normal"><button type="button" onClick={() => toggleSort('id')} className="sort-btn">№ <SortIcon column="id" /></button></th>
+                <th className="w-10"><button type="button" onClick={() => toggleSort('avatar')} className="sort-btn">Фото <SortIcon column="avatar" /></button></th>
+                <th className="w-8 text-center" title="Шаблон лица"><button type="button" onClick={() => toggleSort('has_face')} className="sort-btn">Лицо <SortIcon column="has_face" /></button></th>
                 <th><button type="button" onClick={() => toggleSort('first_name')} className="sort-btn">Имя <SortIcon column="first_name" /></button></th>
                 <th><button type="button" onClick={() => toggleSort('last_name')} className="sort-btn">Фамилия <SortIcon column="last_name" /></button></th>
                 <th className="whitespace-nowrap"><button type="button" onClick={() => toggleSort('birth_date')} className="sort-btn">Д.рожд. <SortIcon column="birth_date" /></button></th>
@@ -1793,13 +1789,13 @@ export default function Users({ user, embedded = false }) {
               </tr>
             </thead>
             <tbody>
-              {sortedList.map((u, idx) => (
+              {sortedList.map((u) => (
                 <tr
                   key={u.id}
                   className="cursor-pointer hover:bg-white/5"
                   onClick={() => { if (editing !== u.id) openEdit(u); }}
                 >
-                  <td className="text-center text-zinc-500 text-2xs tabular-nums">{idx + 1}</td>
+                  <td className="text-center text-zinc-500 text-2xs tabular-nums">{u.id}</td>
                   <td onClick={(e) => e.stopPropagation()}>
                     {u.avatar ? (
                       <button
@@ -1828,7 +1824,6 @@ export default function Users({ user, embedded = false }) {
                       {u.has_face ? <span className="text-emerald-400">✓</span> : <span className="text-zinc-600">—</span>}
                     </button>
                   </td>
-                  <CopyTableCell value={u.login} className="font-mono text-white" />
                   <CopyTableCell value={u.first_name} className="text-zinc-300" />
                   <CopyTableCell value={u.last_name} className="text-zinc-300" />
                   <CopyTableCell value={u.birth_date ? String(u.birth_date).slice(0, 10) : ''} className="text-zinc-500 whitespace-nowrap tabular-nums" />
@@ -1895,7 +1890,7 @@ export default function Users({ user, embedded = false }) {
               ))}
               {sortedList.length === 0 && (
                 <tr>
-                  <td colSpan={21} className="p-4 text-center text-zinc-500 text-xs">
+                  <td colSpan={20} className="p-4 text-center text-zinc-500 text-xs">
                     {list.length === 0 ? 'Нет пользователей' : 'Нет данных по фильтрам'}
                   </td>
                 </tr>
