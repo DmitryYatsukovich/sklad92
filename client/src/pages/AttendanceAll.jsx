@@ -1231,6 +1231,7 @@ export default function AttendanceAll({ user }) {
   const [candidates, setCandidates] = useState([]);
   const [selectedMemberId, setSelectedMemberId] = useState('');
   const [busy, setBusy] = useState(false);
+  const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine);
   const pendingMutations = usePendingMutations();
 
   const pendingTimesheet = useMemo(
@@ -1257,6 +1258,18 @@ export default function AttendanceAll({ user }) {
   useEffect(() => {
     if (!canChangeMonth) setMonth(currentMonthValue());
   }, [canChangeMonth]);
+
+  useEffect(() => {
+    const syncNetworkStatus = () => setNetworkOnline(navigator.onLine);
+    window.addEventListener('online', syncNetworkStatus);
+    window.addEventListener('offline', syncNetworkStatus);
+    return () => {
+      window.removeEventListener('online', syncNetworkStatus);
+      window.removeEventListener('offline', syncNetworkStatus);
+    };
+  }, []);
+
+  const highlightPending = !networkOnline;
 
   const dayMeta = useMemo(
     () => (data?.days || []).map((d) => ({ date: d, ...dayHeader(d) })),
@@ -1532,7 +1545,7 @@ export default function AttendanceAll({ user }) {
         <span><span className="text-zinc-600">·</span> — нет отметки</span>
         {canEditTimes && <span>Клик по ячейке — приход и уход</span>}
       </div>
-      {(pendingTimesheet.pendingUsers.size > 0 || pendingTimesheet.pendingDays.size > 0) && (
+      {highlightPending && (pendingTimesheet.pendingUsers.size > 0 || pendingTimesheet.pendingDays.size > 0) && (
         <p className="text-2xs text-amber-400/90 border border-amber-500/30 rounded px-2 py-1 bg-amber-500/10">
           Несинхронизированные изменения в табеле отображаются тускло и отправятся на сервер при появлении сети.
         </p>
@@ -1642,12 +1655,13 @@ export default function AttendanceAll({ user }) {
             <tbody>
               {group.employees.map((emp) => {
                 const userIdNum = Number(emp.user_id);
-                const rowPending = pendingTimesheet.pendingUsers.has(userIdNum) || emp._pending;
+                const rowPendingRaw = pendingTimesheet.pendingUsers.has(userIdNum) || emp._pending;
+                const rowPendingVisual = highlightPending && rowPendingRaw;
                 return (
                 <tr
                   key={emp.user_id}
-                  className={withPendingRowClass('border-b border-white/5 hover:bg-white/[0.02]', { _pending: rowPending })}
-                  title={rowPending ? 'Ожидает отправки на сервер' : undefined}
+                  className={withPendingRowClass('border-b border-white/5 hover:bg-white/[0.02]', { _pending: rowPendingVisual })}
+                  title={rowPendingVisual ? 'Ожидает отправки на сервер' : undefined}
                 >
                   <td
                     className="timesheet-name text-zinc-200 sticky left-0 bg-surface-900 border-r border-white/10 font-medium truncate"
@@ -1664,13 +1678,14 @@ export default function AttendanceAll({ user }) {
                     </td>
                   )}
                   {dayMeta.map(({ date, isWeekend }) => {
-                    const cellPending = pendingTimesheet.pendingDays.has(`${userIdNum}|${date}`);
+                    const cellPendingRaw = pendingTimesheet.pendingDays.has(`${userIdNum}|${date}`);
+                    const cellPendingVisual = highlightPending && (rowPendingRaw || cellPendingRaw);
                     return (
                     <td
                       key={date}
                       className={withPendingRowClass(
                         `timesheet-day tabular-nums ${isWeekend ? 'bg-white/[0.02]' : ''}`,
-                        { _pending: rowPending || cellPending },
+                        { _pending: cellPendingVisual },
                       )}
                     >
                       <TimesheetCell

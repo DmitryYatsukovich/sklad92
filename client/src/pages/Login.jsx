@@ -9,9 +9,11 @@ import {
   saveOfflineCredentials,
   verifyOfflinePassword,
   setOfflineSession,
+  clearOfflineSession,
   setPrefetchNotice,
   formatPrefetchStatsMessage,
 } from '../lib/offlineCache';
+import { canUseOfflineMode } from '../lib/offlineCache/access.js';
 
 export default function Login({ onLogin }) {
   const [login, setLogin] = useState('');
@@ -76,8 +78,13 @@ export default function Login({ onLogin }) {
       }
 
       const { user } = await auth.login(loginNorm, password);
-      // Всегда включаем офлайн-кэш устройства: вход онлайн = полная предзагрузка данных.
-      setQuickDeviceEnabled(true);
+      const offlineEnabled = canUseOfflineMode(user);
+      setQuickDeviceEnabled(offlineEnabled);
+      if (!offlineEnabled) {
+        await clearOfflineSession().catch(() => {});
+        await finishLogin(user, { withOfflineSession: false });
+        return;
+      }
       await persistCachedUser(user);
       await saveOfflineCredentials(loginNorm, password);
       setPrefetchStatus('Загрузка данных на устройство…');
@@ -158,7 +165,7 @@ export default function Login({ onLogin }) {
             </div>
             {!offlineMode && (
               <p className="text-2xs text-zinc-300 border border-white/10 rounded px-2 py-1.5 bg-white/[0.02]">
-                При входе онлайн приложение автоматически загружает и сохраняет все доступные данные на устройство для офлайн-работы.
+                При входе онлайн приложение загружает данные на устройство, если для вашей роли разрешён офлайн-режим.
               </p>
             )}
             {prefetchStatus && (

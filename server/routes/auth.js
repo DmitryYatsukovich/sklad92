@@ -7,6 +7,7 @@ import { PERMISSION_KEYS } from '../lib/app-permissions.js';
 import { userAccessBlockReason } from '../lib/user-access.js';
 
 const router = Router();
+const ACCESS_PERMISSION_KEYS = PERMISSION_KEYS.filter((k) => k !== 'can_offline_mode');
 
 function userPayload(base, perms = {}) {
   return {
@@ -49,7 +50,7 @@ router.post('/login', async (req, res) => {
   );
   const p = perm.rows[0] || {};
   const hasAnyAccess =
-    user.role === 'admin' || PERMISSION_KEYS.some((k) => p[k]);
+    user.role === 'admin' || ACCESS_PERMISSION_KEYS.some((k) => p[k]);
   if (!hasAnyAccess) {
     return res.status(403).json({
       error: 'Нет назначенных прав доступа. Обратитесь к администратору.',

@@ -80,6 +80,7 @@ export default function RolesTab() {
       can_warehouse: true,
       can_issuance: true,
       can_production: true,
+      can_offline_mode: true,
     });
     setError('');
     setFormOpen(true);

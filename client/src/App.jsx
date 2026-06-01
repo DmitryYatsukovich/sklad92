@@ -17,6 +17,7 @@ import {
   refreshOfflineCacheIfNeeded,
   initOfflineCacheAutoSync,
 } from './lib/offlineCache';
+import { canUseOfflineMode } from './lib/offlineCache/access.js';
 
 const Warehouse = lazy(() => import('./pages/Warehouse'));
 const Issuance = lazy(() => import('./pages/Issuance'));
@@ -124,6 +125,11 @@ export default function App() {
       if (!(await hasValidOfflineSession())) return false;
       const cached = await getCachedUser();
       if (!cached || cancelled) return false;
+      if (!canUseOfflineMode(cached)) {
+        setQuickDeviceEnabled(false);
+        await clearOfflineSession().catch(() => {});
+        return false;
+      }
       setUser(cached);
       return true;
     }
@@ -152,13 +158,15 @@ export default function App() {
         const { user: u } = await auth.me();
         if (!cancelled) {
           if (u) {
-            setQuickDeviceEnabled(true);
+            setQuickDeviceEnabled(canUseOfflineMode(u));
           }
           setUser(u);
           if (u) {
-            await setOfflineSession(u);
-            if (navigator.onLine) {
+            if (canUseOfflineMode(u)) {
+              await setOfflineSession(u);
               await refreshOfflineCacheIfNeeded(u, { silent: true }).catch(() => {});
+            } else {
+              await clearOfflineSession().catch(() => {});
             }
           }
         }
@@ -191,7 +199,7 @@ export default function App() {
   useEffect(() => {
     if (!user) return undefined;
     setActionLogUser(user);
-    if (isQuickDeviceEnabled()) {
+    if (isQuickDeviceEnabled() && canUseOfflineMode(user)) {
       setOfflineSession(user).catch(() => {});
     }
     return initActionLogSync();
@@ -214,8 +222,11 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     const onOnline = () => {
-      prewarmTabBundles(userRef.current);
-      if (isQuickDeviceEnabled()) refreshOfflineCacheIfNeeded(user, { silent: false }).catch(() => {});
+      const currentUser = userRef.current;
+      prewarmTabBundles(currentUser);
+      if (currentUser && isQuickDeviceEnabled() && canUseOfflineMode(currentUser)) {
+        refreshOfflineCacheIfNeeded(currentUser, { silent: false }).catch(() => {});
+      }
       auth.me().then(({ user: u }) => { if (u) setUser(u); }).catch(() => {});
     };
     prewarmTabBundles(user);
@@ -230,7 +241,12 @@ export default function App() {
         .then(({ user: u }) => {
           if (u) {
             setUser(u);
-            if (isQuickDeviceEnabled()) refreshOfflineCacheIfNeeded(u, { silent: true }).catch(() => {});
+            setQuickDeviceEnabled(canUseOfflineMode(u));
+            if (isQuickDeviceEnabled() && canUseOfflineMode(u)) {
+              refreshOfflineCacheIfNeeded(u, { silent: true }).catch(() => {});
+            } else {
+              clearOfflineSession().catch(() => {});
+            }
           }
         })
         .catch(() => {});
@@ -239,7 +255,10 @@ export default function App() {
   }, [user?.id]);
 
   const onLogin = (u) => {
-    setQuickDeviceEnabled(true);
+    setQuickDeviceEnabled(canUseOfflineMode(u));
+    if (!canUseOfflineMode(u)) {
+      clearOfflineSession().catch(() => {});
+    }
     markActiveSession(true);
     setUser(u);
   };

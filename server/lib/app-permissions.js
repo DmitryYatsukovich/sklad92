@@ -32,6 +32,12 @@ export const APP_PERMISSIONS = [
     actionsScopeOption: true,
   },
   {
+    key: 'can_offline_mode',
+    label: 'Оффлайн режим',
+    description: 'Разрешает сохранение данных на устройстве и вход/работу без сети',
+    group: 'Основные разделы',
+  },
+  {
     key: 'can_face',
     label: 'Отметка по лицу',
     description: 'Сканирование лица для отметки прихода (нужен шаблон лица)',

@@ -83,6 +83,8 @@ const statements = [
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_attendance_import BOOLEAN DEFAULT false`,
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_attendance_change_month BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_attendance_change_month BOOLEAN DEFAULT false`,
+  `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_offline_mode BOOLEAN DEFAULT true`,
+  `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_offline_mode BOOLEAN DEFAULT true`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_face BOOLEAN DEFAULT false`,
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_face BOOLEAN DEFAULT false`,
   `ALTER TABLE issuances ADD COLUMN IF NOT EXISTS production_confirmed BOOLEAN DEFAULT false`,
