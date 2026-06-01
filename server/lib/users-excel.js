@@ -520,17 +520,36 @@ function parseImportSheetXlsx(buffer) {
 }
 
 export async function parseImportSheet(buffer) {
+  const normalizeImportParseError = (primary, fallback) => {
+    const raw = [primary?.message, fallback?.message].filter(Boolean).join(' | ');
+    const msg = String(raw || '').toLowerCase();
+    if (
+      msg.includes('corrupted zip')
+      || msg.includes('central directory')
+      || msg.includes('zip')
+      || msg.includes('end of central directory')
+      || msg.includes('invalid signature')
+      || msg.includes('unsupported file')
+    ) {
+      return new Error(
+        'Файл Excel повреждён или загружен не полностью. '
+        + 'Скачайте экспорт заново и выберите оригинальный .xlsx файл.',
+      );
+    }
+    return primary || fallback || new Error('Ошибка чтения файла Excel');
+  };
+
   try {
     return await parseImportSheetExcelJs(buffer);
-  } catch (e) {
-    const msg = String(e.message || '');
+  } catch (primaryErr) {
+    const msg = String(primaryErr?.message || '');
     if (msg.includes('Логин') || msg.includes('пуст') || msg.includes('Нет строк') || msg.includes('заполненных')) {
-      throw e;
+      throw primaryErr;
     }
     try {
       return parseImportSheetXlsx(buffer);
-    } catch {
-      throw e;
+    } catch (fallbackErr) {
+      throw normalizeImportParseError(primaryErr, fallbackErr);
     }
   }
 }
