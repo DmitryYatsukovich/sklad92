@@ -56,7 +56,15 @@ const upload = multer({
   },
 });
 
-const DIST_THRESHOLD = 0.6;
+function readNumberEnv(name, fallback) {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+}
+
+// Более строгие дефолты, чтобы снизить ложные срабатывания "чужого" пользователя.
+const DIST_THRESHOLD = readNumberEnv('FACE_MATCH_THRESHOLD', 0.5);
+const DIST_MIN_GAP = readNumberEnv('FACE_MATCH_MIN_GAP', 0.04);
+const DIST_MAX_RATIO = readNumberEnv('FACE_MATCH_MAX_RATIO', 0.94);
 
 function euclideanDistance(a, b) {
   if (!a?.length || !b?.length || a.length !== b.length) return Infinity;
@@ -69,8 +77,26 @@ function euclideanDistance(a, b) {
 }
 
 function normalizeDescriptor(raw) {
-  if (!Array.isArray(raw) || raw.length < 128) return null;
-  return raw.map((x) => Number(x));
+  if (!Array.isArray(raw) || raw.length !== 128) return null;
+  const values = raw.map((x) => Number(x));
+  if (values.some((x) => !Number.isFinite(x))) return null;
+  return values;
+}
+
+function normalizeStoredDescriptor(raw) {
+  if (!raw) return null;
+  let parsed = raw;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(parsed) || parsed.length !== 128) return null;
+  const values = parsed.map((x) => Number(x));
+  if (values.some((x) => !Number.isFinite(x))) return null;
+  return values;
 }
 
 /** Найти пользователя по дескриптору лица */
@@ -78,21 +104,34 @@ async function matchUserByDescriptor(descriptor) {
   const r = await pool.query(
     `SELECT id, login, display_name, first_name, last_name, face_descriptor
      FROM users
-     WHERE face_descriptor IS NOT NULL`
+     WHERE face_descriptor IS NOT NULL
+       AND COALESCE(profile_active, true) = true
+       AND COALESCE(employment_status, 'working') <> 'fired'`
   );
   let best = null;
   let bestDist = Infinity;
+  let secondBestDist = Infinity;
   for (const row of r.rows) {
-    const stored = row.face_descriptor;
-    if (!Array.isArray(stored)) continue;
+    const stored = normalizeStoredDescriptor(row.face_descriptor);
+    if (!stored) continue;
     const d = euclideanDistance(descriptor, stored);
+    if (!Number.isFinite(d)) continue;
     if (d < bestDist) {
+      secondBestDist = bestDist;
       bestDist = d;
       best = row;
+    } else if (d < secondBestDist) {
+      secondBestDist = d;
     }
   }
   if (!best || bestDist > DIST_THRESHOLD) return null;
-  return { user: best, distance: bestDist };
+  if (Number.isFinite(secondBestDist)) {
+    const gap = secondBestDist - bestDist;
+    const ratio = secondBestDist > 0 ? (bestDist / secondBestDist) : 1;
+    // Если лучший и второй кандидат слишком близки — распознавание неоднозначно.
+    if (gap < DIST_MIN_GAP || ratio > DIST_MAX_RATIO) return null;
+  }
+  return { user: best, distance: bestDist, second_distance: Number.isFinite(secondBestDist) ? secondBestDist : null };
 }
 
 router.use(requireAuth);
