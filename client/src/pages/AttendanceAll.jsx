@@ -510,6 +510,35 @@ function calcGroupTotals(employees) {
   };
 }
 
+function hasCheckInMark(cell) {
+  if (!isRowObject(cell)) return false;
+  if (cell.check_in_at) return true;
+  if (typeof cell.check_in === 'string' && cell.check_in.trim()) return true;
+  return false;
+}
+
+function calcGroupPresenceByDays(employees, dayKeys) {
+  const perDay = Object.fromEntries((dayKeys || []).map((d) => [d, 0]));
+  let withCheckInInPeriod = 0;
+
+  for (const emp of employees || []) {
+    const days = isRowObject(emp?.days) ? emp.days : {};
+    let hasAnyCheckIn = false;
+    for (const date of dayKeys || []) {
+      if (!hasCheckInMark(days[date])) continue;
+      perDay[date] = (perDay[date] || 0) + 1;
+      hasAnyCheckIn = true;
+    }
+    if (hasAnyCheckIn) withCheckInInPeriod += 1;
+  }
+
+  return {
+    totalEmployees: Array.isArray(employees) ? employees.length : 0,
+    withCheckInInPeriod,
+    perDay,
+  };
+}
+
 function orgGroupLabel(name) {
   const s = name && String(name).trim();
   return s || 'Без организации';
@@ -1275,6 +1304,7 @@ export default function AttendanceAll({ user }) {
     () => (data?.days || []).map((d) => ({ date: d, ...dayHeader(d) })),
     [data?.days],
   );
+  const dayKeys = useMemo(() => dayMeta.map((d) => d.date), [dayMeta]);
 
   const periodTitle = useMemo(
     () => formatMonthTitle(data?.from, data?.to),
@@ -1563,12 +1593,18 @@ export default function AttendanceAll({ user }) {
         <div className="space-y-8">
           {employeeGroups.map((group) => {
             const groupTotals = calcGroupTotals(group.employees);
+            const groupPresence = calcGroupPresenceByDays(group.employees, dayKeys);
             return (
             <section key={group.label} className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2">
-                <h3 className="text-sm font-semibold text-zinc-200">
-                  {group.label}
-                </h3>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-zinc-200">
+                    {group.label}
+                  </h3>
+                  <p className="text-2xs text-zinc-500 mt-1">
+                    Общее количество сотрудников: {groupPresence.totalEmployees}
+                  </p>
+                </div>
                 {canExportTimesheet && canViewAll && (
                   <button
                     type="button"
@@ -1751,6 +1787,39 @@ export default function AttendanceAll({ user }) {
                 </tr>
                 );
               })}
+              <tr className="border-t border-white/10 bg-white/[0.02]">
+                <td
+                  className="timesheet-name text-sky-200 sticky left-0 bg-surface-900 border-r border-white/10 font-semibold"
+                  title="Количество сотрудников на площадке (есть отметка прихода)"
+                >
+                  На площадке
+                </td>
+                {showPayColumns && (
+                  <td className="timesheet-org text-zinc-500 border-r border-white/10 text-2xs">
+                    по отметке прихода
+                  </td>
+                )}
+                {dayMeta.map(({ date, isWeekend }) => (
+                  <td
+                    key={`presence-${group.label}-${date}`}
+                    className={`timesheet-day tabular-nums font-semibold text-sky-300 ${
+                      isWeekend ? 'bg-white/[0.03]' : ''
+                    }`}
+                    title="Если сотрудник отметил приход, он считается на площадке"
+                  >
+                    {groupPresence.perDay[date] || 0}
+                  </td>
+                ))}
+                <td
+                  className="timesheet-total font-semibold tabular-nums text-sky-300 border-l border-white/10"
+                  title="Сотрудников с отметкой прихода за выбранный период"
+                >
+                  {groupPresence.withCheckInInPeriod}
+                </td>
+                {showPayColumns && (
+                  <td className="border-l border-white/10" colSpan={5} />
+                )}
+              </tr>
             </tbody>
           </table>
               </div>
