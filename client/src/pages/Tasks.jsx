@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { tasks as tasksApi } from '../api';
 import { useAutoRefreshOnVisible } from '../hooks/useAutoRefreshOnVisible';
 
@@ -94,10 +94,12 @@ export default function Tasks({ user }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [editingId, setEditingId] = useState(null);
+  const [busyTaskId, setBusyTaskId] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [assigneeFilter, setAssigneeFilter] = useState('all');
   const [form, setForm] = useState(() => makeDefaultForm());
+  const loadSeqRef = useRef(0);
 
   const resetForm = useCallback(() => {
     setEditingId(null);
@@ -105,10 +107,13 @@ export default function Tasks({ user }) {
   }, [objects, assignableUsers]);
 
   const load = useCallback(async (silent = false) => {
+    const seq = loadSeqRef.current + 1;
+    loadSeqRef.current = seq;
     if (!silent) setLoading(true);
     setError('');
     try {
       const [listRes, metaRes] = await Promise.all([tasksApi.list(), tasksApi.meta()]);
+      if (loadSeqRef.current !== seq) return;
       const listItems = Array.isArray(listRes?.items) ? listRes.items : [];
       const metaUsers = Array.isArray(metaRes?.users) ? metaRes.users : [];
       const metaObjects = Array.isArray(metaRes?.objects) ? metaRes.objects : [];
@@ -132,9 +137,10 @@ export default function Tasks({ user }) {
         setFormOpen(false);
       }
     } catch (e) {
+      if (loadSeqRef.current !== seq) return;
       setError(e.message || 'Ошибка загрузки задач');
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent && loadSeqRef.current === seq) setLoading(false);
     }
   }, [editingId]);
 
@@ -222,13 +228,26 @@ export default function Tasks({ user }) {
     }
   };
 
-  const onToggleCompleted = async (row) => {
+  const onToggleCompleted = async (taskId, completed) => {
+    const normalizedId = Number.parseInt(taskId, 10);
+    if (!normalizedId) return;
+    if (Number.parseInt(busyTaskId, 10) === normalizedId) return;
+    setBusyTaskId(normalizedId);
     setError('');
     try {
-      await tasksApi.setCompleted(row.id, row.visible_status !== 'completed');
+      const updated = await tasksApi.setCompleted(normalizedId, completed);
+      if (updated && typeof updated === 'object') {
+        setItems((prev) => prev.map((row) => (
+          Number(row.id) === normalizedId
+            ? { ...row, ...updated }
+            : row
+        )));
+      }
       await load(true);
     } catch (e) {
       setError(e.message || 'Ошибка изменения статуса');
+    } finally {
+      setBusyTaskId((prev) => (Number.parseInt(prev, 10) === normalizedId ? null : prev));
     }
   };
 
@@ -441,16 +460,21 @@ export default function Tasks({ user }) {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-1.5">
-              <button type="button" className="btn-ghost text-2xs" onClick={() => onStartEdit(row)}>Изменить</button>
-              <button type="button" className="btn-ghost text-2xs" onClick={() => onToggleCompleted(row)}>
+              <button type="button" className="btn-ghost text-2xs" onClick={() => onStartEdit(row)} disabled={Number(busyTaskId) === Number(row.id)}>Изменить</button>
+              <button
+                type="button"
+                className="btn-ghost text-2xs"
+                onClick={() => onToggleCompleted(row.id, row.visible_status !== 'completed')}
+                disabled={Number(busyTaskId) === Number(row.id)}
+              >
                 {row.visible_status === 'completed' ? 'Вернуть' : 'Выполнена'}
               </button>
               {row.visible_status !== 'completed' ? (
-                <button type="button" className="btn-ghost text-2xs" onClick={() => onQuickExtend(row)}>
+                <button type="button" className="btn-ghost text-2xs" onClick={() => onQuickExtend(row)} disabled={Number(busyTaskId) === Number(row.id)}>
                   Продлить +1д
                 </button>
               ) : <span />}
-              <button type="button" className="btn-ghost text-2xs text-rose-300" onClick={() => onDelete(row)}>
+              <button type="button" className="btn-ghost text-2xs text-rose-300" onClick={() => onDelete(row)} disabled={Number(busyTaskId) === Number(row.id)}>
                 Удалить
               </button>
             </div>
@@ -502,18 +526,23 @@ export default function Tasks({ user }) {
                 </td>
                 <td>
                   <div className="flex flex-wrap gap-1.5">
-                    <button type="button" className="btn-ghost text-2xs" onClick={() => onStartEdit(row)}>
+                    <button type="button" className="btn-ghost text-2xs" onClick={() => onStartEdit(row)} disabled={Number(busyTaskId) === Number(row.id)}>
                       Изм.
                     </button>
                     {row.visible_status !== 'completed' && (
-                      <button type="button" className="btn-ghost text-2xs" onClick={() => onQuickExtend(row)}>
+                      <button type="button" className="btn-ghost text-2xs" onClick={() => onQuickExtend(row)} disabled={Number(busyTaskId) === Number(row.id)}>
                         Продлить +1д
                       </button>
                     )}
-                    <button type="button" className="btn-ghost text-2xs" onClick={() => onToggleCompleted(row)}>
+                    <button
+                      type="button"
+                      className="btn-ghost text-2xs"
+                      onClick={() => onToggleCompleted(row.id, row.visible_status !== 'completed')}
+                      disabled={Number(busyTaskId) === Number(row.id)}
+                    >
                       {row.visible_status === 'completed' ? 'Вернуть' : 'Выполнена'}
                     </button>
-                    <button type="button" className="btn-ghost text-2xs text-rose-300" onClick={() => onDelete(row)}>
+                    <button type="button" className="btn-ghost text-2xs text-rose-300" onClick={() => onDelete(row)} disabled={Number(busyTaskId) === Number(row.id)}>
                       Удалить
                     </button>
                   </div>
