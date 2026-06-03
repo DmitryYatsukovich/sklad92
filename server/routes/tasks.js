@@ -122,9 +122,9 @@ async function readTaskList(client, { userId, viewAll }) {
      LEFT JOIN users cu ON cu.id = t.created_by_user_id
      WHERE ($1::boolean OR t.assigned_user_id = $2)
      ORDER BY
-       CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END,
        t.due_at ASC,
-       t.created_at DESC`,
+       t.created_at DESC,
+       t.id DESC`,
     [viewAll, userId],
   );
   return r.rows.map(normalizeTaskRow);

@@ -243,7 +243,9 @@ export default function Tasks({ user }) {
             : row
         )));
       }
-      await load(true);
+      setTimeout(() => {
+        load(true).catch(() => {});
+      }, 900);
     } catch (e) {
       setError(e.message || 'Ошибка изменения статуса');
     } finally {
