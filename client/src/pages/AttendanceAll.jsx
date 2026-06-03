@@ -170,7 +170,7 @@ function isoToTimeInput(iso) {
 
 function employeeDisplayTitle(emp) {
   if (!emp) return '—';
-  const full = [emp.employeeFirstName ?? emp.first_name, emp.employeeLastName ?? emp.last_name]
+  const full = [emp.employeeLastName ?? emp.last_name, emp.employeeFirstName ?? emp.first_name]
     .filter(Boolean)
     .join(' ')
     .trim();
@@ -178,6 +178,16 @@ function employeeDisplayTitle(emp) {
   const name = emp.employeeName ?? emp.name;
   if (name && name !== emp.employeeLogin && name !== emp.login) return name;
   return name || emp.employeeLogin || emp.login || '—';
+}
+
+function employeeTableName(emp) {
+  if (!emp) return '—';
+  const full = [emp.last_name, emp.first_name]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+  if (full) return full;
+  return employeeDisplayTitle(emp);
 }
 
 function resolveTimeAttribution(cell, which) {
@@ -1623,11 +1633,6 @@ export default function AttendanceAll({ user }) {
                 <th className="timesheet-name text-left font-medium text-zinc-300 sticky left-0 bg-surface-900 z-20 border-r border-white/10">
                   Сотр.
                 </th>
-                {showPayColumns && (
-                  <th className="timesheet-org text-left font-medium text-zinc-300 border-r border-white/10">
-                    Организация
-                  </th>
-                )}
                 {dayMeta.map(({ date, day, wd, isWeekend }) => (
                   <th
                     key={date}
@@ -1693,6 +1698,7 @@ export default function AttendanceAll({ user }) {
                 const userIdNum = Number(emp.user_id);
                 const rowPendingRaw = pendingTimesheet.pendingUsers.has(userIdNum) || emp._pending;
                 const rowPendingVisual = highlightPending && rowPendingRaw;
+                const displayName = employeeTableName(emp);
                 return (
                 <tr
                   key={emp.user_id}
@@ -1700,19 +1706,11 @@ export default function AttendanceAll({ user }) {
                   title={rowPendingVisual ? 'Ожидает отправки на сервер' : undefined}
                 >
                   <td
-                    className="timesheet-name text-zinc-200 sticky left-0 bg-surface-900 border-r border-white/10 font-medium truncate"
-                    title={emp.name}
+                    className="timesheet-name text-zinc-200 sticky left-0 bg-surface-900 border-r border-white/10 font-medium whitespace-nowrap"
+                    title={displayName}
                   >
-                    {emp.name}
+                    {displayName}
                   </td>
-                  {showPayColumns && (
-                    <td
-                      className="timesheet-org truncate border-r border-white/10"
-                      title={orgGroupLabel(emp.organization_name)}
-                    >
-                      {orgGroupLabel(emp.organization_name)}
-                    </td>
-                  )}
                   {dayMeta.map(({ date, isWeekend }) => {
                     const cellPendingRaw = pendingTimesheet.pendingDays.has(`${userIdNum}|${date}`);
                     const cellPendingVisual = highlightPending && (rowPendingRaw || cellPendingRaw);
@@ -1732,7 +1730,7 @@ export default function AttendanceAll({ user }) {
                           if (cell.status === 'empty' && !canEditTimes) return;
                           setDetail({
                             userId: emp.user_id,
-                            employeeName: emp.name,
+                            employeeName: displayName,
                             employeeLogin: emp.login,
                             employeeLastName: emp.last_name,
                             employeeFirstName: emp.first_name,
@@ -1794,11 +1792,6 @@ export default function AttendanceAll({ user }) {
                 >
                   На площадке
                 </td>
-                {showPayColumns && (
-                  <td className="timesheet-org text-zinc-500 border-r border-white/10 text-2xs">
-                    по отметке прихода
-                  </td>
-                )}
                 {dayMeta.map(({ date, isWeekend }) => (
                   <td
                     key={`presence-${group.label}-${date}`}
