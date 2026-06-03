@@ -90,6 +90,17 @@ function normalizeDescriptor(raw) {
   return normalizeDescriptorVector(raw);
 }
 
+function normalizeDescriptorBatch(raw) {
+  if (Array.isArray(raw) && raw.length > 0 && Array.isArray(raw[0])) {
+    const list = raw
+      .map((item) => normalizeDescriptor(item))
+      .filter(Boolean);
+    return list.length ? list : null;
+  }
+  const one = normalizeDescriptor(raw);
+  return one ? [one] : null;
+}
+
 function normalizeStoredDescriptor(raw) {
   if (!raw) return null;
   let parsed = raw;
@@ -104,21 +115,13 @@ function normalizeStoredDescriptor(raw) {
   return normalizeDescriptorVector(parsed);
 }
 
-/** Найти пользователя по дескриптору лица */
-async function matchUserByDescriptor(descriptor) {
-  const r = await pool.query(
-    `SELECT id, login, display_name, first_name, last_name, face_descriptor
-     FROM users
-     WHERE face_descriptor IS NOT NULL
-       AND COALESCE(profile_active, true) = true
-       AND COALESCE(employment_status, 'working') <> 'fired'`
-  );
+function findBestFaceCandidate(descriptor, candidates) {
   let best = null;
   let bestDist = Infinity;
   let secondBestDist = Infinity;
-  for (const row of r.rows) {
-    const stored = normalizeStoredDescriptor(row.face_descriptor);
-    if (!stored) continue;
+  for (const row of candidates) {
+    const stored = row._face_descriptor;
+    if (!stored?.length) continue;
     const d = euclideanDistance(descriptor, stored);
     if (!Number.isFinite(d)) continue;
     if (d < bestDist) {
@@ -136,7 +139,80 @@ async function matchUserByDescriptor(descriptor) {
     // Если лучший и второй кандидат слишком близки — распознавание неоднозначно.
     if (gap < DIST_MIN_GAP || ratio > DIST_MAX_RATIO) return null;
   }
-  return { user: best, distance: bestDist, second_distance: Number.isFinite(secondBestDist) ? secondBestDist : null };
+  return {
+    user: best,
+    distance: bestDist,
+    second_distance: Number.isFinite(secondBestDist) ? secondBestDist : null,
+  };
+}
+
+function average(arr) {
+  if (!arr?.length) return Infinity;
+  return arr.reduce((s, x) => s + x, 0) / arr.length;
+}
+
+function matchUserByDescriptors(descriptors, candidates) {
+  const matches = [];
+  for (const descriptor of descriptors) {
+    const hit = findBestFaceCandidate(descriptor, candidates);
+    if (hit) matches.push(hit);
+  }
+  if (!matches.length) return null;
+
+  const grouped = new Map();
+  for (const hit of matches) {
+    const id = Number(hit.user.id);
+    const prev = grouped.get(id) || { user: hit.user, distances: [] };
+    prev.distances.push(hit.distance);
+    grouped.set(id, prev);
+  }
+  const ranked = Array.from(grouped.values())
+    .map((row) => ({
+      user: row.user,
+      count: row.distances.length,
+      avgDistance: average(row.distances),
+      minDistance: Math.min(...row.distances),
+    }))
+    .sort((a, b) => (b.count - a.count) || (a.avgDistance - b.avgDistance));
+  const top = ranked[0];
+  if (!top) return null;
+
+  const minVotes = descriptors.length >= 3 ? 2 : 1;
+  if (top.count < minVotes) return null;
+
+  const second = ranked[1];
+  if (second) {
+    if (second.count === top.count && Math.abs(top.avgDistance - second.avgDistance) < 0.025) {
+      return null;
+    }
+    if (second.count > top.count && second.minDistance <= top.minDistance + 0.015) {
+      return null;
+    }
+  }
+
+  if (top.avgDistance > DIST_THRESHOLD) return null;
+  return {
+    user: top.user,
+    distance: top.avgDistance,
+    matched_samples: top.count,
+    total_samples: descriptors.length,
+  };
+}
+
+async function loadFaceCandidates() {
+  const r = await pool.query(
+    `SELECT id, login, display_name, first_name, last_name, face_descriptor
+     FROM users
+     WHERE face_descriptor IS NOT NULL
+       AND COALESCE(profile_active, true) = true
+       AND COALESCE(employment_status, 'working') <> 'fired'`,
+  );
+  return r.rows
+    .map((row) => ({
+      ...row,
+      _face_descriptor: normalizeStoredDescriptor(row.face_descriptor),
+    }))
+    .filter((row) => Array.isArray(row._face_descriptor));
 }
 
 router.use(requireAuth);
@@ -183,11 +259,14 @@ router.post('/register-face', async (req, res) => {
 
 /** Распознать лицо и отметить приход/уход за сегодня */
 router.post('/scan', requirePermission('can_face'), async (req, res) => {
-  const descriptor = normalizeDescriptor(req.body?.descriptor);
-  if (!descriptor) {
-    return res.status(400).json({ error: 'Передайте массив descriptor' });
+  const descriptors = normalizeDescriptorBatch(
+    req.body?.descriptors ?? req.body?.descriptor,
+  );
+  if (!descriptors) {
+    return res.status(400).json({ error: 'Передайте descriptor (128 чисел) или descriptors (массив векторов)' });
   }
-  const match = await matchUserByDescriptor(descriptor);
+  const candidates = await loadFaceCandidates();
+  const match = matchUserByDescriptors(descriptors, candidates);
   if (!match) {
     return res.status(404).json({ error: 'Лицо не распознано. Зарегистрируйте шаблон в профиле или у администратора.' });
   }
@@ -239,6 +318,8 @@ router.post('/scan', requirePermission('can_face'), async (req, res) => {
         },
         record: ins.rows[0],
         distance: match.distance,
+        matched_samples: match.matched_samples || 1,
+        total_samples: match.total_samples || 1,
       });
     }
 
@@ -268,6 +349,8 @@ router.post('/scan', requirePermission('can_face'), async (req, res) => {
       },
       record: upd.rows[0],
       distance: match.distance,
+      matched_samples: match.matched_samples || 1,
+      total_samples: match.total_samples || 1,
     });
   } catch (e) {
     await client.query('ROLLBACK');

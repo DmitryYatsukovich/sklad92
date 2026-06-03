@@ -129,26 +129,34 @@ export default function FaceCheckIn({ user }) {
     setBusy(true);
     setStatus('');
     try {
-      let d = await captureFaceDescriptor(videoEl, {
-        stableSamples: 2,
-        maxSampleAttempts: 7,
-        maxDescriptorDrift: 0.24,
-        minScore: 0.35,
-      });
-      if (!d) {
-        // Фолбэк на более мягкие параметры, если лицо видно, но уверенности не хватило.
-        d = await captureFaceDescriptor(videoEl, {
+      const descriptors = [];
+      for (let attempt = 0; attempt < 6 && descriptors.length < 3; attempt += 1) {
+        const d = await captureFaceDescriptor(videoEl, {
           stableSamples: 1,
           maxSampleAttempts: 4,
-          maxDescriptorDrift: 0.3,
-          minScore: 0.25,
+          maxDescriptorDrift: 0.32,
+          minScore: 0.24,
         });
+        if (d) descriptors.push(d);
+        if (attempt < 5 && descriptors.length < 3) {
+          await new Promise((resolve) => setTimeout(resolve, 70));
+        }
       }
-      if (!d) {
+      if (descriptors.length < 2) {
+        const fallback = await captureFaceDescriptor(videoEl, {
+          stableSamples: 1,
+          maxSampleAttempts: 4,
+          maxDescriptorDrift: 0.36,
+          minScore: 0.2,
+        });
+        if (fallback) descriptors.push(fallback);
+      }
+      if (!descriptors.length) {
         setStatus('Лицо не распознано. Подойдите ближе к камере и повторите.', 'error');
         return;
       }
-      const r = await attendanceApi.scan(d);
+      const payload = descriptors.length > 1 ? descriptors : descriptors[0];
+      const r = await attendanceApi.scan(payload);
       const name = r.user?.display_name || r.user?.login || '';
       const tIn = formatMsgTime(r.record?.check_in_at);
       const tOut = formatMsgTime(r.record?.check_out_at);

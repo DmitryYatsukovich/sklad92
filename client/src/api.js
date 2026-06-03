@@ -471,7 +471,14 @@ export const attendance = {
         ...(faceImage ? { face_image: faceImage } : {}),
       }),
     }),
-  scan: (descriptor) => request('/api/attendance/scan', { method: 'POST', body: JSON.stringify({ descriptor }) }),
+  scan: (descriptorOrDescriptors) => request('/api/attendance/scan', {
+    method: 'POST',
+    body: JSON.stringify(
+      Array.isArray(descriptorOrDescriptors?.[0])
+        ? { descriptors: descriptorOrDescriptors }
+        : { descriptor: descriptorOrDescriptors },
+    ),
+  }),
   my: (limit) => request(`/api/attendance/my?limit=${limit || 60}`),
   all: (from, to) => {
     const q = new URLSearchParams();

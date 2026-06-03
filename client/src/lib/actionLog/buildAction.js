@@ -241,7 +241,7 @@ export function shouldQueueOfflineMutation(path, method) {
 }
 
 function attendancePayload(body) {
-  const { descriptor, face_image, ...rest } = body || {};
+  const { descriptor, descriptors, face_image, ...rest } = body || {};
   return rest;
 }
 
