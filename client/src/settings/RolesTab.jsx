@@ -98,6 +98,7 @@ export default function RolesTab() {
     setForm((f) => {
       const next = { ...f, [key]: value };
       if (key === 'can_tasks' && !value) {
+        next.can_task_notifications = false;
         next.can_tasks_all = false;
       }
       if (key === 'can_actions' && !value) {
@@ -289,17 +290,20 @@ export default function RolesTab() {
                       <div className="space-y-2">
                         {items
                           .filter((p) => !p.attendanceScopeOption && !p.attendanceEditOption && !p.attendancePayOption && !p.attendanceRatesOption && !p.attendanceToolsOption && !p.attendanceMonthOption && !p.actionsScopeOption && !p.tasksScopeOption)
-                          .map((p) => (
+                          .map((p) => {
+                            const requiresTasks = p.key === 'can_task_notifications';
+                            const disabledByDependencies = requiresTasks && !(editing?.is_admin_role || form.can_tasks);
+                            return (
                             <div key={p.key}>
                               <label
                                 className={`flex items-start gap-3 p-2 rounded-lg border border-white/5 ${
-                                  editing?.is_admin_role ? 'opacity-70' : 'hover:bg-white/5'
+                                  editing?.is_admin_role || disabledByDependencies ? 'opacity-70' : 'hover:bg-white/5'
                                 }`}
                               >
                                 <input
                                   type="checkbox"
                                   checked={editing?.is_admin_role ? true : !!form[p.key]}
-                                  disabled={!!editing?.is_admin_role}
+                                  disabled={!!editing?.is_admin_role || disabledByDependencies}
                                   onChange={(e) => setPerm(p.key, e.target.checked)}
                                   className="mt-1 rounded border-slate-600 text-brand-600"
                                 />
@@ -498,7 +502,8 @@ export default function RolesTab() {
                                 </div>
                               )}
                             </div>
-                          ))}
+                            );
+                          })}
                       </div>
                     </div>
                   ))}

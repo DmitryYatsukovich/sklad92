@@ -474,6 +474,20 @@ export const tasks = {
   delete: (id) => request(`/api/tasks/${id}`, { method: 'DELETE' }),
 };
 
+export const notifications = {
+  getPushPublicKey: () => request('/api/notifications/push-public-key'),
+  savePushSubscription: (subscription) =>
+    request('/api/notifications/push-subscription', {
+      method: 'POST',
+      body: JSON.stringify({ subscription }),
+    }),
+  deletePushSubscription: (endpoint = '') =>
+    request('/api/notifications/push-subscription', {
+      method: 'DELETE',
+      body: JSON.stringify(endpoint ? { endpoint } : {}),
+    }),
+};
+
 export const attendance = {
   registerFace: (descriptor, userId, faceImage) =>
     request('/api/attendance/register-face', {

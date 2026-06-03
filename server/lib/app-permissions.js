@@ -25,6 +25,12 @@ export const APP_PERMISSIONS = [
     group: 'Основные разделы',
   },
   {
+    key: 'can_task_notifications',
+    label: 'Уведомления о задачах',
+    description: 'In-app и push-уведомления при назначении задач пользователю',
+    group: 'Основные разделы',
+  },
+  {
     key: 'can_tasks_all',
     label: 'Задачи всех пользователей',
     description: 'Просмотр и управление всеми задачами (иначе — только своими)',
@@ -176,6 +182,7 @@ export function fullPermissionFlags(value = true) {
 export function permissionsFromBody(body = {}) {
   const perms = Object.fromEntries(PERMISSION_KEYS.map((k) => [k, !!body[k]]));
   if (!perms.can_tasks) {
+    perms.can_task_notifications = false;
     perms.can_tasks_all = false;
   }
   if (!perms.can_actions) {

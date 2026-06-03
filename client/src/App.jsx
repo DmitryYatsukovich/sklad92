@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, lazy } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { auth } from './api';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { auth, tasks as tasksApi, notifications as notificationsApi } from './api';
 import Login from './pages/Login';
 import Layout from './Layout';
 import { getDefaultRoute } from './lib/defaultRoute.js';
@@ -33,16 +33,58 @@ const Actions = lazy(() => import('./pages/Actions'));
 const STRICT_LOGOUT_ON_CLOSE = true;
 const ACTIVE_SESSION_KEY = 'warehouse-active-session';
 const PENDING_SERVER_LOGOUT_KEY = 'warehouse-pending-server-logout';
+const TASK_SEEN_IDS_LIMIT = 500;
+const TASK_PUSH_PROMPTED_PREFIX = 'warehouse-task-push-prompted:';
+
+function normalizeTaskId(value) {
+  const n = Number.parseInt(value, 10);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+function loadSeenTaskIds(storageKey) {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    const parsed = JSON.parse(raw || '[]');
+    if (!Array.isArray(parsed)) return new Set();
+    const set = new Set();
+    for (const value of parsed) {
+      const id = normalizeTaskId(value);
+      if (id) set.add(id);
+    }
+    return set;
+  } catch {
+    return new Set();
+  }
+}
+
+function encodeSeenTaskIds(set) {
+  const ids = Array.from(set);
+  if (ids.length <= TASK_SEEN_IDS_LIMIT) return ids;
+  return ids.slice(ids.length - TASK_SEEN_IDS_LIMIT);
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const normalized = String(base64String || '')
+    .replace(/-/g, '+')
+    .replace(/_/g, '/');
+  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=');
+  const rawData = atob(padded);
+  return Uint8Array.from([...rawData].map((ch) => ch.charCodeAt(0)));
+}
 
 function HomeRedirect({ user }) {
   return <Navigate to={getDefaultRoute(user)} replace />;
 }
 
 export default function App() {
+  const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [taskToasts, setTaskToasts] = useState([]);
   const userRef = useRef(null);
   const warmedBundleKeyRef = useRef('');
+  const taskSeenIdsRef = useRef(new Set());
+  const taskSeenStorageKeyRef = useRef('');
   userRef.current = user;
 
   const markActiveSession = useCallback((active) => {
@@ -78,6 +120,45 @@ export default function App() {
       return false;
     }
   }, []);
+
+  const persistSeenTaskIds = useCallback(() => {
+    const storageKey = taskSeenStorageKeyRef.current;
+    if (!storageKey) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(encodeSeenTaskIds(taskSeenIdsRef.current)));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const markTaskSeen = useCallback((taskId) => {
+    const id = normalizeTaskId(taskId);
+    if (!id) return false;
+    if (taskSeenIdsRef.current.has(id)) return false;
+    taskSeenIdsRef.current.add(id);
+    while (taskSeenIdsRef.current.size > TASK_SEEN_IDS_LIMIT) {
+      const oldest = taskSeenIdsRef.current.values().next().value;
+      if (!oldest) break;
+      taskSeenIdsRef.current.delete(oldest);
+    }
+    persistSeenTaskIds();
+    return true;
+  }, [persistSeenTaskIds]);
+
+  const removeTaskToast = useCallback((toastId) => {
+    setTaskToasts((prev) => prev.filter((row) => row.id !== toastId));
+  }, []);
+
+  const showTaskToast = useCallback((payload = {}) => {
+    const toastId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const title = String(payload.title || 'Новая задача');
+    const message = String(payload.body || payload.message || 'Вам назначили новую задачу');
+    setTaskToasts((prev) => [
+      { id: toastId, title, message },
+      ...prev,
+    ].slice(0, 4));
+    setTimeout(() => removeTaskToast(toastId), 7000);
+  }, [removeTaskToast]);
 
   const prewarmTabBundles = useCallback((u) => {
     if (!u || !navigator.onLine) return;
@@ -249,6 +330,157 @@ export default function App() {
     return () => window.removeEventListener('offline-cache-updated', onCacheUpdated);
   }, [user?.id]);
 
+  const canTaskNotifications = !!(user?.can_tasks && user?.can_task_notifications);
+
+  useEffect(() => {
+    if (!user) {
+      taskSeenStorageKeyRef.current = '';
+      taskSeenIdsRef.current = new Set();
+      return;
+    }
+    const storageKey = `warehouse-task-seen:${user.id}`;
+    taskSeenStorageKeyRef.current = storageKey;
+    taskSeenIdsRef.current = loadSeenTaskIds(storageKey);
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user || !canTaskNotifications) return undefined;
+    let cancelled = false;
+    let initialized = false;
+    const loadAssignments = async () => {
+      if (cancelled || !navigator.onLine) return;
+      try {
+        const data = await tasksApi.list();
+        if (cancelled) return;
+        const items = Array.isArray(data?.items) ? data.items : [];
+        const mine = items.filter((row) => Number(row?.assigned_user_id) === Number(user.id));
+        if (!initialized) {
+          mine.forEach((row) => {
+            const id = normalizeTaskId(row?.id);
+            if (id) taskSeenIdsRef.current.add(id);
+          });
+          persistSeenTaskIds();
+          initialized = true;
+          return;
+        }
+        const incoming = [];
+        for (const row of mine) {
+          const id = normalizeTaskId(row?.id);
+          if (!id || taskSeenIdsRef.current.has(id)) continue;
+          incoming.push(row);
+          taskSeenIdsRef.current.add(id);
+        }
+        if (incoming.length) {
+          persistSeenTaskIds();
+          incoming
+            .sort((a, b) => Date.parse(a?.created_at || 0) - Date.parse(b?.created_at || 0))
+            .forEach((row) => {
+              showTaskToast({
+                title: 'Новая задача',
+                body: row?.title || 'Вам назначили новую задачу',
+              });
+            });
+        }
+      } catch {
+        /* silent polling */
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadAssignments();
+    };
+    loadAssignments();
+    const timer = setInterval(onVisible, getAdaptivePollInterval(15000, {
+      mobileMs: 25000,
+      lowPowerMs: 35000,
+    }));
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [user?.id, canTaskNotifications, persistSeenTaskIds, showTaskToast]);
+
+  useEffect(() => {
+    if (!user || !canTaskNotifications) return undefined;
+    const onSwMessage = (event) => {
+      const msg = event?.data;
+      if (!msg || msg.type !== 'TASK_PUSH_EVENT') return;
+      const payload = msg.payload || {};
+      const taskId = normalizeTaskId(payload.taskId || payload.task_id);
+      if (taskId && !markTaskSeen(taskId)) return;
+      showTaskToast({
+        title: payload.title || 'Новая задача',
+        body: payload.body || payload.taskTitle || 'Вам назначили новую задачу',
+      });
+    };
+    navigator.serviceWorker?.addEventListener?.('message', onSwMessage);
+    return () => navigator.serviceWorker?.removeEventListener?.('message', onSwMessage);
+  }, [user?.id, canTaskNotifications, markTaskSeen, showTaskToast]);
+
+  useEffect(() => {
+    if (!user || !('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      return undefined;
+    }
+    let cancelled = false;
+    const disablePush = async () => {
+      const registration = await navigator.serviceWorker.ready.catch(() => null);
+      if (!registration) return;
+      const current = await registration.pushManager.getSubscription().catch(() => null);
+      if (!current) return;
+      const endpoint = current.endpoint;
+      await current.unsubscribe().catch(() => {});
+      if (navigator.onLine) {
+        await notificationsApi.deletePushSubscription(endpoint).catch(() => {});
+      }
+    };
+    const syncPushSubscription = async () => {
+      if (cancelled || !canTaskNotifications || !navigator.onLine) return;
+      const keyResponse = await notificationsApi.getPushPublicKey().catch(() => null);
+      const publicKey = keyResponse?.publicKey;
+      if (!publicKey) return;
+
+      let permission = Notification.permission;
+      if (permission === 'default') {
+        const promptKey = `${TASK_PUSH_PROMPTED_PREFIX}${user.id}`;
+        const prompted = localStorage.getItem(promptKey) === '1';
+        if (!prompted) {
+          localStorage.setItem(promptKey, '1');
+          permission = await Notification.requestPermission();
+        }
+      }
+      if (permission !== 'granted') return;
+
+      const registration = await navigator.serviceWorker.ready.catch(() => null);
+      if (!registration) return;
+      let subscription = await registration.pushManager.getSubscription().catch(() => null);
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey),
+        });
+      }
+      const json = subscription?.toJSON ? subscription.toJSON() : null;
+      if (!json) return;
+      await notificationsApi.savePushSubscription(json);
+    };
+
+    if (!canTaskNotifications) {
+      disablePush().catch(() => {});
+      return undefined;
+    }
+
+    syncPushSubscription().catch(() => {});
+    const onOnline = () => syncPushSubscription().catch(() => {});
+    window.addEventListener('online', onOnline);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('online', onOnline);
+    };
+  }, [user?.id, canTaskNotifications]);
+
   useEffect(() => {
     if (!user) return;
     const onOnline = () => {
@@ -361,111 +593,139 @@ export default function App() {
     setUser(null);
   };
 
+  const toastStack = taskToasts.length ? (
+    <div className="fixed top-12 right-2 z-[120] flex flex-col gap-2 w-[min(24rem,calc(100vw-1rem))]">
+      {taskToasts.map((toast) => (
+        <button
+          type="button"
+          key={toast.id}
+          className="text-left rounded-xl border border-sky-500/40 bg-black/90 shadow-lg px-3 py-2 hover:bg-black"
+          onClick={() => {
+            removeTaskToast(toast.id);
+            navigate('/tasks');
+          }}
+        >
+          <div className="text-sky-300 text-xs font-medium">{toast.title}</div>
+          <div className="text-zinc-200 text-2xs mt-0.5">{toast.message}</div>
+        </button>
+      ))}
+    </div>
+  ) : null;
+
   if (loading) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-black">
-        <div className="w-8 h-8 rounded-full border-2 border-white/20 border-t-white animate-spin" aria-hidden />
-        <p className="text-zinc-500 text-xs">Загрузка…</p>
-      </div>
+      <>
+        {toastStack}
+        <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-black">
+          <div className="w-8 h-8 rounded-full border-2 border-white/20 border-t-white animate-spin" aria-hidden />
+          <p className="text-zinc-500 text-xs">Загрузка…</p>
+        </div>
+      </>
     );
   }
 
   if (!user) {
     return (
-      <Routes>
-        <Route path="/login" element={<Login onLogin={onLogin} />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
+      <>
+        {toastStack}
+        <Routes>
+          <Route path="/login" element={<Login onLogin={onLogin} />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </>
     );
   }
 
   return (
-    <Routes>
-      <Route path="/" element={<Layout user={user} onLogout={onLogout} />}>
-        <Route index element={<HomeRedirect user={user} />} />
-        <Route
-          path="warehouse"
-          element={(
-            <ProtectedRoute user={user} perm="can_warehouse">
-              <RecoverableErrorBoundary onError={recoverWarehouseTabCache}>
-                <Warehouse user={user} />
-              </RecoverableErrorBoundary>
-            </ProtectedRoute>
-          )}
-        />
-        <Route
-          path="settings"
-          element={(
-            <ProtectedRoute user={user} anyPerm={['can_settings_organizations', 'can_settings_warehouses', 'can_settings_categories', 'can_settings_work', 'can_users', 'can_roles']}>
-              <RecoverableErrorBoundary onError={recoverSettingsTabCache}>
-                <Settings user={user} />
-              </RecoverableErrorBoundary>
-            </ProtectedRoute>
-          )}
-        />
-        <Route path="users" element={<Navigate to="/settings" replace state={{ tab: 'users' }} />} />
-        <Route
-          path="issuance"
-          element={(
-            <ProtectedRoute user={user} perm="can_issuance">
-              <RecoverableErrorBoundary onError={recoverIssuanceTabCache}>
-                <Issuance user={user} />
-              </RecoverableErrorBoundary>
-            </ProtectedRoute>
-          )}
-        />
-        <Route
-          path="production"
-          element={(
-            <ProtectedRoute user={user} perm="can_production">
-              <RecoverableErrorBoundary onError={recoverProductionTabCache}>
-                <Production user={user} />
-              </RecoverableErrorBoundary>
-            </ProtectedRoute>
-          )}
-        />
-        <Route
-          path="face"
-          element={(
-            <ProtectedRoute user={user} perm="can_face">
-              <RecoverableErrorBoundary onError={recoverAttendanceTabCache}>
-                <FaceCheckIn user={user} />
-              </RecoverableErrorBoundary>
-            </ProtectedRoute>
-          )}
-        />
-        <Route
-          path="attendance"
-          element={(
-            <ProtectedRoute user={user} perm="can_attendance">
-              <RecoverableErrorBoundary onError={recoverAttendanceTabCache}>
-                <AttendanceAll user={user} />
-              </RecoverableErrorBoundary>
-            </ProtectedRoute>
-          )}
-        />
-        <Route
-          path="tasks"
-          element={(
-            <ProtectedRoute user={user} perm="can_tasks">
-              <RecoverableErrorBoundary onError={recoverTasksTabCache}>
-                <Tasks user={user} />
-              </RecoverableErrorBoundary>
-            </ProtectedRoute>
-          )}
-        />
-        <Route
-          path="actions"
-          element={(
-            <ProtectedRoute user={user} perm="can_actions">
-              <RecoverableErrorBoundary onError={recoverActionsTabCache}>
-                <Actions user={user} />
-              </RecoverableErrorBoundary>
-            </ProtectedRoute>
-          )}
-        />
-      </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      {toastStack}
+      <Routes>
+        <Route path="/" element={<Layout user={user} onLogout={onLogout} />}>
+          <Route index element={<HomeRedirect user={user} />} />
+          <Route
+            path="warehouse"
+            element={(
+              <ProtectedRoute user={user} perm="can_warehouse">
+                <RecoverableErrorBoundary onError={recoverWarehouseTabCache}>
+                  <Warehouse user={user} />
+                </RecoverableErrorBoundary>
+              </ProtectedRoute>
+            )}
+          />
+          <Route
+            path="settings"
+            element={(
+              <ProtectedRoute user={user} anyPerm={['can_settings_organizations', 'can_settings_warehouses', 'can_settings_categories', 'can_settings_work', 'can_users', 'can_roles']}>
+                <RecoverableErrorBoundary onError={recoverSettingsTabCache}>
+                  <Settings user={user} />
+                </RecoverableErrorBoundary>
+              </ProtectedRoute>
+            )}
+          />
+          <Route path="users" element={<Navigate to="/settings" replace state={{ tab: 'users' }} />} />
+          <Route
+            path="issuance"
+            element={(
+              <ProtectedRoute user={user} perm="can_issuance">
+                <RecoverableErrorBoundary onError={recoverIssuanceTabCache}>
+                  <Issuance user={user} />
+                </RecoverableErrorBoundary>
+              </ProtectedRoute>
+            )}
+          />
+          <Route
+            path="production"
+            element={(
+              <ProtectedRoute user={user} perm="can_production">
+                <RecoverableErrorBoundary onError={recoverProductionTabCache}>
+                  <Production user={user} />
+                </RecoverableErrorBoundary>
+              </ProtectedRoute>
+            )}
+          />
+          <Route
+            path="face"
+            element={(
+              <ProtectedRoute user={user} perm="can_face">
+                <RecoverableErrorBoundary onError={recoverAttendanceTabCache}>
+                  <FaceCheckIn user={user} />
+                </RecoverableErrorBoundary>
+              </ProtectedRoute>
+            )}
+          />
+          <Route
+            path="attendance"
+            element={(
+              <ProtectedRoute user={user} perm="can_attendance">
+                <RecoverableErrorBoundary onError={recoverAttendanceTabCache}>
+                  <AttendanceAll user={user} />
+                </RecoverableErrorBoundary>
+              </ProtectedRoute>
+            )}
+          />
+          <Route
+            path="tasks"
+            element={(
+              <ProtectedRoute user={user} perm="can_tasks">
+                <RecoverableErrorBoundary onError={recoverTasksTabCache}>
+                  <Tasks user={user} />
+                </RecoverableErrorBoundary>
+              </ProtectedRoute>
+            )}
+          />
+          <Route
+            path="actions"
+            element={(
+              <ProtectedRoute user={user} perm="can_actions">
+                <RecoverableErrorBoundary onError={recoverActionsTabCache}>
+                  <Actions user={user} />
+                </RecoverableErrorBoundary>
+              </ProtectedRoute>
+            )}
+          />
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   );
 }

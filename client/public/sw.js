@@ -1,7 +1,7 @@
 /* eslint-disable no-restricted-globals */
 /** Кэш оболочки SPA для работы после обновления страницы без сети (Timeweb / PWA). */
-const CACHE_SHELL = 'warehouse-shell-v3';
-const CACHE_ASSETS = 'warehouse-assets-v2';
+const CACHE_SHELL = 'warehouse-shell-v4';
+const CACHE_ASSETS = 'warehouse-assets-v3';
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
@@ -146,3 +146,68 @@ async function cacheFirst(request, cacheName) {
     return new Response('Offline', { status: 503 });
   }
 }
+
+async function getWindowClients() {
+  return self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+}
+
+async function postToClients(message) {
+  const clients = await getWindowClients();
+  clients.forEach((client) => {
+    client.postMessage(message);
+  });
+  return clients;
+}
+
+self.addEventListener('push', (event) => {
+  event.waitUntil((async () => {
+    let payload = {};
+    try {
+      payload = event.data ? event.data.json() : {};
+    } catch {
+      payload = {
+        type: 'task-assigned',
+        title: 'Новая задача',
+        body: event.data?.text?.() || 'Вам назначили новую задачу',
+      };
+    }
+
+    const clients = await postToClients({
+      type: 'TASK_PUSH_EVENT',
+      payload,
+    });
+    const hasVisibleClient = clients.some(
+      (client) => client.visibilityState === 'visible' || client.focused,
+    );
+    if (hasVisibleClient) return;
+
+    const title = payload?.title || 'Новая задача';
+    const body = payload?.body || 'Вам назначили новую задачу';
+    const taskId = payload?.taskId || payload?.task_id || null;
+    await self.registration.showNotification(title, {
+      body,
+      tag: taskId ? `task-${taskId}` : 'task-assigned',
+      data: {
+        url: payload?.url || '/tasks',
+      },
+    });
+  })());
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = event.notification?.data?.url || '/tasks';
+  event.waitUntil((async () => {
+    const clients = await getWindowClients();
+    const target = new URL(targetUrl, self.location.origin).href;
+    for (const client of clients) {
+      if (client.url === target && 'focus' in client) {
+        await client.focus();
+        return;
+      }
+    }
+    if (self.clients.openWindow) {
+      await self.clients.openWindow(targetUrl);
+    }
+  })());
+});

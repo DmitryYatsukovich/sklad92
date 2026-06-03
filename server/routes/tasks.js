@@ -2,6 +2,7 @@ import { Router } from 'express';
 import pool from '../db/pool.js';
 import { requireAuth, loadUser, requirePermission } from '../middleware/auth.js';
 import { canViewAllTasks } from '../lib/tasks-access.js';
+import { sendTaskAssignedPush } from '../lib/push-notifications.js';
 
 const router = Router();
 
@@ -62,6 +63,37 @@ function buildSummary(items) {
     else summary.pending += 1;
   }
   return summary;
+}
+
+function actorDisplayName(user) {
+  return user?.display_name || user?.login || 'Система';
+}
+
+function buildTaskAssignedPayload(task, actorName, reassigned = false) {
+  const dueAt = task?.due_at || null;
+  const dueText = dueAt
+    ? (() => {
+      const d = new Date(dueAt);
+      if (Number.isNaN(d.getTime())) return 'Без срока';
+      return d.toLocaleString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    })()
+    : 'Без срока';
+  const title = reassigned ? 'Задача назначена вам' : 'Новая задача';
+  return {
+    taskId: task?.id || null,
+    title,
+    body: `${task?.title || 'Без названия'} · срок ${dueText}`,
+    taskTitle: task?.title || '',
+    dueAt,
+    objectName: task?.object_name || '',
+    assignedBy: actorName,
+  };
 }
 
 async function findTaskForUpdate(client, taskId, { userId, viewAll }) {
@@ -195,6 +227,12 @@ router.post('/', async (req, res) => {
     const items = await readTaskList(client, { userId: req.user.id, viewAll });
     const created = items.find((row) => row.id === taskId);
     if (!created) return res.status(404).json({ error: 'Задача не найдена' });
+    sendTaskAssignedPush(
+      Number(created.assigned_user_id),
+      buildTaskAssignedPayload(created, actorDisplayName(req.user), false),
+    ).catch((err) => {
+      console.error('push send create task:', err?.message || err);
+    });
     res.status(201).json(created);
   } catch (e) {
     console.error('POST /api/tasks:', e);
@@ -273,6 +311,14 @@ router.put('/:id', async (req, res) => {
     const items = await readTaskList(client, { userId: req.user.id, viewAll });
     const updated = items.find((row) => row.id === taskId);
     if (!updated) return res.status(404).json({ error: 'Задача не найдена' });
+    if (Number(current.assigned_user_id) !== Number(updated.assigned_user_id)) {
+      sendTaskAssignedPush(
+        Number(updated.assigned_user_id),
+        buildTaskAssignedPayload(updated, actorDisplayName(req.user), true),
+      ).catch((err) => {
+        console.error('push send reassign task:', err?.message || err);
+      });
+    }
     res.json(updated);
   } catch (e) {
     console.error('PUT /api/tasks/:id:', e);
