@@ -62,9 +62,18 @@ function readNumberEnv(name, fallback) {
 }
 
 // Более строгие дефолты, чтобы снизить ложные срабатывания "чужого" пользователя.
-const DIST_THRESHOLD = readNumberEnv('FACE_MATCH_THRESHOLD', 0.5);
-const DIST_MIN_GAP = readNumberEnv('FACE_MATCH_MIN_GAP', 0.04);
-const DIST_MAX_RATIO = readNumberEnv('FACE_MATCH_MAX_RATIO', 0.94);
+const DIST_THRESHOLD = readNumberEnv('FACE_MATCH_THRESHOLD', 0.45);
+const DIST_MIN_GAP = readNumberEnv('FACE_MATCH_MIN_GAP', 0.08);
+const DIST_MAX_RATIO = readNumberEnv('FACE_MATCH_MAX_RATIO', 0.88);
+
+function normalizeDescriptorVector(values) {
+  if (!Array.isArray(values) || values.length !== 128) return null;
+  const vector = values.map((x) => Number(x));
+  if (vector.some((x) => !Number.isFinite(x))) return null;
+  const norm = Math.hypot(...vector);
+  if (!Number.isFinite(norm) || norm < 0.7 || norm > 1.3) return null;
+  return vector.map((x) => x / norm);
+}
 
 function euclideanDistance(a, b) {
   if (!a?.length || !b?.length || a.length !== b.length) return Infinity;
@@ -78,9 +87,7 @@ function euclideanDistance(a, b) {
 
 function normalizeDescriptor(raw) {
   if (!Array.isArray(raw) || raw.length !== 128) return null;
-  const values = raw.map((x) => Number(x));
-  if (values.some((x) => !Number.isFinite(x))) return null;
-  return values;
+  return normalizeDescriptorVector(raw);
 }
 
 function normalizeStoredDescriptor(raw) {
@@ -94,9 +101,7 @@ function normalizeStoredDescriptor(raw) {
     }
   }
   if (!Array.isArray(parsed) || parsed.length !== 128) return null;
-  const values = parsed.map((x) => Number(x));
-  if (values.some((x) => !Number.isFinite(x))) return null;
-  return values;
+  return normalizeDescriptorVector(parsed);
 }
 
 /** Найти пользователя по дескриптору лица */

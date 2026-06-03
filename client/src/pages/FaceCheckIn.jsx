@@ -129,9 +129,14 @@ export default function FaceCheckIn({ user }) {
     setBusy(true);
     setStatus('');
     try {
-      const d = await captureFaceDescriptor(videoEl);
+      const d = await captureFaceDescriptor(videoEl, {
+        stableSamples: 3,
+        maxSampleAttempts: 8,
+        maxDescriptorDrift: 0.2,
+        minScore: 0.45,
+      });
       if (!d) {
-        setStatus('Лицо не найдено в кадре.', 'error');
+        setStatus('Лицо не распознано уверенно. Посмотрите прямо в камеру и повторите.', 'error');
         return;
       }
       const r = await attendanceApi.scan(d);

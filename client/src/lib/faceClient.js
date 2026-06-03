@@ -212,6 +212,36 @@ function videoFrameCanvas(videoEl, maxDim = 640) {
   return canvas;
 }
 
+function descriptorDistance(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return Infinity;
+  let s = 0;
+  for (let i = 0; i < a.length; i++) {
+    const d = a[i] - b[i];
+    s += d * d;
+  }
+  return Math.sqrt(s);
+}
+
+function normalizeDescriptor(values) {
+  if (!Array.isArray(values) || values.length !== 128) return null;
+  const norm = Math.hypot(...values);
+  if (!Number.isFinite(norm) || norm < 1e-9) return null;
+  return values.map((x) => x / norm);
+}
+
+function buildStableDescriptor(samples) {
+  if (!Array.isArray(samples) || !samples.length) return null;
+  const size = samples[0]?.length || 0;
+  if (size !== 128) return null;
+  const avg = new Array(size).fill(0);
+  for (const descriptor of samples) {
+    if (!Array.isArray(descriptor) || descriptor.length !== size) return null;
+    for (let i = 0; i < size; i++) avg[i] += descriptor[i];
+  }
+  for (let i = 0; i < size; i++) avg[i] /= samples.length;
+  return normalizeDescriptor(avg);
+}
+
 async function detectOneFace(input, minConfidence) {
   const opts = faceDetectorOptions(minConfidence);
   let det = await faceapi
@@ -235,36 +265,74 @@ async function detectOneFace(input, minConfidence) {
   return det;
 }
 
-export async function captureFaceDescriptor(videoEl) {
+export async function captureFaceDescriptor(videoEl, options = {}) {
   await loadFaceModels();
   const ok = await ensureVideoReady(videoEl);
   if (!ok) return null;
 
-  const canvas = videoFrameCanvas(videoEl);
-  const sources = canvas ? [canvas, videoEl] : [videoEl];
-  const thresholds = isAndroid() ? [0.4, 0.32, 0.25] : [0.4, 0.35];
+  const {
+    stableSamples = 1,
+    maxSampleAttempts = Math.max(stableSamples * 2, stableSamples + 2),
+    maxDescriptorDrift = 0.22,
+    minScore = 0,
+  } = options || {};
 
-  for (const source of sources) {
-    for (const conf of thresholds) {
-      const det = await detectOneFace(source, conf);
-      if (det) return Array.from(det.descriptor);
-    }
-  }
-
-  if (isAndroid() && tf.getBackend() === 'webgl') {
-    try {
-      await tf.setBackend('cpu');
-      await tf.ready();
-      for (const source of sources) {
-        const det = await detectOneFace(source, 0.32);
-        if (det) return Array.from(det.descriptor);
+  const sampleDescriptor = async () => {
+    const canvas = videoFrameCanvas(videoEl);
+    const sources = canvas ? [canvas, videoEl] : [videoEl];
+    const thresholds = isAndroid() ? [0.4, 0.32, 0.25] : [0.4, 0.35];
+    for (const source of sources) {
+      for (const conf of thresholds) {
+        const det = await detectOneFace(source, conf);
+        if (!det) continue;
+        const score = Number(det?.detection?.score || 0);
+        if (score < minScore) continue;
+        const normalized = normalizeDescriptor(Array.from(det.descriptor));
+        if (normalized) return normalized;
       }
-    } catch {
-      /* ignore */
+    }
+    if (isAndroid() && tf.getBackend() === 'webgl') {
+      try {
+        await tf.setBackend('cpu');
+        await tf.ready();
+        for (const source of sources) {
+          const det = await detectOneFace(source, 0.32);
+          if (!det) continue;
+          const score = Number(det?.detection?.score || 0);
+          if (score < minScore) continue;
+          const normalized = normalizeDescriptor(Array.from(det.descriptor));
+          if (normalized) return normalized;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    return null;
+  };
+
+  const targetSamples = Math.max(1, Number(stableSamples) || 1);
+  const samples = [];
+  let attempts = 0;
+  while (samples.length < targetSamples && attempts < maxSampleAttempts) {
+    attempts += 1;
+    const descriptor = await sampleDescriptor();
+    if (descriptor) samples.push(descriptor);
+    if (samples.length < targetSamples) {
+      await waitAnimationFrames(1);
+      await new Promise((resolve) => setTimeout(resolve, 80));
     }
   }
-
-  return null;
+  if (samples.length < targetSamples) return null;
+  if (targetSamples > 1) {
+    let maxPairwise = 0;
+    for (let i = 0; i < samples.length; i++) {
+      for (let j = i + 1; j < samples.length; j++) {
+        maxPairwise = Math.max(maxPairwise, descriptorDistance(samples[i], samples[j]));
+      }
+    }
+    if (maxPairwise > maxDescriptorDrift) return null;
+  }
+  return buildStableDescriptor(samples);
 }
 
 const IMAGE_OPEN_ERROR =
