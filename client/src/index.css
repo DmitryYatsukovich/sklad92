@@ -108,7 +108,7 @@
   }
 
   .timesheet-table .timesheet-day {
-    @apply w-[1.35rem] max-w-[1.35rem] text-center;
+    @apply w-[1.5rem] min-w-[1.5rem] max-w-[1.5rem] px-[1px] text-center border-l border-white/[0.05];
   }
 
   .timesheet-table .timesheet-total {
