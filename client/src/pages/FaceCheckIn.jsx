@@ -129,14 +129,23 @@ export default function FaceCheckIn({ user }) {
     setBusy(true);
     setStatus('');
     try {
-      const d = await captureFaceDescriptor(videoEl, {
-        stableSamples: 3,
-        maxSampleAttempts: 8,
-        maxDescriptorDrift: 0.2,
-        minScore: 0.45,
+      let d = await captureFaceDescriptor(videoEl, {
+        stableSamples: 2,
+        maxSampleAttempts: 7,
+        maxDescriptorDrift: 0.24,
+        minScore: 0.35,
       });
       if (!d) {
-        setStatus('Лицо не распознано уверенно. Посмотрите прямо в камеру и повторите.', 'error');
+        // Фолбэк на более мягкие параметры, если лицо видно, но уверенности не хватило.
+        d = await captureFaceDescriptor(videoEl, {
+          stableSamples: 1,
+          maxSampleAttempts: 4,
+          maxDescriptorDrift: 0.3,
+          minScore: 0.25,
+        });
+      }
+      if (!d) {
+        setStatus('Лицо не распознано. Подойдите ближе к камере и повторите.', 'error');
         return;
       }
       const r = await attendanceApi.scan(d);

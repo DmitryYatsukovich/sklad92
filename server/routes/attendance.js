@@ -62,9 +62,9 @@ function readNumberEnv(name, fallback) {
 }
 
 // Более строгие дефолты, чтобы снизить ложные срабатывания "чужого" пользователя.
-const DIST_THRESHOLD = readNumberEnv('FACE_MATCH_THRESHOLD', 0.45);
-const DIST_MIN_GAP = readNumberEnv('FACE_MATCH_MIN_GAP', 0.08);
-const DIST_MAX_RATIO = readNumberEnv('FACE_MATCH_MAX_RATIO', 0.88);
+const DIST_THRESHOLD = readNumberEnv('FACE_MATCH_THRESHOLD', 0.48);
+const DIST_MIN_GAP = readNumberEnv('FACE_MATCH_MIN_GAP', 0.06);
+const DIST_MAX_RATIO = readNumberEnv('FACE_MATCH_MAX_RATIO', 0.92);
 
 function normalizeDescriptorVector(values) {
   if (!Array.isArray(values) || values.length !== 128) return null;
