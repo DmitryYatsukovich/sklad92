@@ -472,7 +472,10 @@ async function detectDescriptorFromSources(sources) {
   for (const source of sources) {
     for (const conf of thresholds) {
       const det = await detectOneFace(source, conf);
-      if (det) return Array.from(det.descriptor);
+      if (det) {
+        const normalized = normalizeDescriptor(Array.from(det.descriptor));
+        if (normalized) return normalized;
+      }
     }
   }
 
@@ -482,7 +485,10 @@ async function detectDescriptorFromSources(sources) {
       await tf.ready();
       for (const source of sources) {
         const det = await detectOneFace(source, 0.32);
-        if (det) return Array.from(det.descriptor);
+        if (det) {
+          const normalized = normalizeDescriptor(Array.from(det.descriptor));
+          if (normalized) return normalized;
+        }
       }
     } catch {
       /* ignore */

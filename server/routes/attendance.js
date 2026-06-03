@@ -65,13 +65,15 @@ function readNumberEnv(name, fallback) {
 const DIST_THRESHOLD = readNumberEnv('FACE_MATCH_THRESHOLD', 0.48);
 const DIST_MIN_GAP = readNumberEnv('FACE_MATCH_MIN_GAP', 0.06);
 const DIST_MAX_RATIO = readNumberEnv('FACE_MATCH_MAX_RATIO', 0.92);
+const DIST_STRICT_SINGLE_THRESHOLD = readNumberEnv('FACE_MATCH_STRICT_SINGLE_THRESHOLD', 0.42);
+const DIST_STRICT_SINGLE_GAP = readNumberEnv('FACE_MATCH_STRICT_SINGLE_GAP', 0.03);
 
 function normalizeDescriptorVector(values) {
   if (!Array.isArray(values) || values.length !== 128) return null;
   const vector = values.map((x) => Number(x));
   if (vector.some((x) => !Number.isFinite(x))) return null;
   const norm = Math.hypot(...vector);
-  if (!Number.isFinite(norm) || norm < 0.7 || norm > 1.3) return null;
+  if (!Number.isFinite(norm) || norm < 1e-9) return null;
   return vector.map((x) => x / norm);
 }
 
@@ -178,14 +180,21 @@ function matchUserByDescriptors(descriptors, candidates) {
   if (!top) return null;
 
   const minVotes = descriptors.length >= 3 ? 2 : 1;
-  if (top.count < minVotes) return null;
+  if (top.count < minVotes) {
+    // Если консенсуса нет, разрешаем только очень уверенное одиночное совпадение
+    // с заметным отрывом от второго кандидата.
+    const second = ranked[1];
+    const strongSingle = top.minDistance <= DIST_STRICT_SINGLE_THRESHOLD
+      && (!second || (second.minDistance - top.minDistance) >= DIST_STRICT_SINGLE_GAP);
+    if (!strongSingle) return null;
+  }
 
   const second = ranked[1];
   if (second) {
     if (second.count === top.count && Math.abs(top.avgDistance - second.avgDistance) < 0.025) {
       return null;
     }
-    if (second.count > top.count && second.minDistance <= top.minDistance + 0.015) {
+    if (second.count === top.count && second.minDistance <= top.minDistance + 0.015) {
       return null;
     }
   }
