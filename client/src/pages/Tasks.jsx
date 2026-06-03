@@ -62,9 +62,30 @@ function emptySummary() {
   };
 }
 
+function defaultDueParts() {
+  const due = new Date();
+  due.setMinutes(0, 0, 0);
+  due.setHours(due.getHours() + 1);
+  return {
+    date: `${due.getFullYear()}-${pad2(due.getMonth() + 1)}-${pad2(due.getDate())}`,
+    time: `${pad2(due.getHours())}:${pad2(due.getMinutes())}`,
+  };
+}
+
+function makeDefaultForm(objects = [], users = []) {
+  const due = defaultDueParts();
+  return {
+    title: '',
+    description: '',
+    object_id: objects[0] ? String(objects[0].id) : '',
+    assigned_user_id: users[0] ? String(users[0].id) : '',
+    due_date: due.date,
+    due_time: due.time,
+  };
+}
+
 export default function Tasks({ user }) {
   const [items, setItems] = useState([]);
-  const [summary, setSummary] = useState(emptySummary());
   const [assignableUsers, setAssignableUsers] = useState([]);
   const [objects, setObjects] = useState([]);
   const [viewAll, setViewAll] = useState(false);
@@ -72,26 +93,15 @@ export default function Tasks({ user }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState({
-    title: '',
-    description: '',
-    object_id: '',
-    assigned_user_id: '',
-    due_date: '',
-    due_time: '',
-  });
+  const [formOpen, setFormOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [assigneeFilter, setAssigneeFilter] = useState('all');
+  const [form, setForm] = useState(() => makeDefaultForm());
 
   const resetForm = useCallback(() => {
     setEditingId(null);
-    setForm((prev) => ({
-      title: '',
-      description: '',
-      object_id: prev.object_id || '',
-      assigned_user_id: prev.assigned_user_id || '',
-      due_date: '',
-      due_time: '',
-    }));
-  }, []);
+    setForm(makeDefaultForm(objects, assignableUsers));
+  }, [objects, assignableUsers]);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -99,31 +109,26 @@ export default function Tasks({ user }) {
     try {
       const [listRes, metaRes] = await Promise.all([tasksApi.list(), tasksApi.meta()]);
       const listItems = Array.isArray(listRes?.items) ? listRes.items : [];
-      const summaryData = listRes?.summary && typeof listRes.summary === 'object'
-        ? listRes.summary
-        : emptySummary();
       const metaUsers = Array.isArray(metaRes?.users) ? metaRes.users : [];
       const metaObjects = Array.isArray(metaRes?.objects) ? metaRes.objects : [];
 
       setItems(listItems);
-      setSummary({
-        pending: Number(summaryData.pending || 0),
-        extended: Number(summaryData.extended || 0),
-        overdue: Number(summaryData.overdue || 0),
-        completed: Number(summaryData.completed || 0),
-        total: Number(summaryData.total || listItems.length || 0),
-      });
       setAssignableUsers(metaUsers);
       setObjects(metaObjects);
       setViewAll(Boolean(listRes?.viewAll || metaRes?.viewAll));
 
       setForm((prev) => ({
         ...prev,
-        object_id: prev.object_id || (metaObjects[0] ? String(metaObjects[0].id) : ''),
-        assigned_user_id: prev.assigned_user_id || (metaUsers[0] ? String(metaUsers[0].id) : ''),
+        object_id: metaObjects.some((row) => String(row.id) === String(prev.object_id))
+          ? prev.object_id
+          : (metaObjects[0] ? String(metaObjects[0].id) : ''),
+        assigned_user_id: metaUsers.some((row) => String(row.id) === String(prev.assigned_user_id))
+          ? prev.assigned_user_id
+          : (metaUsers[0] ? String(metaUsers[0].id) : ''),
       }));
       if (editingId && !listItems.some((row) => row.id === editingId)) {
         setEditingId(null);
+        setFormOpen(false);
       }
     } catch (e) {
       setError(e.message || 'Ошибка загрузки задач');
@@ -136,9 +141,17 @@ export default function Tasks({ user }) {
     load();
   }, [load]);
 
+  const openCreate = () => {
+    setError('');
+    setEditingId(null);
+    setForm(makeDefaultForm(objects, assignableUsers));
+    setFormOpen(true);
+  };
+
   const onStartEdit = (row) => {
     const parts = toInputDateTimeParts(row.due_at);
     setEditingId(row.id);
+    setError('');
     setForm({
       title: row.title || '',
       description: row.description || '',
@@ -147,6 +160,13 @@ export default function Tasks({ user }) {
       due_date: parts.date,
       due_time: parts.time,
     });
+    setFormOpen(true);
+  };
+
+  const closeForm = () => {
+    if (saving) return;
+    setFormOpen(false);
+    resetForm();
   };
 
   const onSubmit = async (e) => {
@@ -174,6 +194,7 @@ export default function Tasks({ user }) {
       } else {
         await tasksApi.create(payload);
       }
+      setFormOpen(false);
       resetForm();
       await load(true);
     } catch (err) {
@@ -188,7 +209,10 @@ export default function Tasks({ user }) {
     setError('');
     try {
       await tasksApi.delete(row.id);
-      if (editingId === row.id) resetForm();
+      if (editingId === row.id) {
+        setFormOpen(false);
+        resetForm();
+      }
       await load(true);
     } catch (e) {
       setError(e.message || 'Ошибка удаления задачи');
@@ -228,12 +252,55 @@ export default function Tasks({ user }) {
     }
   };
 
+  const tasksByUser = useMemo(() => {
+    const map = new Map();
+    for (const row of items) {
+      const uid = Number(row.assigned_user_id);
+      if (!Number.isFinite(uid) || uid <= 0) continue;
+      map.set(uid, (map.get(uid) || 0) + 1);
+    }
+    return map;
+  }, [items]);
+
+  const myTaskCount = tasksByUser.get(Number(user?.id)) || 0;
+
+  const userFilteredItems = useMemo(() => {
+    if (assigneeFilter === 'all') return items;
+    const uid = Number.parseInt(assigneeFilter, 10);
+    if (!uid) return items;
+    return items.filter((row) => Number(row.assigned_user_id) === uid);
+  }, [items, assigneeFilter]);
+
+  const statusSummary = useMemo(() => {
+    const summary = emptySummary();
+    summary.total = userFilteredItems.length;
+    for (const row of userFilteredItems) {
+      if (row.visible_status === 'completed') summary.completed += 1;
+      else if (row.visible_status === 'extended') summary.extended += 1;
+      else if (row.visible_status === 'overdue') summary.overdue += 1;
+      else summary.pending += 1;
+    }
+    return summary;
+  }, [userFilteredItems]);
+
+  const filteredItems = useMemo(() => {
+    if (statusFilter === 'all') return userFilteredItems;
+    return userFilteredItems.filter((row) => row.visible_status === statusFilter);
+  }, [statusFilter, userFilteredItems]);
+
   const cards = useMemo(() => ([
-    { key: 'pending', label: 'К выполнению', value: summary.pending, cls: 'text-amber-300 border-amber-500/30 bg-amber-500/10' },
-    { key: 'extended', label: 'Продлена', value: summary.extended, cls: 'text-sky-300 border-sky-500/30 bg-sky-500/10' },
-    { key: 'overdue', label: 'Просрочена', value: summary.overdue, cls: 'text-rose-300 border-rose-500/30 bg-rose-500/10' },
-    { key: 'completed', label: 'Выполнена', value: summary.completed, cls: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10' },
-  ]), [summary.completed, summary.extended, summary.overdue, summary.pending]);
+    { key: 'all', label: 'Все', value: statusSummary.total, cls: 'text-zinc-300 border-zinc-500/30 bg-zinc-500/10' },
+    { key: 'pending', label: 'К выполнению', value: statusSummary.pending, cls: 'text-amber-300 border-amber-500/30 bg-amber-500/10' },
+    { key: 'extended', label: 'Продлена', value: statusSummary.extended, cls: 'text-sky-300 border-sky-500/30 bg-sky-500/10' },
+    { key: 'overdue', label: 'Просрочена', value: statusSummary.overdue, cls: 'text-rose-300 border-rose-500/30 bg-rose-500/10' },
+    { key: 'completed', label: 'Выполнена', value: statusSummary.completed, cls: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10' },
+  ]), [statusSummary]);
+
+  const hasFilters = statusFilter !== 'all' || assigneeFilter !== 'all';
+  const resetFilters = () => {
+    setStatusFilter('all');
+    setAssigneeFilter('all');
+  };
 
   return (
     <div className="space-y-4">
@@ -246,110 +313,149 @@ export default function Tasks({ user }) {
             {viewAll ? 'Показаны все задачи.' : 'Показаны только ваши задачи.'}
           </p>
         </div>
-        <div className="text-2xs text-zinc-400">
-          Всего: <span className="text-white font-medium">{summary.total}</span>
+        <div className="flex items-center gap-2">
+          <div className="text-2xs text-zinc-400">
+            Всего: <span className="text-white font-medium">{items.length}</span>
+          </div>
+          <button type="button" className="btn-primary text-sm" onClick={openCreate}>
+            Новая задача
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+      <div className="flex flex-wrap gap-1.5">
+        <span className="text-2xs text-zinc-300 border border-white/10 rounded-lg px-2 py-1 bg-white/[0.03]">
+          Мне поставлено задач: <span className="text-white font-semibold">{myTaskCount}</span>
+        </span>
+      </div>
+
+      {viewAll && (
+        <div className="rounded-lg border border-white/10 bg-white/[0.02] p-2.5">
+          <p className="text-2xs text-zinc-400 mb-2">Количество задач по исполнителям</p>
+          <div className="flex gap-1.5 overflow-x-auto pb-1">
+            <button
+              type="button"
+              onClick={() => setAssigneeFilter('all')}
+              className={`shrink-0 rounded-md border px-2 py-1 text-2xs ${
+                assigneeFilter === 'all'
+                  ? 'border-sky-400/50 bg-sky-500/15 text-sky-200'
+                  : 'border-white/10 bg-white/[0.02] text-zinc-300'
+              }`}
+            >
+              Все пользователи · {items.length}
+            </button>
+            {assignableUsers.map((row) => {
+              const count = tasksByUser.get(Number(row.id)) || 0;
+              const active = assigneeFilter === String(row.id);
+              return (
+                <button
+                  key={row.id}
+                  type="button"
+                  onClick={() => setAssigneeFilter(String(row.id))}
+                  className={`shrink-0 rounded-md border px-2 py-1 text-2xs ${
+                    active
+                      ? 'border-sky-400/50 bg-sky-500/15 text-sky-200'
+                      : 'border-white/10 bg-white/[0.02] text-zinc-300'
+                  }`}
+                  title="Фильтр по исполнителю"
+                >
+                  {row.display_name || row.login} · {count}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
         {cards.map((card) => (
-          <div key={card.key} className={`rounded-lg border p-2.5 ${card.cls}`}>
+          <button
+            type="button"
+            key={card.key}
+            onClick={() => setStatusFilter(card.key)}
+            className={`rounded-lg border p-2.5 text-left transition ${card.cls} ${
+              statusFilter === card.key ? 'ring-1 ring-white/40 scale-[0.99]' : 'opacity-90 hover:opacity-100'
+            }`}
+            title="Нажмите, чтобы фильтровать список"
+          >
             <div className="text-2xs opacity-90">{card.label}</div>
             <div className="text-lg font-semibold leading-6">{card.value}</div>
+          </button>
+        ))}
+      </div>
+
+      {hasFilters && (
+        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.02] px-2.5 py-1.5">
+          <span className="text-2xs text-zinc-300">
+            Фильтр: {statusFilter === 'all' ? 'все статусы' : statusLabel(statusFilter)}
+            {assigneeFilter !== 'all' ? ' · по исполнителю' : ''}
+            {' '}({filteredItems.length})
+          </span>
+          <button type="button" className="btn-ghost text-2xs" onClick={resetFilters}>
+            Сбросить
+          </button>
+        </div>
+      )}
+
+      {error && <div className="text-2xs text-red-300 border border-red-500/30 rounded px-2 py-1.5">{error}</div>}
+
+      <div className="md:hidden space-y-2">
+        {loading && !items.length ? (
+          <div className="text-center text-zinc-500 py-6 text-2xs">Загрузка…</div>
+        ) : null}
+        {!loading && !filteredItems.length ? (
+          <div className="text-center text-zinc-500 py-6 text-2xs">Нет задач по выбранному фильтру</div>
+        ) : null}
+        {filteredItems.map((row) => (
+          <div key={row.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-3 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="text-sm text-white font-medium leading-snug">{row.title}</div>
+              <span className={`inline-flex shrink-0 items-center px-2 py-0.5 rounded border text-2xs ${statusClass(row.visible_status)}`}>
+                {statusLabel(row.visible_status)}
+              </span>
+            </div>
+            {row.description ? (
+              <div className="text-2xs text-zinc-400 leading-relaxed">{row.description}</div>
+            ) : null}
+            <div className="grid grid-cols-2 gap-2 text-2xs">
+              <div>
+                <div className="text-zinc-500">Объект</div>
+                <div className="text-zinc-200">{row.object_name || '—'}</div>
+              </div>
+              <div>
+                <div className="text-zinc-500">Срок</div>
+                <div className="text-zinc-200">{formatDateTime(row.due_at)}</div>
+              </div>
+              <div className="col-span-2">
+                <div className="text-zinc-500">Исполнитель</div>
+                <div className="text-zinc-200">
+                  {row.assigned_user_name || '—'}
+                  {' '}
+                  <span className="text-zinc-500">
+                    · задач: {tasksByUser.get(Number(row.assigned_user_id)) || 0}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button type="button" className="btn-ghost text-2xs" onClick={() => onStartEdit(row)}>Изменить</button>
+              <button type="button" className="btn-ghost text-2xs" onClick={() => onToggleCompleted(row)}>
+                {row.visible_status === 'completed' ? 'Вернуть' : 'Выполнена'}
+              </button>
+              {row.visible_status !== 'completed' ? (
+                <button type="button" className="btn-ghost text-2xs" onClick={() => onQuickExtend(row)}>
+                  Продлить +1д
+                </button>
+              ) : <span />}
+              <button type="button" className="btn-ghost text-2xs text-rose-300" onClick={() => onDelete(row)}>
+                Удалить
+              </button>
+            </div>
           </div>
         ))}
       </div>
 
-      {error && <div className="text-2xs text-red-300 border border-red-500/30 rounded px-2 py-1.5">{error}</div>}
-
-      <div className="card p-4">
-        <h3 className="text-white text-sm font-medium mb-3">{editingId ? 'Редактирование задачи' : 'Новая задача'}</h3>
-        <form onSubmit={onSubmit} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          <div className="xl:col-span-2">
-            <label className="label">Задача</label>
-            <input
-              type="text"
-              value={form.title}
-              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              className="input"
-              placeholder="Например: Проверить выдачу материалов по объекту"
-              required
-            />
-          </div>
-          <div>
-            <label className="label">Объект</label>
-            <select
-              value={form.object_id}
-              onChange={(e) => setForm((f) => ({ ...f, object_id: e.target.value }))}
-              className="input"
-              required
-            >
-              <option value="">— Выберите —</option>
-              {objects.map((row) => (
-                <option key={row.id} value={row.id}>{row.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">Исполнитель</label>
-            <select
-              value={form.assigned_user_id}
-              onChange={(e) => setForm((f) => ({ ...f, assigned_user_id: e.target.value }))}
-              className="input"
-              required
-              disabled={!viewAll && assignableUsers.length <= 1}
-            >
-              <option value="">— Выберите —</option>
-              {assignableUsers.map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.display_name || row.login}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">Дата выполнения</label>
-            <input
-              type="date"
-              value={form.due_date}
-              onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))}
-              className="input"
-              required
-            />
-          </div>
-          <div>
-            <label className="label">Время выполнения</label>
-            <input
-              type="time"
-              value={form.due_time}
-              onChange={(e) => setForm((f) => ({ ...f, due_time: e.target.value }))}
-              className="input"
-              required
-            />
-          </div>
-          <div className="md:col-span-2 xl:col-span-3">
-            <label className="label">Комментарий</label>
-            <textarea
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              className="input min-h-[84px]"
-              placeholder="Дополнительные детали задачи (необязательно)"
-            />
-          </div>
-          <div className="xl:col-span-3 flex flex-wrap gap-2">
-            <button type="submit" className="btn-primary text-sm" disabled={saving || loading}>
-              {saving ? 'Сохранение…' : (editingId ? 'Сохранить' : 'Поставить задачу')}
-            </button>
-            {editingId && (
-              <button type="button" onClick={resetForm} className="btn-ghost text-sm" disabled={saving}>
-                Отмена
-              </button>
-            )}
-          </div>
-        </form>
-      </div>
-
-      <div className="table-wrap">
+      <div className="table-wrap hidden md:block">
         <table className="data-table">
           <thead>
             <tr>
@@ -367,12 +473,12 @@ export default function Tasks({ user }) {
                 <td colSpan={6} className="text-center text-zinc-500 py-6 text-2xs">Загрузка…</td>
               </tr>
             ) : null}
-            {!loading && !items.length ? (
+            {!loading && !filteredItems.length ? (
               <tr>
-                <td colSpan={6} className="text-center text-zinc-500 py-6 text-2xs">Задач пока нет</td>
+                <td colSpan={6} className="text-center text-zinc-500 py-6 text-2xs">Нет задач по выбранному фильтру</td>
               </tr>
             ) : null}
-            {items.map((row) => (
+            {filteredItems.map((row) => (
               <tr key={row.id}>
                 <td>
                   <div className="text-white text-sm font-medium">{row.title}</div>
@@ -381,7 +487,10 @@ export default function Tasks({ user }) {
                   ) : null}
                 </td>
                 <td className="text-zinc-300 text-2xs">{row.object_name || '—'}</td>
-                <td className="text-zinc-300 text-2xs">{row.assigned_user_name || '—'}</td>
+                <td className="text-zinc-300 text-2xs">
+                  <div>{row.assigned_user_name || '—'}</div>
+                  <div className="text-zinc-500">Задач: {tasksByUser.get(Number(row.assigned_user_id)) || 0}</div>
+                </td>
                 <td className="text-zinc-300 text-2xs whitespace-nowrap">{formatDateTime(row.due_at)}</td>
                 <td>
                   <span className={`inline-flex items-center px-2 py-0.5 rounded border text-2xs ${statusClass(row.visible_status)}`}>
@@ -411,6 +520,103 @@ export default function Tasks({ user }) {
           </tbody>
         </table>
       </div>
+
+      {formOpen && (
+        <div
+          className="modal-backdrop z-[75]"
+          onClick={closeForm}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="card p-5 max-w-xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-white text-sm font-medium mb-3">{editingId ? 'Редактирование задачи' : 'Новая задача'}</h3>
+            <form onSubmit={onSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="md:col-span-2">
+                <label className="label">Задача</label>
+                <input
+                  type="text"
+                  value={form.title}
+                  onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                  className="input"
+                  placeholder="Например: Проверить выдачу материалов по объекту"
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">Объект</label>
+                <select
+                  value={form.object_id}
+                  onChange={(e) => setForm((f) => ({ ...f, object_id: e.target.value }))}
+                  className="input"
+                  required
+                >
+                  <option value="">— Выберите —</option>
+                  {objects.map((row) => (
+                    <option key={row.id} value={row.id}>{row.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Исполнитель</label>
+                <select
+                  value={form.assigned_user_id}
+                  onChange={(e) => setForm((f) => ({ ...f, assigned_user_id: e.target.value }))}
+                  className="input"
+                  required
+                  disabled={!viewAll && assignableUsers.length <= 1}
+                >
+                  <option value="">— Выберите —</option>
+                  {assignableUsers.map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {(row.display_name || row.login)} · {tasksByUser.get(Number(row.id)) || 0}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Дата выполнения</label>
+                <input
+                  type="date"
+                  value={form.due_date}
+                  onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))}
+                  className="input"
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">Время выполнения</label>
+                <input
+                  type="time"
+                  value={form.due_time}
+                  onChange={(e) => setForm((f) => ({ ...f, due_time: e.target.value }))}
+                  className="input"
+                  required
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="label">Комментарий</label>
+                <textarea
+                  value={form.description}
+                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                  className="input min-h-[84px]"
+                  placeholder="Дополнительные детали задачи (необязательно)"
+                />
+              </div>
+              <div className="md:col-span-2 flex flex-wrap gap-2 pt-1">
+                <button type="submit" className="btn-primary text-sm" disabled={saving || loading}>
+                  {saving ? 'Сохранение…' : (editingId ? 'Сохранить' : 'Поставить задачу')}
+                </button>
+                <button type="button" onClick={closeForm} className="btn-ghost text-sm" disabled={saving}>
+                  Отмена
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
