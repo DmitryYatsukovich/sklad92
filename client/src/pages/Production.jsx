@@ -5,6 +5,7 @@ import ProductionHistoryModal from '../components/ProductionHistoryModal';
 import ProductionConfirmModal from '../components/ProductionConfirmModal';
 import ListPagination from '../components/ListPagination';
 import { useListPagination } from '../hooks/useListPagination';
+import { useAutoRefreshOnVisible } from '../hooks/useAutoRefreshOnVisible';
 import { usePendingMutations } from '../hooks/usePendingMutations';
 import { useReloadOnSyncComplete } from '../hooks/useReloadOnSyncComplete';
 import { applyPendingToProduction, applyPendingToMaterials, withPendingRowClass } from '../lib/actionLog/applyOptimistic';
@@ -233,6 +234,8 @@ export default function Production({ user }) {
       })
       .finally(() => { if (!silent) setLoading(false); });
   }, [periodFrom, periodTo, productionCacheKey]);
+
+  useAutoRefreshOnVisible(() => load(true), { intervalMs: 10000 });
 
   useReloadOnSyncComplete(() => {
     load(true);

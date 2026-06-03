@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { tasks as tasksApi } from '../api';
+import { useAutoRefreshOnVisible } from '../hooks/useAutoRefreshOnVisible';
 
 function pad2(value) {
   return String(value).padStart(2, '0');
@@ -140,6 +141,8 @@ export default function Tasks({ user }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useAutoRefreshOnVisible(() => load(true), { intervalMs: 10000 });
 
   const openCreate = () => {
     setError('');

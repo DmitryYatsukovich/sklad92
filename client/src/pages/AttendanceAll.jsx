@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { attendance as attendanceApi, isOfflineQueuedError } from '../api';
 import { usePendingMutations } from '../hooks/usePendingMutations';
+import { useAutoRefreshOnVisible } from '../hooks/useAutoRefreshOnVisible';
 import { withPendingRowClass } from '../lib/actionLog/applyOptimistic';
 
 const WEEKDAYS = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
@@ -1278,21 +1279,25 @@ export default function AttendanceAll({ user }) {
     [pendingMutations],
   );
 
-  const load = useCallback(() => {
+  const load = useCallback(({ silent = false } = {}) => {
     const { from, to } = monthToRange(month);
     if (!from || !to) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError('');
     attendanceApi
       .timesheet(from, to)
       .then((payload) => setData(normalizeTimesheetData(payload)))
       .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!silent) setLoading(false);
+      });
   }, [month]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useAutoRefreshOnVisible(() => load({ silent: true }), { intervalMs: 10000 });
 
   useEffect(() => {
     if (!canChangeMonth) setMonth(currentMonthValue());
