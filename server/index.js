@@ -28,6 +28,7 @@ import attendance from './routes/attendance.js';
 import settings from './routes/settings.js';
 import roles from './routes/roles.js';
 import actions from './routes/actions.js';
+import tasks from './routes/tasks.js';
 import { loadUser } from './middleware/auth.js';
 import { ensureAdminUser } from './db/ensure-admin.js';
 import { ensureSchema } from './db/ensure-schema.js';
@@ -171,6 +172,7 @@ app.use('/api/attendance', attendance);
 app.use('/api/settings', settings);
 app.use('/api/roles', roles);
 app.use('/api/actions', actions);
+app.use('/api/tasks', tasks);
 
 if (isProd) {
   if (hasIndex) {

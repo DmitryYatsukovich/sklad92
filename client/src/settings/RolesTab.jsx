@@ -97,6 +97,9 @@ export default function RolesTab() {
     if (editing?.is_admin_role) return;
     setForm((f) => {
       const next = { ...f, [key]: value };
+      if (key === 'can_tasks' && !value) {
+        next.can_tasks_all = false;
+      }
       if (key === 'can_actions' && !value) {
         next.can_actions_all = false;
       }
@@ -127,6 +130,11 @@ export default function RolesTab() {
   const setActionsScope = (allUsers) => {
     if (editing?.is_admin_role) return;
     setForm((f) => ({ ...f, can_actions_all: allUsers }));
+  };
+
+  const setTasksScope = (allUsers) => {
+    if (editing?.is_admin_role) return;
+    setForm((f) => ({ ...f, can_tasks_all: allUsers }));
   };
 
   const selectAllPerms = (value) => {
@@ -280,7 +288,7 @@ export default function RolesTab() {
                       <p className="text-slate-500 text-2xs uppercase tracking-wide mb-2">{groupName}</p>
                       <div className="space-y-2">
                         {items
-                          .filter((p) => !p.attendanceScopeOption && !p.attendanceEditOption && !p.attendancePayOption && !p.attendanceRatesOption && !p.attendanceToolsOption && !p.attendanceMonthOption && !p.actionsScopeOption)
+                          .filter((p) => !p.attendanceScopeOption && !p.attendanceEditOption && !p.attendancePayOption && !p.attendanceRatesOption && !p.attendanceToolsOption && !p.attendanceMonthOption && !p.actionsScopeOption && !p.tasksScopeOption)
                           .map((p) => (
                             <div key={p.key}>
                               <label
@@ -324,6 +332,33 @@ export default function RolesTab() {
                                       className="border-slate-600 text-brand-600"
                                     />
                                     Только свои действия
+                                  </label>
+                                </div>
+                              )}
+                              {p.key === 'can_tasks' && (editing?.is_admin_role || form.can_tasks) && (
+                                <div className="ml-9 mt-1 mb-2 space-y-1.5 pl-3 border-l border-white/10">
+                                  <p className="text-slate-500 text-2xs">Область задач</p>
+                                  <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      name="tasks_scope"
+                                      checked={editing?.is_admin_role ? true : !!form.can_tasks_all}
+                                      disabled={!!editing?.is_admin_role}
+                                      onChange={() => setTasksScope(true)}
+                                      className="border-slate-600 text-brand-600"
+                                    />
+                                    Все задачи
+                                  </label>
+                                  <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      name="tasks_scope"
+                                      checked={editing?.is_admin_role ? false : !form.can_tasks_all}
+                                      disabled={!!editing?.is_admin_role}
+                                      onChange={() => setTasksScope(false)}
+                                      className="border-slate-600 text-brand-600"
+                                    />
+                                    Только свои задачи
                                   </label>
                                 </div>
                               )}

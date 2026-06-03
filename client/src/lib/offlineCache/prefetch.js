@@ -69,6 +69,7 @@ export async function prefetchOfflineData(user, { onProgress } = {}) {
     reports,
     attendance,
     actions,
+    tasks,
   } = await import('../../api.js');
 
   try {
@@ -173,6 +174,18 @@ export async function prefetchOfflineData(user, { onProgress } = {}) {
       const log = await actions.list(400);
       counts.actions = log?.items?.length ?? 0;
       await save(path, log, uid);
+    }
+
+    if (user.can_tasks) {
+      report('Задачи…');
+      const [taskList, taskMeta] = await Promise.all([
+        tasks.list(),
+        tasks.meta(),
+      ]);
+      counts.tasks = Array.isArray(taskList?.items) ? taskList.items.length : 0;
+      counts.taskObjects = Array.isArray(taskMeta?.objects) ? taskMeta.objects.length : 0;
+      await save('/api/tasks', taskList, uid);
+      await save('/api/tasks/meta', taskMeta, uid);
     }
 
     if (user.can_users || user.role === 'admin') {

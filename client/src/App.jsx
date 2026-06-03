@@ -23,6 +23,7 @@ import { isMobileDevice, getAdaptivePollInterval } from './lib/device.js';
 const Warehouse = lazy(() => import('./pages/Warehouse'));
 const Issuance = lazy(() => import('./pages/Issuance'));
 const Production = lazy(() => import('./pages/Production'));
+const Tasks = lazy(() => import('./pages/Tasks'));
 const Users = lazy(() => import('./pages/Users'));
 const FaceCheckIn = lazy(() => import('./pages/FaceCheckIn'));
 const AttendanceAll = lazy(() => import('./pages/AttendanceAll'));
@@ -93,6 +94,7 @@ export default function App() {
       u.can_warehouse ? 'w' : '',
       u.can_issuance ? 'i' : '',
       u.can_production ? 'p' : '',
+      u.can_tasks ? 'k' : '',
       u.can_actions ? 'a' : '',
       u.can_face ? 'f' : '',
       u.can_attendance ? 't' : '',
@@ -105,6 +107,7 @@ export default function App() {
     if (u.can_warehouse) loaders.push(() => import('./pages/Warehouse'));
     if (u.can_issuance) loaders.push(() => import('./pages/Issuance'));
     if (u.can_production) loaders.push(() => import('./pages/Production'));
+    if (u.can_tasks) loaders.push(() => import('./pages/Tasks'));
     if (u.can_actions) loaders.push(() => import('./pages/Actions'));
     if (u.can_face) loaders.push(() => import('./pages/FaceCheckIn'));
     if (u.can_attendance) loaders.push(() => import('./pages/AttendanceAll'));
@@ -340,6 +343,12 @@ export default function App() {
       m.deleteCachedResponse('/api/materials/users-for-issuance'),
     ])).catch(() => {});
   }, []);
+  const recoverTasksTabCache = useCallback(() => {
+    import('./lib/pageCache').then((m) => m.invalidatePageCache()).catch(() => {});
+    import('./lib/offlineCache').then((m) => Promise.allSettled([
+      m.deleteCachedResponsesByPathPrefix('/api/tasks'),
+    ])).catch(() => {});
+  }, []);
   const onLogout = async () => {
     markActiveSession(false);
     setPendingServerLogout(false);
@@ -431,6 +440,16 @@ export default function App() {
             <ProtectedRoute user={user} perm="can_attendance">
               <RecoverableErrorBoundary onError={recoverAttendanceTabCache}>
                 <AttendanceAll user={user} />
+              </RecoverableErrorBoundary>
+            </ProtectedRoute>
+          )}
+        />
+        <Route
+          path="tasks"
+          element={(
+            <ProtectedRoute user={user} perm="can_tasks">
+              <RecoverableErrorBoundary onError={recoverTasksTabCache}>
+                <Tasks user={user} />
               </RecoverableErrorBoundary>
             </ProtectedRoute>
           )}

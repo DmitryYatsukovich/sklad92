@@ -461,6 +461,19 @@ export const actions = {
   sync: (items) => request('/api/actions/sync', { method: 'POST', body: JSON.stringify({ items }) }),
 };
 
+export const tasks = {
+  list: () => request('/api/tasks'),
+  meta: () => request('/api/tasks/meta'),
+  create: (body) => request('/api/tasks', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id, body) => request(`/api/tasks/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  setCompleted: (id, completed) =>
+    request(`/api/tasks/${id}/complete`, {
+      method: 'PATCH',
+      body: JSON.stringify({ completed: !!completed }),
+    }),
+  delete: (id) => request(`/api/tasks/${id}`, { method: 'DELETE' }),
+};
+
 export const attendance = {
   registerFace: (descriptor, userId, faceImage) =>
     request('/api/attendance/register-face', {

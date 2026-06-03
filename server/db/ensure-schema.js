@@ -250,10 +250,32 @@ const statements = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_app_action_log_created ON app_action_log(created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_app_action_log_user ON app_action_log(user_id)`,
+  `CREATE TABLE IF NOT EXISTS tasks (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(400) NOT NULL,
+    description TEXT,
+    object_id INTEGER NOT NULL REFERENCES warehouse_objects(id) ON DELETE RESTRICT,
+    assigned_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    due_at TIMESTAMPTZ NOT NULL,
+    extended_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CHECK (status IN ('pending', 'extended', 'completed'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_tasks_assigned_user ON tasks(assigned_user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_tasks_due_at ON tasks(due_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_actions BOOLEAN DEFAULT false`,
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_actions BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_actions_all BOOLEAN DEFAULT false`,
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_actions_all BOOLEAN DEFAULT false`,
+  `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_tasks BOOLEAN DEFAULT false`,
+  `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_tasks BOOLEAN DEFAULT false`,
+  `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_tasks_all BOOLEAN DEFAULT false`,
+  `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_tasks_all BOOLEAN DEFAULT false`,
 ];
 
 export async function ensureSchema() {

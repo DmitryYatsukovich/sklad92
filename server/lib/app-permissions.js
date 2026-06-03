@@ -19,6 +19,19 @@ export const APP_PERMISSIONS = [
     group: 'Основные разделы',
   },
   {
+    key: 'can_tasks',
+    label: 'Задачи',
+    description: 'Постановка и контроль задач сотрудников',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_tasks_all',
+    label: 'Задачи всех пользователей',
+    description: 'Просмотр и управление всеми задачами (иначе — только своими)',
+    group: 'Основные разделы',
+    tasksScopeOption: true,
+  },
+  {
     key: 'can_actions',
     label: 'Действия',
     description: 'Журнал операций в приложении, офлайн-синхронизация',
@@ -162,6 +175,9 @@ export function fullPermissionFlags(value = true) {
 
 export function permissionsFromBody(body = {}) {
   const perms = Object.fromEntries(PERMISSION_KEYS.map((k) => [k, !!body[k]]));
+  if (!perms.can_tasks) {
+    perms.can_tasks_all = false;
+  }
   if (!perms.can_actions) {
     perms.can_actions_all = false;
   }
