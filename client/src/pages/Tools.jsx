@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { tools as toolsApi } from '../api';
 import QrScanner from '../components/QrScanner';
 import { useAutoRefreshOnVisible } from '../hooks/useAutoRefreshOnVisible';
@@ -56,6 +57,55 @@ function formatMoney(value) {
 function locationText(row) {
   const parts = [row.object_name, row.warehouse_name, row.rack_name].filter(Boolean);
   return parts.length ? parts.join(' → ') : '—';
+}
+
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function buildToolQrPrintHtml(tool, svgEl) {
+  const svgClone = svgEl.cloneNode(true);
+  svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  if (!svgClone.getAttribute('width')) svgClone.setAttribute('width', '280');
+  if (!svgClone.getAttribute('height')) svgClone.setAttribute('height', '280');
+  return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>QR — ${escapeHtml(tool?.name || '')}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 28px;
+      font-family: system-ui, -apple-system, sans-serif;
+      color: #111;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    .code { margin: 0 0 16px; color: #444; font-family: ui-monospace, monospace; font-size: 13px; }
+    .qr {
+      border: 1px solid #ddd;
+      border-radius: 14px;
+      padding: 16px;
+      background: #fff;
+    }
+    .qr svg { width: 280px; height: 280px; display: block; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(tool?.name || 'Инструмент')}</h1>
+  <p class="code">${escapeHtml(tool?.code || '')}</p>
+  <div class="qr">${svgClone.outerHTML}</div>
+</body>
+</html>`;
 }
 
 function defaultForm(meta) {
@@ -128,6 +178,9 @@ export default function Tools() {
   const [historyTool, setHistoryTool] = useState(null);
   const [historyItems, setHistoryItems] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [qrPreviewTool, setQrPreviewTool] = useState(null);
+  const [qrPrintError, setQrPrintError] = useState('');
+  const qrPreviewRef = useRef(null);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -380,6 +433,52 @@ export default function Tools() {
     setHistoryItems([]);
   };
 
+  const openQrPreview = (tool) => {
+    setQrPreviewTool(tool);
+    setQrPrintError('');
+  };
+
+  const closeQrPreview = () => {
+    setQrPreviewTool(null);
+    setQrPrintError('');
+  };
+
+  const printQrPreview = useCallback(() => {
+    if (!qrPreviewTool) return;
+    const svg = qrPreviewRef.current?.querySelector('svg');
+    if (!svg) {
+      setQrPrintError('Не удалось подготовить QR для печати');
+      return;
+    }
+    setQrPrintError('');
+    const html = buildToolQrPrintHtml(qrPreviewTool, svg);
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    document.body.appendChild(iframe);
+    const win = iframe.contentWindow;
+    if (!win) {
+      iframe.remove();
+      setQrPrintError('Не удалось открыть печать');
+      return;
+    }
+    const cleanup = () => setTimeout(() => iframe.remove(), 400);
+    try {
+      const doc = win.document;
+      doc.open();
+      doc.write(html);
+      doc.close();
+      win.addEventListener('afterprint', cleanup, { once: true });
+      setTimeout(() => {
+        win.focus();
+        win.print();
+      }, 180);
+    } catch {
+      cleanup();
+      setQrPrintError('Не удалось открыть печать');
+    }
+  }, [qrPreviewTool]);
+
   const onScan = async (decoded) => {
     const code = String(decoded || '').trim();
     if (!code || scanBusy) return;
@@ -522,16 +621,28 @@ export default function Tools() {
             {filteredItems.map((row) => (
               <tr key={row.id}>
                 <td>
-                  <button
-                    type="button"
-                    onClick={() => openHistory(row)}
-                    className="text-left text-white hover:text-sky-300 text-sm font-medium"
-                    title="Открыть историю действий"
-                  >
-                    {row.name}
-                  </button>
-                  <div className="text-zinc-500 text-2xs mt-0.5">QR: {row.code}</div>
-                  <div className="text-zinc-500 text-2xs">Покупка: {formatDate(row.purchase_date)} · Гарантия: {formatDate(row.warranty_date)}</div>
+                  <div className="flex items-start gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openQrPreview(row)}
+                      className="rounded-md bg-white p-1 border border-white/10 hover:border-sky-400/50 shrink-0"
+                      title="Открыть увеличенный QR"
+                    >
+                      <QRCodeSVG value={row.code || `tool-${row.id}`} size={40} level="M" />
+                    </button>
+                    <div className="min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => openHistory(row)}
+                        className="text-left text-white hover:text-sky-300 text-sm font-medium"
+                        title="Открыть историю действий"
+                      >
+                        {row.name}
+                      </button>
+                      <div className="text-zinc-500 text-2xs mt-0.5">QR: {row.code}</div>
+                      <div className="text-zinc-500 text-2xs">Покупка: {formatDate(row.purchase_date)} · Гарантия: {formatDate(row.warranty_date)}</div>
+                    </div>
+                  </div>
                 </td>
                 <td className="text-zinc-300 text-2xs">{row.type_name || '—'}</td>
                 <td className="text-zinc-300 text-2xs">{row.serial_number || '—'}</td>
@@ -564,13 +675,23 @@ export default function Tools() {
         {filteredItems.map((row) => (
           <div key={row.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-3 space-y-2">
             <div className="flex items-start justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => openHistory(row)}
-                className="text-left text-white hover:text-sky-300 text-sm font-medium"
-              >
-                {row.name}
-              </button>
+              <div className="flex items-start gap-2 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => openQrPreview(row)}
+                  className="rounded-md bg-white p-1 border border-white/10 hover:border-sky-400/50 shrink-0"
+                  title="Открыть увеличенный QR"
+                >
+                  <QRCodeSVG value={row.code || `tool-${row.id}`} size={36} level="M" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openHistory(row)}
+                  className="text-left text-white hover:text-sky-300 text-sm font-medium"
+                >
+                  {row.name}
+                </button>
+              </div>
               <span className={`inline-flex items-center rounded border px-2 py-0.5 text-2xs ${statusClass(row.status)}`}>
                 {statusLabel(row.status)}
               </span>
@@ -949,6 +1070,32 @@ export default function Tools() {
             )}
             <div className="pt-3">
               <button type="button" className="btn-ghost text-sm" onClick={closeHistory}>Закрыть</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {qrPreviewTool && (
+        <div className="modal-backdrop z-[88]" onClick={closeQrPreview} role="dialog" aria-modal="true">
+          <div className="card p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-white text-sm font-medium mb-1">QR-код инструмента</h3>
+            <p className="text-zinc-300 text-xs">{qrPreviewTool.name}</p>
+            <p className="text-zinc-500 text-2xs mb-3">{qrPreviewTool.code}</p>
+            <div className="flex justify-center">
+              <div ref={qrPreviewRef} className="rounded-xl bg-white p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+                <QRCodeSVG value={qrPreviewTool.code || `tool-${qrPreviewTool.id}`} size={260} level="M" />
+              </div>
+            </div>
+            {qrPrintError && (
+              <p className="text-rose-300 text-2xs mt-3">{qrPrintError}</p>
+            )}
+            <div className="flex gap-2 mt-4">
+              <button type="button" className="btn-primary text-sm" onClick={printQrPreview}>
+                Распечатать QR
+              </button>
+              <button type="button" className="btn-ghost text-sm" onClick={closeQrPreview}>
+                Закрыть
+              </button>
             </div>
           </div>
         </div>
