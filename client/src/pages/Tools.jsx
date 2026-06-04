@@ -23,6 +23,21 @@ function statusClass(status) {
   return 'text-sky-300 bg-sky-500/10 border-sky-500/30';
 }
 
+const STATUS_FILTERS = [
+  { id: 'all', label: 'Все' },
+  { id: 'new', label: 'Новый' },
+  { id: 'in_use', label: 'В работе' },
+  { id: 'in_repair', label: 'В ремонте' },
+  { id: 'in_stock', label: 'На складе' },
+];
+
+function statusFilterButtonClass(active, status) {
+  const tone = statusClass(status || 'new');
+  return active
+    ? `rounded-md border px-2 py-1 text-2xs font-medium ${tone}`
+    : 'rounded-md border border-white/10 px-2 py-1 text-2xs text-zinc-300 bg-white/[0.02] hover:bg-white/[0.04]';
+}
+
 function actionLabel(action) {
   if (action === 'create') return 'Создан';
   if (action === 'update') return 'Изменение карточки';
@@ -174,6 +189,7 @@ export default function Tools() {
   const [actionTool, setActionTool] = useState(null);
   const [actionForm, setActionForm] = useState(() => actionDefault(null));
   const [actionSaving, setActionSaving] = useState(false);
+  const [issueUserDropdownOpen, setIssueUserDropdownOpen] = useState(false);
 
   const [historyTool, setHistoryTool] = useState(null);
   const [historyItems, setHistoryItems] = useState([]);
@@ -243,6 +259,12 @@ export default function Tools() {
     });
   }, [actionForm.user_query, meta.users]);
 
+  const selectedIssueUser = useMemo(() => {
+    const id = parseId(actionForm.target_user_id);
+    if (!id) return null;
+    return meta.users.find((row) => Number(row.id) === Number(id)) || null;
+  }, [actionForm.target_user_id, meta.users]);
+
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = items.filter((row) => {
@@ -288,6 +310,23 @@ export default function Tools() {
       count: Number(row.count || 0),
     })));
   }, [items.length, summaryByType]);
+
+  const statusButtons = useMemo(() => {
+    const counts = {
+      all: items.length,
+      new: 0,
+      in_use: 0,
+      in_repair: 0,
+      in_stock: 0,
+    };
+    for (const row of items) {
+      if (counts[row.status] != null) counts[row.status] += 1;
+    }
+    return STATUS_FILTERS.map((cfg) => ({
+      ...cfg,
+      count: counts[cfg.id] || 0,
+    }));
+  }, [items]);
 
   const resetForm = useCallback(() => {
     setEditingId(null);
@@ -368,11 +407,13 @@ export default function Tools() {
   const openActionModal = (tool) => {
     setActionTool(tool);
     setActionForm(actionDefault(tool));
+    setIssueUserDropdownOpen(false);
     setScanError('');
   };
 
   const closeActionModal = () => {
     if (actionSaving) return;
+    setIssueUserDropdownOpen(false);
     setActionTool(null);
   };
 
@@ -405,6 +446,7 @@ export default function Tools() {
     setError('');
     try {
       await toolsApi.action(actionTool.id, payload);
+      setIssueUserDropdownOpen(false);
       setActionTool(null);
       await load(true);
     } catch (e) {
@@ -526,24 +568,13 @@ export default function Tools() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-2">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="input"
           placeholder="Поиск: название, QR, серийный, склад, пользователь…"
         />
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="input"
-        >
-          <option value="all">Все статусы</option>
-          <option value="new">Новый</option>
-          <option value="in_use">В работе</option>
-          <option value="in_repair">В ремонте</option>
-          <option value="in_stock">На складе</option>
-        </select>
         <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value)}
@@ -564,6 +595,19 @@ export default function Tools() {
           <option value="desc">По убыванию</option>
           <option value="asc">По возрастанию</option>
         </select>
+      </div>
+
+      <div className="flex gap-1.5 overflow-x-auto pb-1">
+        {statusButtons.map((row) => (
+          <button
+            key={row.id}
+            type="button"
+            onClick={() => setStatusFilter(row.id)}
+            className={`shrink-0 ${statusFilterButtonClass(String(statusFilter) === String(row.id), row.id === 'all' ? '' : row.id)}`}
+          >
+            {row.label} · {row.count}
+          </button>
+        ))}
       </div>
 
       <div className="flex gap-1.5 overflow-x-auto pb-1">
@@ -648,9 +692,14 @@ export default function Tools() {
                 <td className="text-zinc-300 text-2xs">{row.serial_number || '—'}</td>
                 <td className="text-zinc-300 text-2xs tabular-nums">{formatMoney(row.cost)}</td>
                 <td>
-                  <span className={`inline-flex items-center rounded border px-2 py-0.5 text-2xs ${statusClass(row.status)}`}>
+                  <button
+                    type="button"
+                    className={`inline-flex items-center rounded border px-2 py-0.5 text-2xs ${statusClass(row.status)}`}
+                    onClick={() => setStatusFilter(row.status)}
+                    title="Фильтровать по этому статусу"
+                  >
                     {statusLabel(row.status)}
-                  </span>
+                  </button>
                 </td>
                 <td className="text-zinc-300 text-2xs">{statusInfo(row)}</td>
                 <td>
@@ -692,9 +741,14 @@ export default function Tools() {
                   {row.name}
                 </button>
               </div>
-              <span className={`inline-flex items-center rounded border px-2 py-0.5 text-2xs ${statusClass(row.status)}`}>
+              <button
+                type="button"
+                className={`inline-flex items-center rounded border px-2 py-0.5 text-2xs ${statusClass(row.status)}`}
+                onClick={() => setStatusFilter(row.status)}
+                title="Фильтровать по этому статусу"
+              >
                 {statusLabel(row.status)}
-              </span>
+              </button>
             </div>
             <div className="text-2xs text-zinc-500">QR: {row.code}</div>
             <div className="grid grid-cols-2 gap-2 text-2xs text-zinc-300">
@@ -795,16 +849,18 @@ export default function Tools() {
               </div>
               <div>
                 <label className="label">Статус инструмента</label>
-                <select
-                  value={form.status}
-                  onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))}
-                  className="input"
-                >
-                  <option value="new">Новый</option>
-                  <option value="in_use">В работе</option>
-                  <option value="in_repair">В ремонте</option>
-                  <option value="in_stock">На складе</option>
-                </select>
+                <div className="flex flex-wrap gap-1.5">
+                  {STATUS_FILTERS.filter((row) => row.id !== 'all').map((row) => (
+                    <button
+                      key={row.id}
+                      type="button"
+                      onClick={() => setForm((prev) => ({ ...prev, status: row.id }))}
+                      className={statusFilterButtonClass(form.status === row.id, row.id)}
+                    >
+                      {row.label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div>
                 <label className="label">Объект</label>
@@ -890,7 +946,13 @@ export default function Tools() {
                 <label className="label">Действие</label>
                 <select
                   value={actionForm.action}
-                  onChange={(e) => setActionForm((prev) => ({ ...prev, action: e.target.value }))}
+                  onChange={(e) => {
+                    const nextAction = e.target.value;
+                    setActionForm((prev) => ({ ...prev, action: nextAction }));
+                    if (nextAction !== 'issue') {
+                      setIssueUserDropdownOpen(false);
+                    }
+                  }}
                   className="input"
                 >
                   <option value="issue">Выдать пользователю</option>
@@ -903,23 +965,51 @@ export default function Tools() {
               {actionForm.action === 'issue' && (
                 <div className="space-y-2">
                   <label className="label">Пользователь</label>
-                  <input
-                    value={actionForm.user_query}
-                    onChange={(e) => setActionForm((prev) => ({ ...prev, user_query: e.target.value }))}
-                    className="input"
-                    placeholder="Поиск по имени или логину"
-                  />
-                  <select
-                    value={actionForm.target_user_id}
-                    onChange={(e) => setActionForm((prev) => ({ ...prev, target_user_id: e.target.value }))}
-                    className="input"
-                    required
-                  >
-                    <option value="">— Выберите пользователя —</option>
-                    {searchedUsers.map((row) => (
-                      <option key={row.id} value={row.id}>{row.display_name || row.login}</option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      className="input text-left flex items-center justify-between"
+                      onClick={() => setIssueUserDropdownOpen((prev) => !prev)}
+                    >
+                      <span className={selectedIssueUser ? 'text-zinc-100' : 'text-zinc-500'}>
+                        {selectedIssueUser ? (selectedIssueUser.display_name || selectedIssueUser.login) : '— Выберите пользователя —'}
+                      </span>
+                      <span className="text-zinc-500 text-xs">{issueUserDropdownOpen ? '▲' : '▼'}</span>
+                    </button>
+                    {issueUserDropdownOpen && (
+                      <div className="absolute z-20 mt-1 w-full rounded-lg border border-white/10 bg-surface-900 shadow-xl p-2 space-y-2">
+                        <input
+                          value={actionForm.user_query}
+                          onChange={(e) => setActionForm((prev) => ({ ...prev, user_query: e.target.value }))}
+                          className="input"
+                          placeholder="Поиск по имени или логину"
+                          autoFocus
+                        />
+                        <div className="max-h-52 overflow-y-auto space-y-1">
+                          {searchedUsers.length === 0 && (
+                            <div className="text-zinc-500 text-2xs px-2 py-1">Пользователи не найдены</div>
+                          )}
+                          {searchedUsers.map((row) => (
+                            <button
+                              key={row.id}
+                              type="button"
+                              onClick={() => {
+                                setActionForm((prev) => ({ ...prev, target_user_id: String(row.id) }));
+                                setIssueUserDropdownOpen(false);
+                              }}
+                              className={`w-full text-left rounded px-2 py-1.5 text-2xs ${
+                                String(actionForm.target_user_id) === String(row.id)
+                                  ? 'bg-sky-500/20 text-sky-200'
+                                  : 'hover:bg-white/5 text-zinc-200'
+                              }`}
+                            >
+                              {row.display_name || row.login}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
