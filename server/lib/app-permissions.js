@@ -19,6 +19,12 @@ export const APP_PERMISSIONS = [
     group: 'Основные разделы',
   },
   {
+    key: 'can_tools',
+    label: 'Инструмент',
+    description: 'Учёт инструмента, QR-сканирование, выдача и перемещения',
+    group: 'Основные разделы',
+  },
+  {
     key: 'can_tasks',
     label: 'Задачи',
     description: 'Постановка и контроль задач сотрудников',
@@ -146,6 +152,12 @@ export const APP_PERMISSIONS = [
     key: 'can_settings_work',
     label: 'Место проведения работ',
     description: 'Объекты, подъезды, этажи, квартиры и помещения',
+    group: 'Настройка',
+  },
+  {
+    key: 'can_settings_tools',
+    label: 'Виды инструмента',
+    description: 'Справочник видов инструмента (перфоратор, шуроповерт и т.д.)',
     group: 'Настройка',
   },
   {

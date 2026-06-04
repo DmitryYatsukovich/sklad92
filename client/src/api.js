@@ -403,6 +403,12 @@ export const settings = {
     update: (id, body) => request(`/api/settings/organizations/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
     delete: (id) => request(`/api/settings/organizations/${id}`, { method: 'DELETE' }),
   },
+  toolTypes: {
+    list: () => request('/api/settings/tool-types'),
+    create: (body) => request('/api/settings/tool-types', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => request(`/api/settings/tool-types/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    delete: (id) => request(`/api/settings/tool-types/${id}`, { method: 'DELETE' }),
+  },
 };
 
 export const operations = {
@@ -486,6 +492,16 @@ export const notifications = {
       method: 'DELETE',
       body: JSON.stringify(endpoint ? { endpoint } : {}),
     }),
+};
+
+export const tools = {
+  list: () => request('/api/tools'),
+  meta: () => request('/api/tools/meta'),
+  create: (body) => request('/api/tools', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id, body) => request(`/api/tools/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  byCode: (code) => request(`/api/tools/by-code/${encodeURIComponent(code)}`),
+  action: (id, body) => request(`/api/tools/${id}/action`, { method: 'POST', body: JSON.stringify(body) }),
+  history: (id) => request(`/api/tools/${id}/history`),
 };
 
 export const attendance = {

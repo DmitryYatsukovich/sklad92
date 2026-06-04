@@ -21,7 +21,7 @@ router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req,
   try {
     const [
       objects, warehouses, racks, categories,
-      workEntrances, workFloors, workApartments, workRooms,
+      workEntrances, workFloors, workApartments, workRooms, toolTypes,
     ] = await Promise.all([
       pool.query('SELECT id, name FROM warehouse_objects ORDER BY name'),
       pool.query(
@@ -66,6 +66,7 @@ router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req,
          LEFT JOIN warehouse_objects o ON o.id = e.object_id
          ORDER BY o.name NULLS LAST, e.name, f.name, a.name, r.name`
       ),
+      pool.query('SELECT id, name FROM tool_types ORDER BY name'),
     ]);
     res.json({
       objects: objects.rows,
@@ -76,6 +77,7 @@ router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req,
       work_floors: workFloors.rows,
       work_apartments: workApartments.rows,
       work_rooms: workRooms.rows,
+      tool_types: toolTypes.rows,
     });
   } catch (e) {
     console.error('GET /settings/catalog:', e.message);
@@ -352,6 +354,54 @@ router.delete('/categories/:id', requirePermission('can_settings_categories'), a
   const used = await pool.query('SELECT 1 FROM materials WHERE category_id = $1 LIMIT 1', [id]);
   if (used.rowCount) return res.status(400).json({ error: 'Категория используется в материалах' });
   const r = await pool.query('DELETE FROM material_categories WHERE id = $1 RETURNING id', [id]);
+  if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
+  res.json({ ok: true });
+});
+
+// ——— Виды инструмента ———
+router.get('/tool-types', requirePermission('can_settings_tools'), async (_req, res) => {
+  const r = await pool.query('SELECT id, name, created_at FROM tool_types ORDER BY name');
+  res.json(r.rows);
+});
+
+router.post('/tool-types', requirePermission('can_settings_tools'), async (req, res) => {
+  const name = (req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Укажите название вида инструмента' });
+  try {
+    const r = await pool.query(
+      'INSERT INTO tool_types (name) VALUES ($1) RETURNING id, name, created_at',
+      [name],
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'Такой вид инструмента уже существует' });
+    throw e;
+  }
+});
+
+router.put('/tool-types/:id', requirePermission('can_settings_tools'), async (req, res) => {
+  const id = parseId(req.params.id);
+  const name = (req.body?.name || '').trim();
+  if (!id || !name) return res.status(400).json({ error: 'Неверные данные' });
+  try {
+    const r = await pool.query(
+      'UPDATE tool_types SET name = $1 WHERE id = $2 RETURNING id, name, created_at',
+      [name, id],
+    );
+    if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
+    res.json(r.rows[0]);
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'Такой вид инструмента уже существует' });
+    throw e;
+  }
+});
+
+router.delete('/tool-types/:id', requirePermission('can_settings_tools'), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Неверный id' });
+  const used = await pool.query('SELECT 1 FROM tools WHERE type_id = $1 LIMIT 1', [id]);
+  if (used.rowCount) return res.status(400).json({ error: 'Этот вид используется в инструментах' });
+  const r = await pool.query('DELETE FROM tool_types WHERE id = $1 RETURNING id', [id]);
   if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
   res.json({ ok: true });
 });

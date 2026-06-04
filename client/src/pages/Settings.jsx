@@ -16,6 +16,7 @@ const MAIN_TABS = [
   { id: 'warehouses', label: 'Склады', perm: SETTINGS_TAB_PERMISSIONS.warehouses },
   { id: 'categories', label: 'Категории', perm: SETTINGS_TAB_PERMISSIONS.categories },
   { id: 'work', label: 'Место проведения работ', perm: SETTINGS_TAB_PERMISSIONS.work },
+  { id: 'tools', label: 'Виды инструмента', perm: SETTINGS_TAB_PERMISSIONS.tools },
 ];
 
 const WAREHOUSE_SUB_TABS = [
@@ -40,6 +41,7 @@ const EMPTY_CATALOG = {
   work_floors: [],
   work_apartments: [],
   work_rooms: [],
+  tool_types: [],
 };
 
 function isRowObject(value) {
@@ -63,6 +65,7 @@ function normalizeCatalog(value) {
     work_floors: asArrayOfObjects(safe.work_floors),
     work_apartments: asArrayOfObjects(safe.work_apartments),
     work_rooms: asArrayOfObjects(safe.work_rooms),
+    tool_types: asArrayOfObjects(safe.tool_types),
   };
 }
 
@@ -207,6 +210,7 @@ export default function Settings({ user }) {
         _extra: r.warehouse_name || catalog.warehouses.find((w) => w.id === r.warehouse_id)?.name,
       }));
     }
+    if (tab === 'tools') return catalog.tool_types.map((t) => ({ ...t }));
     if (tab === 'categories') return catalog.categories.map((c) => ({ ...c }));
 
     if (effectiveWorkTab === 'objects') {
@@ -260,6 +264,9 @@ export default function Settings({ user }) {
       } else if (tab === 'categories') {
         if (editing) await settingsApi.categories.update(editing.id, { name: n });
         else await settingsApi.categories.create({ name: n });
+      } else if (tab === 'tools') {
+        if (editing) await settingsApi.toolTypes.update(editing.id, { name: n });
+        else await settingsApi.toolTypes.create({ name: n });
       } else if (effectiveWorkTab === 'entrances') {
         const oid = parseInt(parentId, 10);
         if (!oid) return setError('Выберите объект');
@@ -308,6 +315,7 @@ export default function Settings({ user }) {
       else if (effectiveWarehouseTab === 'warehouses') await settingsApi.warehouses.delete(row.id);
       else if (effectiveWarehouseTab === 'storage') await settingsApi.racks.delete(row.id);
       else if (tab === 'categories') await settingsApi.categories.delete(row.id);
+      else if (tab === 'tools') await settingsApi.toolTypes.delete(row.id);
       else if (effectiveWorkTab === 'entrances') await settingsApi.workEntrances.delete(row.id);
       else if (effectiveWorkTab === 'floors') await settingsApi.workFloors.delete(row.id);
       else if (effectiveWorkTab === 'apartments') await settingsApi.workApartments.delete(row.id);
@@ -335,6 +343,7 @@ export default function Settings({ user }) {
       const what = labels[effectiveWarehouseTab] || 'запись';
       return editing ? `Редактирование: ${what}` : `Добавить ${what}`;
     }
+    if (tab === 'tools') return editing ? 'Редактирование: вид инструмента' : 'Добавить вид инструмента';
     if (tab !== 'work') return editing ? 'Редактирование' : 'Добавить';
     const labels = {
       objects: 'объект',

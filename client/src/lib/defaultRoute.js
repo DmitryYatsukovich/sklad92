@@ -4,6 +4,7 @@ export function getDefaultRoute(user) {
   if (user.can_warehouse) return '/warehouse';
   if (user.can_issuance) return '/issuance';
   if (user.can_production) return '/production';
+  if (user.can_tools) return '/tools';
   if (user.can_tasks) return '/tasks';
   if (user.can_actions) return '/actions';
   if (user.can_attendance) return '/attendance';
@@ -12,6 +13,7 @@ export function getDefaultRoute(user) {
     || user.can_settings_warehouses
     || user.can_settings_categories
     || user.can_settings_work
+    || user.can_settings_tools
     || user.can_users
     || user.can_roles
   ) return '/settings';

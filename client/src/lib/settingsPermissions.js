@@ -6,6 +6,7 @@ export const SETTINGS_TAB_PERMISSIONS = {
   warehouses: 'can_settings_warehouses',
   categories: 'can_settings_categories',
   work: 'can_settings_work',
+  tools: 'can_settings_tools',
 };
 
 export const SETTINGS_ACCESS_KEYS = Object.values(SETTINGS_TAB_PERMISSIONS);
@@ -30,5 +31,6 @@ export function getFirstSettingsTab(user) {
   if (canAccessSettingsTab(user, SETTINGS_TAB_PERMISSIONS.warehouses)) return 'warehouses';
   if (canAccessSettingsTab(user, SETTINGS_TAB_PERMISSIONS.categories)) return 'categories';
   if (canAccessSettingsTab(user, SETTINGS_TAB_PERMISSIONS.work)) return 'work';
+  if (canAccessSettingsTab(user, SETTINGS_TAB_PERMISSIONS.tools)) return 'tools';
   return null;
 }

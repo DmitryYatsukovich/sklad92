@@ -56,6 +56,7 @@ export async function prefetchOfflineData(user, { onProgress } = {}) {
     || user.can_settings_warehouses
     || user.can_settings_categories
     || user.can_settings_work
+    || user.can_settings_tools
     || user.can_users
     || user.can_roles
   );
@@ -69,6 +70,7 @@ export async function prefetchOfflineData(user, { onProgress } = {}) {
     reports,
     attendance,
     actions,
+    tools,
     tasks,
   } = await import('../../api.js');
 
@@ -186,6 +188,18 @@ export async function prefetchOfflineData(user, { onProgress } = {}) {
       counts.taskObjects = Array.isArray(taskMeta?.objects) ? taskMeta.objects.length : 0;
       await save('/api/tasks', taskList, uid);
       await save('/api/tasks/meta', taskMeta, uid);
+    }
+
+    if (user.can_tools) {
+      report('Инструмент…');
+      const [toolsList, toolsMeta] = await Promise.all([
+        tools.list(),
+        tools.meta(),
+      ]);
+      counts.tools = Array.isArray(toolsList?.items) ? toolsList.items.length : 0;
+      counts.toolTypes = Array.isArray(toolsMeta?.types) ? toolsMeta.types.length : 0;
+      await save('/api/tools', toolsList, uid);
+      await save('/api/tools/meta', toolsMeta, uid);
     }
 
     if (user.can_users || user.role === 'admin') {

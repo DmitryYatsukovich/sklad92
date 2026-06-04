@@ -23,6 +23,7 @@ import { isMobileDevice, getAdaptivePollInterval } from './lib/device.js';
 const Warehouse = lazy(() => import('./pages/Warehouse'));
 const Issuance = lazy(() => import('./pages/Issuance'));
 const Production = lazy(() => import('./pages/Production'));
+const Tools = lazy(() => import('./pages/Tools'));
 const Tasks = lazy(() => import('./pages/Tasks'));
 const Users = lazy(() => import('./pages/Users'));
 const FaceCheckIn = lazy(() => import('./pages/FaceCheckIn'));
@@ -167,6 +168,7 @@ export default function App() {
       || u.can_settings_warehouses
       || u.can_settings_categories
       || u.can_settings_work
+      || u.can_settings_tools
       || u.can_users
       || u.can_roles
     );
@@ -175,6 +177,7 @@ export default function App() {
       u.can_warehouse ? 'w' : '',
       u.can_issuance ? 'i' : '',
       u.can_production ? 'p' : '',
+      u.can_tools ? 'u' : '',
       u.can_tasks ? 'k' : '',
       u.can_actions ? 'a' : '',
       u.can_face ? 'f' : '',
@@ -188,6 +191,7 @@ export default function App() {
     if (u.can_warehouse) loaders.push(() => import('./pages/Warehouse'));
     if (u.can_issuance) loaders.push(() => import('./pages/Issuance'));
     if (u.can_production) loaders.push(() => import('./pages/Production'));
+    if (u.can_tools) loaders.push(() => import('./pages/Tools'));
     if (u.can_tasks) loaders.push(() => import('./pages/Tasks'));
     if (u.can_actions) loaders.push(() => import('./pages/Actions'));
     if (u.can_face) loaders.push(() => import('./pages/FaceCheckIn'));
@@ -575,6 +579,13 @@ export default function App() {
       m.deleteCachedResponse('/api/materials/users-for-issuance'),
     ])).catch(() => {});
   }, []);
+  const recoverToolsTabCache = useCallback(() => {
+    import('./lib/pageCache').then((m) => m.invalidatePageCache()).catch(() => {});
+    import('./lib/offlineCache').then((m) => Promise.allSettled([
+      m.deleteCachedResponsesByPathPrefix('/api/tools'),
+      m.deleteCachedResponse('/api/settings/catalog'),
+    ])).catch(() => {});
+  }, []);
   const recoverTasksTabCache = useCallback(() => {
     import('./lib/pageCache').then((m) => m.invalidatePageCache()).catch(() => {});
     import('./lib/offlineCache').then((m) => Promise.allSettled([
@@ -655,7 +666,7 @@ export default function App() {
           <Route
             path="settings"
             element={(
-              <ProtectedRoute user={user} anyPerm={['can_settings_organizations', 'can_settings_warehouses', 'can_settings_categories', 'can_settings_work', 'can_users', 'can_roles']}>
+              <ProtectedRoute user={user} anyPerm={['can_settings_organizations', 'can_settings_warehouses', 'can_settings_categories', 'can_settings_work', 'can_settings_tools', 'can_users', 'can_roles']}>
                 <RecoverableErrorBoundary onError={recoverSettingsTabCache}>
                   <Settings user={user} />
                 </RecoverableErrorBoundary>
@@ -704,6 +715,16 @@ export default function App() {
             )}
           />
           <Route
+          path="tools"
+          element={(
+            <ProtectedRoute user={user} perm="can_tools">
+              <RecoverableErrorBoundary onError={recoverToolsTabCache}>
+                <Tools user={user} />
+              </RecoverableErrorBoundary>
+            </ProtectedRoute>
+          )}
+        />
+        <Route
             path="tasks"
             element={(
               <ProtectedRoute user={user} perm="can_tasks">
