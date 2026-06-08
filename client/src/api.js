@@ -108,7 +108,12 @@ async function request(path, options = {}) {
       credentials: 'include',
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || res.statusText || 'Ошибка');
+    if (!res.ok) {
+      const httpError = new Error(data.error || res.statusText || 'Ошибка');
+      httpError.httpStatus = res.status;
+      httpError.isHttpError = true;
+      throw httpError;
+    }
     if (cacheableGet && quickDevice) {
       setCachedResponse(path, data).catch(() => {});
     }
@@ -121,7 +126,8 @@ async function request(path, options = {}) {
     }
     return data;
   } catch (e) {
-    if (cacheableGet && quickDevice) {
+    const allowCacheFallback = cacheableGet && quickDevice && (isNetworkFailure(e) || !navigator.onLine);
+    if (allowCacheFallback) {
       const cached = await readFromOfflineCache(path);
       if (cached != null) return cached;
     }
