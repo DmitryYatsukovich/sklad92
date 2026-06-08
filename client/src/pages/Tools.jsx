@@ -42,7 +42,7 @@ function actionLabel(action) {
   if (action === 'create') return 'Создан';
   if (action === 'update') return 'Изменение карточки';
   if (action === 'issue') return 'Выдача пользователю';
-  if (action === 'receive') return 'Приём на склад';
+  if (action === 'receive') return 'Возврат на склад';
   if (action === 'repair') return 'Отправка в ремонт';
   if (action === 'move') return 'Перемещение';
   return action || 'Действие';
@@ -72,6 +72,20 @@ function formatMoney(value) {
 function locationText(row) {
   const parts = [row.object_name, row.warehouse_name, row.rack_name].filter(Boolean);
   return parts.length ? parts.join(' → ') : '—';
+}
+
+function toolStatusInfoText(row) {
+  if (!row) return 'Статус неизвестен';
+  if (row.status === 'in_use') {
+    return `Статус: В работе · Выдан: ${row.holder_user_name || '—'}`;
+  }
+  if (row.status === 'in_stock') {
+    return `Статус: На складе · Склад: ${locationText(row)}`;
+  }
+  if (row.status === 'in_repair') {
+    return `Статус: В ремонте · Ответственный: ${row.repair_by_user_name || '—'}`;
+  }
+  return `Статус: ${statusLabel(row.status)}`;
 }
 
 function escapeHtml(s) {
@@ -164,7 +178,7 @@ function normalizeMeta(raw = {}) {
   };
 }
 
-export default function Tools() {
+export default function Tools({ user }) {
   const [meta, setMeta] = useState(() => normalizeMeta({}));
   const [items, setItems] = useState([]);
   const [summaryByType, setSummaryByType] = useState([]);
@@ -181,6 +195,7 @@ export default function Tools() {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanBusy, setScanBusy] = useState(false);
   const [scanError, setScanError] = useState('');
+  const [scanInfo, setScanInfo] = useState('');
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -404,9 +419,11 @@ export default function Tools() {
     }
   };
 
-  const openActionModal = (tool) => {
+  const openActionModal = (tool, options = {}) => {
+    const base = actionDefault(tool);
+    if (options.forceAction) base.action = options.forceAction;
     setActionTool(tool);
-    setActionForm(actionDefault(tool));
+    setActionForm(base);
     setIssueUserDropdownOpen(false);
     setScanError('');
   };
@@ -526,9 +543,28 @@ export default function Tools() {
     if (!code || scanBusy) return;
     setScanBusy(true);
     setScanError('');
+    setScanInfo('');
     try {
       const tool = await toolsApi.byCode(code);
       setScannerOpen(false);
+      setScanInfo(`${tool.name} · ${tool.code}. ${toolStatusInfoText(tool)}`);
+
+      if (tool.status === 'in_stock' && user?.id) {
+        const updated = await toolsApi.action(tool.id, {
+          action: 'issue',
+          target_user_id: Number(user.id),
+          note: 'Автовыдача по сканированию QR',
+        });
+        setScanInfo(`${updated.name} · ${updated.code}. ${toolStatusInfoText(updated)}`);
+        await load(true);
+        return;
+      }
+
+      if (tool.status === 'in_use') {
+        openActionModal(tool, { forceAction: 'receive' });
+        return;
+      }
+
       openActionModal(tool);
     } catch (e) {
       setScanError(e.message || 'Инструмент по QR не найден');
@@ -630,6 +666,11 @@ export default function Tools() {
       {scanError && (
         <div className="rounded border border-rose-500/30 bg-rose-500/10 text-rose-300 px-2.5 py-1.5 text-2xs">
           {scanError}
+        </div>
+      )}
+      {scanInfo && (
+        <div className="rounded border border-sky-500/30 bg-sky-500/10 text-sky-200 px-2.5 py-1.5 text-2xs">
+          {scanInfo}
         </div>
       )}
       {error && (
@@ -941,6 +982,9 @@ export default function Tools() {
           <div className="card p-5 max-w-xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-white text-sm font-medium mb-1">Операция с инструментом</h3>
             <p className="text-zinc-500 text-2xs mb-3">{actionTool.name} · {actionTool.code}</p>
+            <div className="rounded border border-white/10 bg-white/[0.02] px-2.5 py-2 text-2xs text-zinc-300 mb-3">
+              {toolStatusInfoText(actionTool)}
+            </div>
             <form onSubmit={submitAction} className="space-y-3">
               <div>
                 <label className="label">Действие</label>
@@ -956,7 +1000,7 @@ export default function Tools() {
                   className="input"
                 >
                   <option value="issue">Выдать пользователю</option>
-                  <option value="receive">Принять на склад</option>
+                  <option value="receive">Вернуть на склад</option>
                   <option value="repair">Отправить в ремонт</option>
                   <option value="move">Переместить</option>
                 </select>
