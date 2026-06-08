@@ -178,7 +178,7 @@ function normalizeMeta(raw = {}) {
   };
 }
 
-export default function Tools({ user }) {
+export default function Tools() {
   const [meta, setMeta] = useState(() => normalizeMeta({}));
   const [items, setItems] = useState([]);
   const [summaryByType, setSummaryByType] = useState([]);
@@ -424,7 +424,7 @@ export default function Tools({ user }) {
     if (options.forceAction) base.action = options.forceAction;
     setActionTool(tool);
     setActionForm(base);
-    setIssueUserDropdownOpen(false);
+    setIssueUserDropdownOpen(Boolean(options.openUserPicker));
     setScanError('');
   };
 
@@ -549,14 +549,8 @@ export default function Tools({ user }) {
       setScannerOpen(false);
       setScanInfo(`${tool.name} · ${tool.code}. ${toolStatusInfoText(tool)}`);
 
-      if (tool.status === 'in_stock' && user?.id) {
-        const updated = await toolsApi.action(tool.id, {
-          action: 'issue',
-          target_user_id: Number(user.id),
-          note: 'Автовыдача по сканированию QR',
-        });
-        setScanInfo(`${updated.name} · ${updated.code}. ${toolStatusInfoText(updated)}`);
-        await load(true);
+      if (tool.status === 'in_stock') {
+        openActionModal(tool, { forceAction: 'issue', openUserPicker: true });
         return;
       }
 
