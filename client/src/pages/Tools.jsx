@@ -197,6 +197,7 @@ export default function Tools({ user }) {
   const [scanBusy, setScanBusy] = useState(false);
   const [scanError, setScanError] = useState('');
   const [scanInfo, setScanInfo] = useState('');
+  const [scanResultModal, setScanResultModal] = useState({ open: false, message: '' });
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -546,6 +547,7 @@ export default function Tools({ user }) {
     setScanBusy(true);
     setScanError('');
     setScanInfo('');
+    setScanResultModal({ open: false, message: '' });
     try {
       const tool = await toolsApi.byCode(code);
       setScannerOpen(false);
@@ -563,7 +565,15 @@ export default function Tools({ user }) {
 
       openActionModal(tool);
     } catch (e) {
-      setScanError(e.message || 'Инструмент по QR не найден');
+      const message = String(e?.message || '');
+      const notRecognized = /не найден|not found|не распознан/i.test(message);
+      setScannerOpen(false);
+      setScanResultModal({
+        open: true,
+        message: notRecognized
+          ? 'QR код инструмента не распознан'
+          : (message || 'Ошибка распознавания QR-кода'),
+      });
     } finally {
       setScanBusy(false);
     }
@@ -1265,6 +1275,40 @@ export default function Tools({ user }) {
               </button>
               <button type="button" className="btn-ghost text-sm" onClick={closeQrPreview}>
                 Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {scanResultModal.open && (
+        <div
+          className="modal-backdrop z-[90]"
+          onClick={() => setScanResultModal({ open: false, message: '' })}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="card p-5 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-white text-sm font-medium mb-2">Результат сканирования</h3>
+            <p className="text-zinc-300 text-sm">{scanResultModal.message}</p>
+            <div className="flex gap-2 mt-4">
+              <button
+                type="button"
+                className="btn-ghost text-sm"
+                onClick={() => setScanResultModal({ open: false, message: '' })}
+              >
+                Закрыть
+              </button>
+              <button
+                type="button"
+                className="btn-primary text-sm"
+                onClick={() => {
+                  setScanResultModal({ open: false, message: '' });
+                  setScanError('');
+                  setScannerOpen(true);
+                }}
+              >
+                Сканировать заново
               </button>
             </div>
           </div>
