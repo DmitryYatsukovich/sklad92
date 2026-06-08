@@ -29,16 +29,93 @@ function asLaborContractFiles(value) {
   return asArrayOfObjects(value).filter((row) => row.id != null);
 }
 
+function isValidDateParts(year, month, day) {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day
+  );
+}
+
+function toIsoDate(value) {
+  if (value == null || value === '') return '';
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const year = value.getFullYear();
+    const month = value.getMonth() + 1;
+    const day = value.getDate();
+    if (!isValidDateParts(year, month, day)) return '';
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  const raw = String(value).trim();
+  if (!raw) return '';
+
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T)/);
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]);
+    const day = Number(isoMatch[3]);
+    if (!isValidDateParts(year, month, day)) return '';
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  }
+
+  const ruMatch = raw.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (ruMatch) {
+    const day = Number(ruMatch[1]);
+    const month = Number(ruMatch[2]);
+    const year = Number(ruMatch[3]);
+    if (!isValidDateParts(year, month, day)) return '';
+    return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  return '';
+}
+
+function toRuDate(value) {
+  const iso = toIsoDate(value);
+  if (!iso) return '';
+  const [year, month, day] = iso.split('-');
+  return `${day}.${month}.${year}`;
+}
+
+function normalizeDateForPayload(value) {
+  const iso = toIsoDate(value);
+  return iso || null;
+}
+
+function normalizeDateFieldValue(value) {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return '';
+  return toRuDate(trimmed) || trimmed;
+}
+
+function validateProfileDates(form) {
+  const checks = [
+    ['Дата рождения', form.birth_date],
+    ['Дата трудоустройства', form.employment_date],
+  ];
+  for (const [label, value] of checks) {
+    const trimmed = String(value ?? '').trim();
+    if (!trimmed) continue;
+    if (!toIsoDate(trimmed)) {
+      return `${label}: укажите дату в формате дд.мм.гггг`;
+    }
+  }
+  return '';
+}
+
 function buildUserPayload(form, extras = {}, { omitPassword } = {}) {
   const payload = {
     login: form.login,
     first_name: form.first_name,
     last_name: form.last_name,
-    birth_date: form.birth_date || null,
+    birth_date: normalizeDateForPayload(form.birth_date),
     passport_number: form.passport_number,
     snils: form.snils,
     inn: form.inn,
-    employment_date: form.employment_date || null,
+    employment_date: normalizeDateForPayload(form.employment_date),
     organization_id: form.organization_id || null,
     internal_uid: form.internal_uid,
     kig_card_number: form.kig_card_number,
@@ -689,11 +766,11 @@ export default function Users({ user, embedded = false }) {
       last_name: u.last_name || '',
       login: u.login || '',
       password: u.password_plain || '',
-      birth_date: u.birth_date ? u.birth_date.slice(0, 10) : '',
+      birth_date: toRuDate(u.birth_date),
       passport_number: u.passport_number || '',
       snils: u.snils || '',
       inn: u.inn || '',
-      employment_date: u.employment_date ? u.employment_date.slice(0, 10) : '',
+      employment_date: toRuDate(u.employment_date),
       organization_id: u.organization_id ? String(u.organization_id) : '',
       internal_uid: u.internal_uid || '',
       kig_card_number: u.kig_card_number || '',
@@ -874,6 +951,8 @@ export default function Users({ user, embedded = false }) {
   const handleCreate = async (e) => {
     e.preventDefault();
     if (!form.login.trim() || !form.password) return setError('Укажите логин и пароль');
+    const dateError = validateProfileDates(form);
+    if (dateError) return setError(dateError);
     setError('');
     try {
       const extras = {};
@@ -901,6 +980,11 @@ export default function Users({ user, embedded = false }) {
     if (!editing || saving) return;
     if (!form.login?.trim()) {
       setError('Укажите логин');
+      return;
+    }
+    const dateError = validateProfileDates(form);
+    if (dateError) {
+      setError(dateError);
       return;
     }
     setError('');
@@ -1184,10 +1268,13 @@ export default function Users({ user, embedded = false }) {
       </CopyFieldRow>
       <CopyFieldRow label="Дата рождения" copyValue={form.birth_date}>
         <input
-          type="date"
+          type="text"
           value={form.birth_date}
           onChange={(e) => setForm((f) => ({ ...f, birth_date: e.target.value }))}
+          onBlur={(e) => setForm((f) => ({ ...f, birth_date: normalizeDateFieldValue(e.target.value) }))}
           className="input"
+          inputMode="numeric"
+          placeholder="дд.мм.гггг"
         />
       </CopyFieldRow>
       <CopyFieldRow label="Номер паспорта" copyValue={form.passport_number}>
@@ -1210,10 +1297,13 @@ export default function Users({ user, embedded = false }) {
       </CopyFieldRow>
       <CopyFieldRow label="Дата трудоустройства" copyValue={form.employment_date}>
         <input
-          type="date"
+          type="text"
           value={form.employment_date}
           onChange={(e) => setForm((f) => ({ ...f, employment_date: e.target.value }))}
+          onBlur={(e) => setForm((f) => ({ ...f, employment_date: normalizeDateFieldValue(e.target.value) }))}
           className="input"
+          inputMode="numeric"
+          placeholder="дд.мм.гггг"
         />
       </CopyFieldRow>
       <CopyFieldRow
@@ -1844,7 +1934,7 @@ export default function Users({ user, embedded = false }) {
                   </td>
                   <CopyTableCell value={u.first_name} className="text-zinc-300" />
                   <CopyTableCell value={u.last_name} className="text-zinc-300" />
-                  <CopyTableCell value={u.birth_date ? String(u.birth_date).slice(0, 10) : ''} className="text-zinc-500 whitespace-nowrap tabular-nums" />
+                  <CopyTableCell value={toRuDate(u.birth_date)} className="text-zinc-500 whitespace-nowrap tabular-nums" />
                   <CopyTableCell value={u.passport_number} className="text-zinc-500" />
                   <CopyTableCell value={u.phone} className="text-zinc-500 tabular-nums" />
                   <CopyTableCell value={u.role === 'admin' ? 'Системный админ' : (u.role_name || '')}>
@@ -1887,7 +1977,7 @@ export default function Users({ user, embedded = false }) {
                   </td>
                   <CopyTableCell value={u.snils} className="text-zinc-500 tabular-nums" />
                   <CopyTableCell value={u.inn} className="text-zinc-500 tabular-nums" />
-                  <CopyTableCell value={u.employment_date ? u.employment_date.slice(0, 10) : ''} className="text-zinc-500 tabular-nums whitespace-nowrap" />
+                  <CopyTableCell value={toRuDate(u.employment_date)} className="text-zinc-500 tabular-nums whitespace-nowrap" />
                   <CopyTableCell value={u.employment_org} className="text-zinc-500 max-w-[120px] truncate" title={u.employment_org} />
                   <CopyTableCell value={u.internal_uid} className="font-mono text-zinc-500 text-2xs" />
                   <CopyTableCell value={u.kig_card_number} className="font-mono text-zinc-500 text-2xs" />
