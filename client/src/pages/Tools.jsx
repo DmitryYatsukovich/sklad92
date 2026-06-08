@@ -178,12 +178,13 @@ function normalizeMeta(raw = {}) {
   };
 }
 
-export default function Tools() {
+export default function Tools({ user }) {
   const [meta, setMeta] = useState(() => normalizeMeta({}));
   const [items, setItems] = useState([]);
   const [summaryByType, setSummaryByType] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingToolId, setDeletingToolId] = useState(null);
   const [error, setError] = useState('');
 
   const [search, setSearch] = useState('');
@@ -212,6 +213,7 @@ export default function Tools() {
   const [qrPreviewTool, setQrPreviewTool] = useState(null);
   const [qrPrintError, setQrPrintError] = useState('');
   const qrPreviewRef = useRef(null);
+  const canDeleteTools = !!(user?.role === 'admin' || user?.can_tools_delete);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -567,6 +569,26 @@ export default function Tools() {
     }
   };
 
+  const onDeleteTool = async (tool) => {
+    if (!canDeleteTools) return;
+    if (!window.confirm(`Удалить инструмент «${tool.name}»?`)) return;
+    setDeletingToolId(tool.id);
+    setError('');
+    try {
+      await toolsApi.delete(tool.id);
+      if (actionTool?.id === tool.id) setActionTool(null);
+      if (historyTool?.id === tool.id) closeHistory();
+      if (qrPreviewTool?.id === tool.id) closeQrPreview();
+      if (editingId === tool.id) closeForm();
+      setScanInfo(`Инструмент удалён: ${tool.name}`);
+      await load(true);
+    } catch (e) {
+      setError(e.message || 'Ошибка удаления инструмента');
+    } finally {
+      setDeletingToolId(null);
+    }
+  };
+
   const statusInfo = (row) => {
     if (row.status === 'in_use') {
       return `Кому: ${row.holder_user_name || '—'} · Выдал: ${row.issued_by_user_name || '—'} · ${formatDate(row.issued_at, true)}`;
@@ -745,6 +767,16 @@ export default function Tools() {
                     <button type="button" className="btn-ghost text-2xs" onClick={() => openEdit(row)}>
                       Изм.
                     </button>
+                    {canDeleteTools && (
+                      <button
+                        type="button"
+                        className="btn-ghost text-2xs text-rose-300 hover:text-rose-200"
+                        onClick={() => onDeleteTool(row)}
+                        disabled={deletingToolId === row.id}
+                      >
+                        {deletingToolId === row.id ? 'Удал...' : 'Удал.'}
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -793,13 +825,23 @@ export default function Tools() {
               <div>Гарантия: {formatDate(row.warranty_date)}</div>
             </div>
             <div className="text-2xs text-zinc-300">{statusInfo(row)}</div>
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className={`grid ${canDeleteTools ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5`}>
               <button type="button" className="btn-ghost text-2xs" onClick={() => openActionModal(row)}>
                 Операция
               </button>
               <button type="button" className="btn-ghost text-2xs" onClick={() => openEdit(row)}>
                 Изм.
               </button>
+              {canDeleteTools && (
+                <button
+                  type="button"
+                  className="btn-ghost text-2xs text-rose-300 hover:text-rose-200"
+                  onClick={() => onDeleteTool(row)}
+                  disabled={deletingToolId === row.id}
+                >
+                  {deletingToolId === row.id ? 'Удал...' : 'Удал.'}
+                </button>
+              )}
             </div>
           </div>
         ))}

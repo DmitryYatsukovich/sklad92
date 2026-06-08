@@ -499,6 +499,7 @@ export const tools = {
   meta: () => request('/api/tools/meta'),
   create: (body) => request('/api/tools', { method: 'POST', body: JSON.stringify(body) }),
   update: (id, body) => request(`/api/tools/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  delete: (id) => request(`/api/tools/${id}`, { method: 'DELETE' }),
   byCode: (code) => request(`/api/tools/by-code/${encodeURIComponent(code)}`),
   action: (id, body) => request(`/api/tools/${id}/action`, { method: 'POST', body: JSON.stringify(body) }),
   history: (id) => request(`/api/tools/${id}/history`),

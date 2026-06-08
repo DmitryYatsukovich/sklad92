@@ -671,4 +671,20 @@ router.post('/:id/action', async (req, res) => {
   }
 });
 
+router.delete('/:id', requirePermission('can_tools_delete'), async (req, res) => {
+  const toolId = parseId(req.params.id);
+  if (!toolId) return res.status(400).json({ error: 'Неверный id инструмента' });
+  try {
+    const removed = await pool.query(
+      'DELETE FROM tools WHERE id = $1 RETURNING id, name, code',
+      [toolId],
+    );
+    if (!removed.rowCount) return res.status(404).json({ error: 'Инструмент не найден' });
+    res.json({ ok: true, item: removed.rows[0] });
+  } catch (e) {
+    console.error('DELETE /api/tools/:id:', e);
+    res.status(500).json({ error: 'Ошибка удаления инструмента' });
+  }
+});
+
 export default router;

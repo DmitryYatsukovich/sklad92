@@ -25,6 +25,12 @@ export const APP_PERMISSIONS = [
     group: 'Основные разделы',
   },
   {
+    key: 'can_tools_delete',
+    label: 'Удаление инструмента',
+    description: 'Удаление карточек инструмента и их истории',
+    group: 'Основные разделы',
+  },
+  {
     key: 'can_tasks',
     label: 'Задачи',
     description: 'Постановка и контроль задач сотрудников',
@@ -196,6 +202,9 @@ export function permissionsFromBody(body = {}) {
   if (!perms.can_tasks) {
     perms.can_task_notifications = false;
     perms.can_tasks_all = false;
+  }
+  if (!perms.can_tools) {
+    perms.can_tools_delete = false;
   }
   if (!perms.can_actions) {
     perms.can_actions_all = false;

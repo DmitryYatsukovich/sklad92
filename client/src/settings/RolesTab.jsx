@@ -105,6 +105,9 @@ export default function RolesTab() {
       if (key === 'can_actions' && !value) {
         next.can_actions_all = false;
       }
+      if (key === 'can_tools' && !value) {
+        next.can_tools_delete = false;
+      }
       if (key === 'can_attendance' && !value) {
         next.can_attendance_all = false;
         next.can_attendance_edit = false;
@@ -293,7 +296,11 @@ export default function RolesTab() {
                           .filter((p) => !p.attendanceScopeOption && !p.attendanceEditOption && !p.attendancePayOption && !p.attendanceRatesOption && !p.attendanceToolsOption && !p.attendanceMonthOption && !p.actionsScopeOption && !p.tasksScopeOption)
                           .map((p) => {
                             const requiresTasks = p.key === 'can_task_notifications';
-                            const disabledByDependencies = requiresTasks && !(editing?.is_admin_role || form.can_tasks);
+                            const requiresTools = p.key === 'can_tools_delete';
+                            const disabledByDependencies = (
+                              (requiresTasks && !(editing?.is_admin_role || form.can_tasks))
+                              || (requiresTools && !(editing?.is_admin_role || form.can_tools))
+                            );
                             return (
                             <div key={p.key}>
                               <label
