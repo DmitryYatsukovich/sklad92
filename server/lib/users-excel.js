@@ -271,7 +271,10 @@ function parseDateKey(val) {
 }
 
 function formatDateForExport(val) {
-  return parseDateKey(val) || '';
+  const iso = parseDateKey(val);
+  if (!iso) return '';
+  const [year, month, day] = iso.split('-');
+  return `${day}.${month}.${year}`;
 }
 
 export function buildTemplateBuffer() {
@@ -364,7 +367,7 @@ export async function fetchUsersForExportByIds(ids) {
   const clean = [...new Set(ids.map((id) => parseInt(id, 10)).filter((n) => !Number.isNaN(n) && n > 0))];
   if (!clean.length) return [];
   const r = await pool.query(
-    `${USERS_EXPORT_SQL} WHERE u.id = ANY($1::int[]) ORDER BY u.login`,
+    `${USERS_EXPORT_SQL} WHERE u.id = ANY($1::int[]) ORDER BY array_position($1::int[], u.id)`,
     [clean],
   );
   return r.rows;
