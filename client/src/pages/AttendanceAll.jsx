@@ -1254,6 +1254,7 @@ function recalcEmployeeTotals(emp) {
 
 export default function AttendanceAll({ user }) {
   const canViewAll = user?.role === 'admin' || !!user?.can_attendance_all;
+  const ownOrganizationScope = canViewAll && user?.role !== 'admin' && !!user?.can_attendance_same_org;
   const showPayColumns = user?.role === 'admin' || !!user?.can_attendance_pay;
   const canEditTimes = user?.role === 'admin' || !!user?.can_attendance_edit;
   const canEditRates = user?.role === 'admin' || !!user?.can_attendance_edit_rates;
@@ -1490,7 +1491,7 @@ export default function AttendanceAll({ user }) {
         <p className="page-subtitle">
           {canEditTimes
             ? (canViewAll
-              ? 'Сотрудник появляется в табеле месяца после сканирования. Новый месяц начинается пустым; ставка и премия копируются с прошлого месяца (для новых — 0). Без ухода — только приход. С уходом или вручную — часы (8.5).'
+              ? `${ownOrganizationScope ? 'Показаны сотрудники только вашей организации. ' : ''}Сотрудник появляется в табеле месяца после сканирования. Новый месяц начинается пустым; ставка и премия копируются с прошлого месяца (для новых — 0). Без ухода — только приход. С уходом или вручную — часы (8.5).`
               : 'Отображается только ваш табель. Можно править свои ячейки.')
             : 'Табель доступен только для просмотра.'}
         </p>
@@ -1554,7 +1555,7 @@ export default function AttendanceAll({ user }) {
         <div className="flex flex-wrap gap-2 items-center">
           {canExportTimesheet && (
             <button type="button" onClick={handleExportAll} className="btn-secondary text-xs" disabled={busy}>
-              {canViewAll ? 'Экспорт общего табеля' : 'Экспорт табеля'}
+              {canViewAll ? (ownOrganizationScope ? 'Экспорт табеля организации' : 'Экспорт общего табеля') : 'Экспорт табеля'}
             </button>
           )}
           {canAddMember && (

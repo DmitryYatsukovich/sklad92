@@ -14,12 +14,15 @@ export async function loadUser(req, res, next) {
   try {
   const r = await pool.query(
     `SELECT u.id, u.login, u.display_name, u.role, u.role_id,
+            u.organization_id,
+            COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')) AS organization_name,
             COALESCE(u.profile_active, true) AS profile_active,
             COALESCE(u.employment_status, 'working') AS employment_status,
             ${PERMISSIONS_SELECT}
      FROM users u
      LEFT JOIN user_permissions p ON p.user_id = u.id
      LEFT JOIN roles r ON r.id = u.role_id
+     LEFT JOIN organizations o ON o.id = u.organization_id
      WHERE u.id = $1`,
     [req.session.userId],
   );

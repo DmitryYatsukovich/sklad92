@@ -88,6 +88,13 @@ export const APP_PERMISSIONS = [
     attendanceScopeOption: true,
   },
   {
+    key: 'can_attendance_same_org',
+    label: 'Табель своей организации',
+    description: 'Ограничение табеля сотрудниками той же организации, что и у пользователя',
+    group: 'Посещаемость',
+    attendanceScopeOption: true,
+  },
+  {
     key: 'can_attendance_edit',
     label: 'Редактирование табеля',
     description: 'Правка ячеек, времени прихода/ухода и комментариев',
@@ -211,6 +218,7 @@ export function permissionsFromBody(body = {}) {
   }
   if (!perms.can_attendance) {
     perms.can_attendance_all = false;
+    perms.can_attendance_same_org = false;
     perms.can_attendance_edit = false;
     perms.can_attendance_pay = false;
     perms.can_attendance_edit_rates = false;
@@ -221,6 +229,7 @@ export function permissionsFromBody(body = {}) {
   }
   if (!perms.can_attendance_pay) perms.can_attendance_edit_rates = false;
   if (!perms.can_attendance_all) {
+    perms.can_attendance_same_org = false;
     perms.can_attendance_add_member = false;
     perms.can_attendance_import = false;
   }

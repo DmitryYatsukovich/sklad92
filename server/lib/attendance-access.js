@@ -3,6 +3,11 @@ export function canAttendanceViewAll(user) {
   return user?.role === 'admin' || !!user?.can_attendance_all;
 }
 
+/** Ограничение табеля сотрудниками своей организации */
+export function canAttendanceScopeToOwnOrganization(user) {
+  return user?.role !== 'admin' && !!user?.can_attendance_same_org && canAttendanceViewAll(user);
+}
+
 export function canAttendanceManageAll(user) {
   return canAttendanceViewAll(user);
 }

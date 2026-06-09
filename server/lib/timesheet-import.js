@@ -4,14 +4,30 @@ import { parseWorkedHoursInput } from './attendance-time.js';
 import { ensureUserMonthRate, upsertMonthRates } from './timesheet-month-rates.js';
 import { toDateKey } from './timesheet-data.js';
 
-async function resolveUserId(client, { user_id, login }) {
+function normalizeOrgName(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+async function resolveUserRow(client, { user_id, login }) {
   if (user_id) {
-    const r = await client.query('SELECT id FROM users WHERE id = $1', [user_id]);
-    if (r.rowCount) return r.rows[0].id;
+    const r = await client.query(
+      `SELECT u.id, COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')) AS organization_name
+       FROM users u
+       LEFT JOIN organizations o ON o.id = u.organization_id
+       WHERE u.id = $1`,
+      [user_id],
+    );
+    if (r.rowCount) return r.rows[0];
   }
   if (login) {
-    const r = await client.query('SELECT id FROM users WHERE LOWER(login) = LOWER($1)', [login.trim()]);
-    if (r.rowCount) return r.rows[0].id;
+    const r = await client.query(
+      `SELECT u.id, COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')) AS organization_name
+       FROM users u
+       LEFT JOIN organizations o ON o.id = u.organization_id
+       WHERE LOWER(login) = LOWER($1)`,
+      [login.trim()],
+    );
+    if (r.rowCount) return r.rows[0];
   }
   return null;
 }
@@ -45,18 +61,31 @@ async function applyDayValue(client, userId, dateStr, rawValue, editorId) {
   }
 }
 
-/** @param {{ monthKey: string, rows: Array, editorId: number|null }} opts */
-export async function applyTimesheetImport({ monthKey, rows, editorId }) {
+/**
+ * @param {{
+ *   monthKey: string,
+ *   rows: Array,
+ *   editorId: number|null,
+ *   organizationNameScope?: string|null,
+ * }} opts
+ */
+export async function applyTimesheetImport({ monthKey, rows, editorId, organizationNameScope = null }) {
   const client = await pool.connect();
   const errors = [];
   let applied = 0;
+  const scopeOrgName = normalizeOrgName(organizationNameScope);
 
   try {
     await client.query('BEGIN');
     for (const row of rows) {
-      const userId = await resolveUserId(client, row);
+      const targetUser = await resolveUserRow(client, row);
+      const userId = targetUser?.id;
       if (!userId) {
         errors.push(`Не найден: ${row.login || row.user_id}`);
+        continue;
+      }
+      if (scopeOrgName && normalizeOrgName(targetUser.organization_name) !== scopeOrgName) {
+        errors.push(`Нет доступа к сотруднику другой организации: ${row.login || row.user_id}`);
         continue;
       }
 
