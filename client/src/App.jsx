@@ -554,7 +554,8 @@ export default function App() {
     import('./lib/offlineCache').then((m) => Promise.allSettled([
       m.deleteCachedResponsesByPathPrefix('/api/settings/'),
       m.deleteCachedResponsesByPathPrefix('/api/roles'),
-      m.deleteCachedResponse('/api/users'),
+      m.deleteCachedResponsesByPathPrefix('/api/users'),
+      m.deleteCachedResponsesByPathPrefix('/api/organizations'),
     ])).catch(() => {});
   }, []);
   const recoverAttendanceTabCache = useCallback(() => {
