@@ -106,6 +106,84 @@ function validateProfileDates(form) {
   return '';
 }
 
+const CYRILLIC_TO_LATIN = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y',
+  к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f',
+  х: 'h', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
+};
+
+function transliterateForLogin(value) {
+  const source = String(value || '').trim().toLowerCase();
+  if (!source) return '';
+  let out = '';
+  for (const ch of source) {
+    if (Object.prototype.hasOwnProperty.call(CYRILLIC_TO_LATIN, ch)) {
+      out += CYRILLIC_TO_LATIN[ch];
+    } else if (/[a-z0-9]/.test(ch)) {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+function buildLoginBase(firstName, lastName) {
+  const first = transliterateForLogin(firstName);
+  const last = transliterateForLogin(lastName);
+  const base = (last && first) ? `${last}.${first}` : (last || first || 'user');
+  return base.slice(0, 40);
+}
+
+function collectTakenLogins(rows) {
+  return new Set(
+    asArrayOfObjects(rows)
+      .map((row) => String(row?.login || '').trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function ensureUniqueLogin(base, takenLogins) {
+  const normalizedBase = String(base || 'user').trim().replace(/\.+/g, '.').replace(/^\.+|\.+$/g, '') || 'user';
+  const taken = takenLogins instanceof Set ? takenLogins : new Set();
+  let candidate = normalizedBase;
+  let suffix = 2;
+  while (taken.has(candidate.toLowerCase())) {
+    candidate = `${normalizedBase}${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+function randomInt(max) {
+  if (!Number.isInteger(max) || max <= 0) return 0;
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const arr = new Uint32Array(1);
+    crypto.getRandomValues(arr);
+    return arr[0] % max;
+  }
+  return Math.floor(Math.random() * max);
+}
+
+function generateRandomPassword(length = 10) {
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const alphabet = letters + digits;
+  const targetLength = Math.max(8, Number(length) || 10);
+  const chars = [
+    letters[randomInt(letters.length)],
+    digits[randomInt(digits.length)],
+  ];
+  while (chars.length < targetLength) {
+    chars.push(alphabet[randomInt(alphabet.length)]);
+  }
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = randomInt(i + 1);
+    const tmp = chars[i];
+    chars[i] = chars[j];
+    chars[j] = tmp;
+  }
+  return chars.join('');
+}
+
 function buildUserPayload(form, extras = {}, { omitPassword } = {}) {
   const payload = {
     login: form.login,
@@ -415,6 +493,7 @@ export default function Users({ user, embedded = false }) {
   const [showPassword, setShowPassword] = useState(false);
   const [passwordSnapshot, setPasswordSnapshot] = useState('');
   const [roles, setRoles] = useState([]);
+  const [autoLoginEnabled, setAutoLoginEnabled] = useState(true);
 
   const loadRoles = useCallback(() => {
     rolesApi.list()
@@ -471,11 +550,34 @@ export default function Users({ user, embedded = false }) {
     settingsApi.organizations.list().then((rows) => setOrganizations(asArrayOfObjects(rows))).catch(() => {});
   };
 
+  const suggestAutoLogin = useCallback((firstName, lastName) => {
+    const taken = collectTakenLogins(list);
+    return ensureUniqueLogin(buildLoginBase(firstName, lastName), taken);
+  }, [list]);
+
+  const regenerateCreatePassword = () => {
+    if (editing) return;
+    setForm((f) => ({ ...f, password: generateRandomPassword() }));
+    setShowPassword(true);
+  };
+
+  const applyAutoLogin = () => {
+    if (editing) return;
+    setAutoLoginEnabled(true);
+    setForm((f) => ({ ...f, login: suggestAutoLogin(f.first_name, f.last_name) }));
+  };
+
   const openCreate = () => {
     refreshOrganizations();
     loadRoles();
     const defaultRole = roles.find((r) => r.name === 'Пользователь') || roles[0];
-    setForm({ ...emptyForm(), role_id: defaultRole ? String(defaultRole.id) : '' });
+    setForm({
+      ...emptyForm(),
+      login: suggestAutoLogin('', ''),
+      password: generateRandomPassword(),
+      role_id: defaultRole ? String(defaultRole.id) : '',
+    });
+    setAutoLoginEnabled(true);
     setAvatarFile(null);
     setAvatarPreview(null);
     setPendingFaceDescriptor(null);
@@ -785,6 +887,7 @@ export default function Users({ user, embedded = false }) {
     clearFacePhotoState();
     setShowFaceCamera(false);
     setPasswordSnapshot(u.password_plain || '');
+    setAutoLoginEnabled(false);
     setShowPassword(true);
     setFaceImageKey(Date.now());
     setError('');
@@ -950,7 +1053,8 @@ export default function Users({ user, embedded = false }) {
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    if (!form.login.trim() || !form.password) return setError('Укажите логин и пароль');
+    const resolvedLogin = form.login.trim() || suggestAutoLogin(form.first_name, form.last_name);
+    if (!resolvedLogin || !form.password) return setError('Укажите логин и пароль');
     const dateError = validateProfileDates(form);
     if (dateError) return setError(dateError);
     setError('');
@@ -959,7 +1063,7 @@ export default function Users({ user, embedded = false }) {
       if (pendingFaceDescriptor?.length >= 128) {
         extras.face_descriptor = pendingFaceDescriptor;
       }
-      const payload = buildUserPayload(form, extras);
+      const payload = buildUserPayload({ ...form, login: resolvedLogin }, extras);
       const created = await usersApi.create(payload);
       if (avatarFile) await usersApi.uploadAvatar(created.id, avatarFile);
       if (facePhotoFile) await usersApi.uploadFacePhoto(created.id, facePhotoFile);
@@ -1221,7 +1325,16 @@ export default function Users({ user, embedded = false }) {
           <input
             type="text"
             value={form.first_name}
-            onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))}
+            onChange={(e) => {
+              const nextFirstName = e.target.value;
+              setForm((f) => {
+                const next = { ...f, first_name: nextFirstName };
+                if (showCreate && !editing && autoLoginEnabled) {
+                  next.login = suggestAutoLogin(nextFirstName, f.last_name);
+                }
+                return next;
+              });
+            }}
             className="input"
           />
         </CopyFieldRow>
@@ -1229,38 +1342,76 @@ export default function Users({ user, embedded = false }) {
           <input
             type="text"
             value={form.last_name}
-            onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))}
+            onChange={(e) => {
+              const nextLastName = e.target.value;
+              setForm((f) => {
+                const next = { ...f, last_name: nextLastName };
+                if (showCreate && !editing && autoLoginEnabled) {
+                  next.login = suggestAutoLogin(f.first_name, nextLastName);
+                }
+                return next;
+              });
+            }}
             className="input"
           />
         </CopyFieldRow>
       </div>
       <CopyFieldRow label="Логин" copyValue={form.login}>
-        <input
-          type="text"
-          value={form.login}
-          onChange={(e) => setForm((f) => ({ ...f, login: e.target.value }))}
-          className="input"
-          required={!editing}
-        />
+        <div className="space-y-1">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={form.login}
+              onChange={(e) => {
+                if (!editing) setAutoLoginEnabled(false);
+                setForm((f) => ({ ...f, login: e.target.value }));
+              }}
+              className="input flex-1"
+              required={!editing}
+            />
+            {!editing && (
+              <button type="button" onClick={applyAutoLogin} className="btn-secondary text-xs shrink-0 px-3">
+                Авто
+              </button>
+            )}
+          </div>
+          {!editing && (
+            <p className="text-2xs text-zinc-500">
+              Логин формируется автоматически из фамилии и имени латиницей.
+            </p>
+          )}
+        </div>
       </CopyFieldRow>
       <CopyFieldRow label="Пароль" copyValue={showPassword ? form.password : ''}>
-        <div className="flex gap-2">
-          <input
-            type={showPassword ? 'text' : 'password'}
-            value={form.password}
-            onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-            className="input flex-1"
-            placeholder={editing ? 'Введите пароль' : ''}
-            required={!editing}
-            autoComplete={editing ? 'off' : 'new-password'}
-          />
-          <button
-            type="button"
-            onClick={() => setShowPassword((v) => !v)}
-            className="btn-secondary text-xs shrink-0 px-3"
-          >
-            {showPassword ? 'Скрыть' : 'Показать'}
-          </button>
+        <div className="space-y-1">
+          <div className="flex gap-2">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              value={form.password}
+              onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+              className="input flex-1"
+              placeholder={editing ? 'Введите пароль' : ''}
+              required={!editing}
+              autoComplete={editing ? 'off' : 'new-password'}
+            />
+            {!editing && (
+              <button type="button" onClick={regenerateCreatePassword} className="btn-ghost text-xs shrink-0 px-3">
+                Сгенерировать
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              className="btn-secondary text-xs shrink-0 px-3"
+            >
+              {showPassword ? 'Скрыть' : 'Показать'}
+            </button>
+          </div>
+          {!editing && (
+            <p className="text-2xs text-zinc-500">
+              Пароль генерируется автоматически, при необходимости можно сгенерировать новый.
+            </p>
+          )}
         </div>
         {editing && !passwordSnapshot && (
           <p className="text-2xs text-zinc-500 mt-1">Пароль не был сохранён в открытом виде — задайте новый.</p>
