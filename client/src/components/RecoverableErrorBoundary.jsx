@@ -16,6 +16,54 @@ function isChunkLoadError(error) {
   return CHUNK_ERROR_MARKERS.some((marker) => haystack.includes(marker));
 }
 
+const APP_INDEXED_DB_NAMES = [
+  'warehouse-app-offline',
+  'warehouse-app-actions',
+];
+
+function deleteIndexedDb(name) {
+  return new Promise((resolve) => {
+    if (!name || typeof indexedDB === 'undefined') {
+      resolve();
+      return;
+    }
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      resolve();
+    };
+    try {
+      const req = indexedDB.deleteDatabase(name);
+      req.onsuccess = finish;
+      req.onerror = finish;
+      req.onblocked = finish;
+      // Не зависаем, если вкладки держат открытое соединение.
+      setTimeout(finish, 1200);
+    } catch {
+      finish();
+    }
+  });
+}
+
+async function hardResetApplicationCaches() {
+  if (typeof window === 'undefined') return;
+
+  if ('serviceWorker' in navigator) {
+    const regs = await navigator.serviceWorker.getRegistrations().catch(() => []);
+    await Promise.allSettled((regs || []).map((reg) => reg.unregister()));
+  }
+
+  if ('caches' in window) {
+    const names = await caches.keys().catch(() => []);
+    await Promise.allSettled((names || []).map((name) => caches.delete(name)));
+  }
+
+  if (typeof indexedDB !== 'undefined') {
+    await Promise.allSettled(APP_INDEXED_DB_NAMES.map((name) => deleteIndexedDb(name)));
+  }
+}
+
 export default class RecoverableErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -77,6 +125,15 @@ export default class RecoverableErrorBoundary extends React.Component {
     }
   };
 
+  handleHardReset = async () => {
+    this.setState({ recovering: true });
+    try {
+      await hardResetApplicationCaches();
+    } finally {
+      window.location.reload();
+    }
+  };
+
   render() {
     if (this.state.hasError) {
       const actionDisabled = this.state.recovering;
@@ -101,6 +158,14 @@ export default class RecoverableErrorBoundary extends React.Component {
                 Обновить приложение
               </button>
             )}
+            <button
+              type="button"
+              onClick={this.handleHardReset}
+              className="btn-ghost text-2xs"
+              disabled={actionDisabled}
+            >
+              Полный сброс кэша
+            </button>
           </div>
         </div>
       );
