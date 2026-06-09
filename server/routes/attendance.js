@@ -4,6 +4,7 @@ import pool from '../db/pool.js';
 import { requireAuth, loadUser, requirePermission, requireAdmin } from '../middleware/auth.js';
 import {
   canAttendanceViewAll,
+  canAttendanceScopeToOwnOrganization,
   canAttendanceAddMember,
   canAttendanceExport,
   canAttendanceImport,
@@ -224,6 +225,50 @@ async function loadFaceCandidates() {
     .filter((row) => Array.isArray(row._face_descriptor));
 }
 
+function normalizeOrgName(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+async function resolveAttendanceOrganizationScope(user) {
+  if (!canAttendanceScopeToOwnOrganization(user)) return null;
+  const r = await pool.query(
+    `SELECT COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')) AS organization_name
+     FROM users u
+     LEFT JOIN organizations o ON o.id = u.organization_id
+     WHERE u.id = $1`,
+    [user.id],
+  );
+  const orgName = r.rows[0]?.organization_name ? String(r.rows[0].organization_name).trim() : '';
+  if (!orgName) {
+    const err = new Error('Для этой роли доступ к табелю ограничен организацией, но у пользователя не указана организация');
+    err.status = 403;
+    throw err;
+  }
+  return { organizationName: orgName };
+}
+
+async function assertTargetUserInAttendanceScope(userId, scope) {
+  if (!scope?.organizationName) return;
+  const r = await pool.query(
+    `SELECT COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')) AS organization_name
+     FROM users u
+     LEFT JOIN organizations o ON o.id = u.organization_id
+     WHERE u.id = $1`,
+    [userId],
+  );
+  if (!r.rowCount) {
+    const err = new Error('Сотрудник не найден');
+    err.status = 404;
+    throw err;
+  }
+  const targetOrg = normalizeOrgName(r.rows[0]?.organization_name);
+  if (!targetOrg || targetOrg !== normalizeOrgName(scope.organizationName)) {
+    const err = new Error('Нет доступа к табелю сотрудника из другой организации');
+    err.status = 403;
+    throw err;
+  }
+}
+
 router.use(requireAuth);
 router.use(loadUser);
 
@@ -400,15 +445,17 @@ router.get('/my', async (req, res) => {
 router.get('/timesheet', requirePermission('can_attendance'), async (req, res) => {
   try {
     const range = resolveTimesheetRange(req.user, req.query.from || null, req.query.to || null);
+    const orgScope = await resolveAttendanceOrganizationScope(req.user);
     const data = await loadTimesheet({
       from: range.from,
       to: range.to,
       isAdmin: canAttendanceViewAll(req.user),
       selfUserId: Number(req.user.id),
+      scopeOrganizationName: orgScope?.organizationName || null,
     });
     res.json(canAttendanceShowPay(req.user) ? data : stripTimesheetPay(data));
   } catch (e) {
-    if (e.status === 400) return res.status(400).json({ error: e.message });
+    if (e.status === 400 || e.status === 403) return res.status(e.status).json({ error: e.message });
     throw e;
   }
 });
@@ -427,13 +474,18 @@ router.get('/timesheet/export', requirePermission('can_attendance'), async (req,
   }
   try {
     const range = resolveTimesheetRange(req.user, req.query.from || null, req.query.to || null);
+    const orgScope = await resolveAttendanceOrganizationScope(req.user);
     const data = await loadTimesheet({
       from: range.from,
       to: range.to,
       isAdmin: canAttendanceViewAll(req.user),
       selfUserId: Number(req.user.id),
+      scopeOrganizationName: orgScope?.organizationName || null,
     });
     const organization = req.query.organization ? String(req.query.organization) : null;
+    if (orgScope?.organizationName && organization && normalizeOrgName(organization) !== normalizeOrgName(orgScope.organizationName)) {
+      return res.status(403).json({ error: 'Нет доступа к табелю другой организации' });
+    }
     const buf = buildTimesheetWorkbook(data, { organization });
     const month = data.month || 'period';
     const name = organization
@@ -443,7 +495,7 @@ router.get('/timesheet/export', requirePermission('can_attendance'), async (req,
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(name)}"`);
     res.send(buf);
   } catch (e) {
-    if (e.status === 400) return res.status(400).json({ error: e.message });
+    if (e.status === 400 || e.status === 403) return res.status(e.status).json({ error: e.message });
     console.error('GET timesheet/export:', e);
     res.status(500).json({ error: 'Ошибка экспорта' });
   }
@@ -466,6 +518,7 @@ router.post('/timesheet/import', requirePermission('can_attendance'), (req, res,
     const monthParam = typeof req.query.month === 'string' ? req.query.month.trim() : '';
     const parsed = parseTimesheetImport(req.file.buffer);
     const monthKey = monthParam || parsed.month;
+    const orgScope = await resolveAttendanceOrganizationScope(req.user);
     if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
       return res.status(400).json({ error: 'Укажите месяц (YYYY-MM) в параметре или в файле' });
     }
@@ -478,6 +531,7 @@ router.post('/timesheet/import', requirePermission('can_attendance'), (req, res,
       monthKey,
       rows: parsed.rows,
       editorId: req.session.userId || null,
+      organizationNameScope: orgScope?.organizationName || null,
     });
     res.json({
       ok: true,
@@ -486,7 +540,7 @@ router.post('/timesheet/import', requirePermission('can_attendance'), (req, res,
       errors: result.errors,
     });
   } catch (e) {
-    if (e.status === 400) return res.status(400).json({ error: e.message });
+    if (e.status === 400 || e.status === 403) return res.status(e.status).json({ error: e.message });
     console.error('POST timesheet/import:', e);
     res.status(500).json({ error: e.message || 'Ошибка импорта' });
   }
@@ -502,6 +556,7 @@ router.get('/timesheet/candidates', requirePermission('can_attendance'), async (
     if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
       return res.status(400).json({ error: 'Укажите месяц (YYYY-MM)' });
     }
+    const orgScope = await resolveAttendanceOrganizationScope(req.user);
     try {
       assertTimesheetMonthAllowed(req.user, monthKey);
     } catch (e) {
@@ -517,17 +572,23 @@ router.get('/timesheet/candidates', requirePermission('can_attendance'), async (
       to: toStr,
       isAdmin: true,
       selfUserId: Number(req.user.id),
+      scopeOrganizationName: orgScope?.organizationName || null,
     });
     const inSheet = new Set(
       data.employees.map((e) => Number(e.user_id)).filter((id) => Number.isFinite(id)),
     );
-    const all = await pool.query(
-      `SELECT u.id, u.login, u.display_name, u.first_name, u.last_name,
-              COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')) AS organization_name
-       FROM users u
-       LEFT JOIN organizations o ON o.id = u.organization_id
-       ORDER BY u.last_name NULLS LAST, u.first_name NULLS LAST, u.login`,
-    );
+    const candidateParams = [];
+    let candidateSql = `SELECT u.id, u.login, u.display_name, u.first_name, u.last_name,
+                               COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')) AS organization_name
+                        FROM users u
+                        LEFT JOIN organizations o ON o.id = u.organization_id`;
+    if (orgScope?.organizationName) {
+      candidateSql += `
+        WHERE LOWER(TRIM(COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')))) = LOWER(TRIM($1))`;
+      candidateParams.push(orgScope.organizationName);
+    }
+    candidateSql += ' ORDER BY u.last_name NULLS LAST, u.first_name NULLS LAST, u.login';
+    const all = await pool.query(candidateSql, candidateParams);
     const candidates = all.rows
       .filter((u) => !inSheet.has(Number(u.id)))
       .map((u) => ({
@@ -538,6 +599,7 @@ router.get('/timesheet/candidates', requirePermission('can_attendance'), async (
       }));
     res.json(candidates);
   } catch (e) {
+    if (e.status === 403) return res.status(403).json({ error: e.message });
     console.error('GET timesheet/candidates:', e);
     res.status(500).json({ error: 'Ошибка загрузки списка' });
   }
@@ -555,9 +617,11 @@ router.post('/timesheet/members', requirePermission('can_attendance'), async (re
     if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
       return res.status(400).json({ error: 'Укажите месяц (YYYY-MM)' });
     }
+    const orgScope = await resolveAttendanceOrganizationScope(req.user);
     assertTimesheetMonthAllowed(req.user, monthKey);
     const exists = await pool.query('SELECT id FROM users WHERE id = $1', [userId]);
     if (!exists.rowCount) return res.status(404).json({ error: 'Пользователь не найден' });
+    await assertTargetUserInAttendanceScope(userId, orgScope);
 
     await ensureUserMonthRate(pool, userId, monthKey);
 
@@ -596,6 +660,7 @@ router.post('/timesheet/members', requirePermission('can_attendance'), async (re
       isAdmin: true,
       selfUserId: Number(req.user.id),
       forceIncludeUserIds: [userId],
+      scopeOrganizationName: orgScope?.organizationName || null,
     });
     const employee = data.employees.find((e) => Number(e.user_id) === userId);
     if (!employee) {
@@ -603,6 +668,7 @@ router.post('/timesheet/members', requirePermission('can_attendance'), async (re
     }
     res.status(201).json({ employee });
   } catch (e) {
+    if (e.status === 403 || e.status === 404) return res.status(e.status).json({ error: e.message });
     console.error('POST timesheet/members:', e);
     res.status(500).json({ error: e.message || 'Ошибка добавления' });
   }
@@ -616,7 +682,9 @@ router.patch('/timesheet/day', requirePermission('can_attendance'), requireAtten
     return res.status(400).json({ error: 'Укажите сотрудника и дату' });
   }
   try {
+    const orgScope = await resolveAttendanceOrganizationScope(req.user);
     assertTimesheetTargetUser(req.user, userId);
+    await assertTargetUserInAttendanceScope(userId, orgScope);
     assertTimesheetMonthAllowed(req.user, monthKeyFromDateStr(dateStr));
   } catch (e) {
     return res.status(e.status || 403).json({ error: e.message });
@@ -862,7 +930,9 @@ router.patch('/timesheet/hours', requirePermission('can_attendance'), async (req
     return res.status(400).json({ error: 'Укажите сотрудника и дату' });
   }
   try {
+    const orgScope = await resolveAttendanceOrganizationScope(req.user);
     assertTimesheetTargetUser(req.user, userId);
+    await assertTargetUserInAttendanceScope(userId, orgScope);
     assertTimesheetMonthAllowed(req.user, monthKeyFromDateStr(dateStr));
   } catch (e) {
     return res.status(e.status || 403).json({ error: e.message });
@@ -954,7 +1024,9 @@ router.patch('/timesheet/times', requirePermission('can_attendance'), requireAtt
     return res.status(400).json({ error: 'Укажите сотрудника и дату' });
   }
   try {
+    const orgScope = await resolveAttendanceOrganizationScope(req.user);
     assertTimesheetTargetUser(req.user, userId);
+    await assertTargetUserInAttendanceScope(userId, orgScope);
     assertTimesheetMonthAllowed(req.user, monthKeyFromDateStr(dateStr));
   } catch (e) {
     return res.status(e.status || 403).json({ error: e.message });
@@ -1092,7 +1164,9 @@ router.patch('/timesheet/rates', requirePermission('can_attendance'), requireAtt
     return res.status(403).json({ error: 'Расчёт ЗП недоступен для этой роли' });
   }
   try {
+    const orgScope = await resolveAttendanceOrganizationScope(req.user);
     assertTimesheetTargetUser(req.user, userId);
+    await assertTargetUserInAttendanceScope(userId, orgScope);
   } catch (e) {
     return res.status(e.status || 403).json({ error: e.message });
   }
@@ -1153,6 +1227,12 @@ router.get('/all', requirePermission('can_attendance'), async (req, res) => {
   if (!canAttendanceViewAll(req.user)) {
     return res.status(403).json({ error: 'Нет доступа' });
   }
+  let orgScope = null;
+  try {
+    orgScope = await resolveAttendanceOrganizationScope(req.user);
+  } catch (e) {
+    return res.status(e.status || 403).json({ error: e.message });
+  }
   const from = req.query.from || null;
   const to = req.query.to || null;
   let q = `
@@ -1171,6 +1251,17 @@ router.get('/all', requirePermission('can_attendance'), async (req, res) => {
   if (to) {
     q += ` AND a.visit_date <= $${n++}`;
     params.push(to);
+  }
+  if (orgScope?.organizationName) {
+    q += ` AND LOWER(TRIM(COALESCE(
+      (
+        SELECT o_scope.name
+        FROM organizations o_scope
+        WHERE o_scope.id = u.organization_id
+      ),
+      NULLIF(TRIM(u.employment_org), '')
+    ))) = LOWER(TRIM($${n++}))`;
+    params.push(orgScope.organizationName);
   }
   q += ` ORDER BY a.visit_date DESC, a.check_in_at DESC`;
   const r = await pool.query(q, params);

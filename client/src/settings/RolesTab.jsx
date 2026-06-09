@@ -110,6 +110,7 @@ export default function RolesTab() {
       }
       if (key === 'can_attendance' && !value) {
         next.can_attendance_all = false;
+        next.can_attendance_same_org = false;
         next.can_attendance_edit = false;
         next.can_attendance_pay = false;
         next.can_attendance_edit_rates = false;
@@ -120,6 +121,7 @@ export default function RolesTab() {
       }
       if (key === 'can_attendance_pay' && !value) next.can_attendance_edit_rates = false;
       if (key === 'can_attendance_all' && !value) {
+        next.can_attendance_same_org = false;
         next.can_attendance_add_member = false;
         next.can_attendance_import = false;
       }
@@ -127,9 +129,17 @@ export default function RolesTab() {
     });
   };
 
-  const setAttendanceScope = (allUsers) => {
+  const setAttendanceScope = (scope) => {
     if (editing?.is_admin_role) return;
-    setForm((f) => ({ ...f, can_attendance_all: allUsers }));
+    setForm((f) => {
+      if (scope === 'all') {
+        return { ...f, can_attendance_all: true, can_attendance_same_org: false };
+      }
+      if (scope === 'same_org') {
+        return { ...f, can_attendance_all: true, can_attendance_same_org: true };
+      }
+      return { ...f, can_attendance_all: false, can_attendance_same_org: false };
+    });
   };
 
   const setActionsScope = (allUsers) => {
@@ -381,9 +391,9 @@ export default function RolesTab() {
                                     <input
                                       type="radio"
                                       name="attendance_scope"
-                                      checked={editing?.is_admin_role ? true : !!form.can_attendance_all}
+                                      checked={editing?.is_admin_role ? true : (!!form.can_attendance_all && !form.can_attendance_same_org)}
                                       disabled={!!editing?.is_admin_role}
-                                      onChange={() => setAttendanceScope(true)}
+                                      onChange={() => setAttendanceScope('all')}
                                       className="border-slate-600 text-brand-600"
                                     />
                                     Табель всех сотрудников
@@ -392,9 +402,20 @@ export default function RolesTab() {
                                     <input
                                       type="radio"
                                       name="attendance_scope"
+                                      checked={editing?.is_admin_role ? false : (!!form.can_attendance_all && !!form.can_attendance_same_org)}
+                                      disabled={!!editing?.is_admin_role}
+                                      onChange={() => setAttendanceScope('same_org')}
+                                      className="border-slate-600 text-brand-600"
+                                    />
+                                    Табель сотрудников своей организации
+                                  </label>
+                                  <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      name="attendance_scope"
                                       checked={editing?.is_admin_role ? false : !form.can_attendance_all}
                                       disabled={!!editing?.is_admin_role}
-                                      onChange={() => setAttendanceScope(false)}
+                                      onChange={() => setAttendanceScope('self')}
                                       className="border-slate-600 text-brand-600"
                                     />
                                     Только свой табель

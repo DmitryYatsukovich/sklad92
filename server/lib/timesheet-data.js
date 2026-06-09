@@ -384,9 +384,20 @@ export function groupEmployeesByOrg(employees) {
     .map(([label, rows]) => ({ label, employees: rows }));
 }
 
-/** @param {{ from?: string, to?: string, isAdmin: boolean, selfUserId: number, forceIncludeUserIds?: number[] }} opts */
+/**
+ * @param {{
+ *   from?: string,
+ *   to?: string,
+ *   isAdmin: boolean,
+ *   selfUserId: number,
+ *   forceIncludeUserIds?: number[],
+ *   scopeOrganizationName?: string | null,
+ * }} opts
+ */
 export async function loadTimesheet(opts) {
   const { isAdmin, selfUserId } = opts;
+  const scopeOrganizationName = String(opts.scopeOrganizationName || '').trim();
+  const hasOrgScope = scopeOrganizationName.length > 0;
   const forceInclude = new Set((opts.forceIncludeUserIds || []).map((id) => Number(id)).filter(Boolean));
   let from = opts.from || null;
   let to = opts.to || null;
@@ -415,8 +426,25 @@ export async function loadTimesheet(opts) {
   const recParams = [fromStr, toStr];
   let recSql = `${ATTENDANCE_DAY_SELECT}
      WHERE a.visit_date >= $1::date AND a.visit_date <= $2::date`;
+  if (hasOrgScope) {
+    recSql += `
+      AND LOWER(TRIM(COALESCE(
+        (
+          SELECT o_scope.name
+          FROM users u_scope
+          LEFT JOIN organizations o_scope ON o_scope.id = u_scope.organization_id
+          WHERE u_scope.id = a.user_id
+        ),
+        (
+          SELECT NULLIF(TRIM(u_scope2.employment_org), '')
+          FROM users u_scope2
+          WHERE u_scope2.id = a.user_id
+        )
+      ))) = LOWER(TRIM($${recParams.length + 1}))`;
+    recParams.push(scopeOrganizationName);
+  }
   if (!isAdmin) {
-    recSql += ' AND a.user_id = $3';
+    recSql += ` AND a.user_id = $${recParams.length + 1}`;
     recParams.push(selfUserId);
   }
   recSql += ' ORDER BY a.user_id, a.visit_date';
@@ -429,10 +457,23 @@ export async function loadTimesheet(opts) {
 
   let userIds = [...new Set(recR.rows.map((r) => uidNum(r.user_id)).filter(Boolean))];
   if (isAdmin && monthKey) {
-    const rated = await pool.query(
-      'SELECT DISTINCT user_id FROM timesheet_month_rates WHERE month_key = $1',
-      [monthKey],
-    );
+    let rated;
+    if (hasOrgScope) {
+      rated = await pool.query(
+        `SELECT DISTINCT mr.user_id
+         FROM timesheet_month_rates mr
+         JOIN users u ON u.id = mr.user_id
+         LEFT JOIN organizations o ON o.id = u.organization_id
+         WHERE mr.month_key = $1
+           AND LOWER(TRIM(COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')))) = LOWER(TRIM($2))`,
+        [monthKey, scopeOrganizationName],
+      );
+    } else {
+      rated = await pool.query(
+        'SELECT DISTINCT user_id FROM timesheet_month_rates WHERE month_key = $1',
+        [monthKey],
+      );
+    }
     userIds = [
       ...new Set([
         ...userIds,
@@ -453,16 +494,19 @@ export async function loadTimesheet(opts) {
 
   let usersR = { rows: [] };
   if (userIds.length) {
-    usersR = await pool.query(
-      `SELECT u.id, u.login, u.display_name, u.first_name, u.last_name,
-              u.organization_id,
-              COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')) AS organization_name
-       FROM users u
-       LEFT JOIN organizations o ON o.id = u.organization_id
-       WHERE u.id = ANY($1::int[])
-       ORDER BY organization_name NULLS LAST, u.last_name NULLS LAST, u.first_name NULLS LAST, u.login`,
-      [userIds],
-    );
+    const usersParams = [userIds];
+    let usersSql = `SELECT u.id, u.login, u.display_name, u.first_name, u.last_name,
+                           u.organization_id,
+                           COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')) AS organization_name
+                    FROM users u
+                    LEFT JOIN organizations o ON o.id = u.organization_id
+                    WHERE u.id = ANY($1::int[])`;
+    if (hasOrgScope) {
+      usersSql += ` AND LOWER(TRIM(COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')))) = LOWER(TRIM($2))`;
+      usersParams.push(scopeOrganizationName);
+    }
+    usersSql += ' ORDER BY organization_name NULLS LAST, u.last_name NULLS LAST, u.first_name NULLS LAST, u.login';
+    usersR = await pool.query(usersSql, usersParams);
   }
 
   const byUserDate = new Map();
