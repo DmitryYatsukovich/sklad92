@@ -64,6 +64,7 @@ function readNumberEnv(name, fallback) {
 
 // Более строгие дефолты, чтобы снизить ложные срабатывания "чужого" пользователя.
 const DIST_THRESHOLD = readNumberEnv('FACE_MATCH_THRESHOLD', 0.48);
+const DIST_SELF_THRESHOLD = readNumberEnv('FACE_MATCH_SELF_THRESHOLD', 0.56);
 const DIST_MIN_GAP = readNumberEnv('FACE_MATCH_MIN_GAP', 0.06);
 const DIST_MAX_RATIO = readNumberEnv('FACE_MATCH_MAX_RATIO', 0.92);
 const DIST_STRICT_SINGLE_THRESHOLD = readNumberEnv('FACE_MATCH_STRICT_SINGLE_THRESHOLD', 0.42);
@@ -118,7 +119,8 @@ function normalizeStoredDescriptor(raw) {
   return normalizeDescriptorVector(parsed);
 }
 
-function findBestFaceCandidate(descriptor, candidates) {
+function findBestFaceCandidate(descriptor, candidates, options = {}) {
+  const threshold = Number.isFinite(options.threshold) ? Number(options.threshold) : DIST_THRESHOLD;
   let best = null;
   let bestDist = Infinity;
   let secondBestDist = Infinity;
@@ -135,7 +137,7 @@ function findBestFaceCandidate(descriptor, candidates) {
       secondBestDist = d;
     }
   }
-  if (!best || bestDist > DIST_THRESHOLD) return null;
+  if (!best || bestDist > threshold) return null;
   if (Number.isFinite(secondBestDist)) {
     const gap = secondBestDist - bestDist;
     const ratio = secondBestDist > 0 ? (bestDist / secondBestDist) : 1;
@@ -154,10 +156,12 @@ function average(arr) {
   return arr.reduce((s, x) => s + x, 0) / arr.length;
 }
 
-function matchUserByDescriptors(descriptors, candidates) {
+function matchUserByDescriptors(descriptors, candidates, options = {}) {
+  const threshold = Number.isFinite(options.threshold) ? Number(options.threshold) : DIST_THRESHOLD;
+  const singleCandidateMode = !!options.singleCandidateMode;
   const matches = [];
   for (const descriptor of descriptors) {
-    const hit = findBestFaceCandidate(descriptor, candidates);
+    const hit = findBestFaceCandidate(descriptor, candidates, { threshold });
     if (hit) matches.push(hit);
   }
   if (!matches.length) return null;
@@ -180,7 +184,7 @@ function matchUserByDescriptors(descriptors, candidates) {
   const top = ranked[0];
   if (!top) return null;
 
-  const minVotes = descriptors.length >= 3 ? 2 : 1;
+  const minVotes = singleCandidateMode ? 1 : (descriptors.length >= 3 ? 2 : 1);
   if (top.count < minVotes) {
     // Если консенсуса нет, разрешаем только очень уверенное одиночное совпадение
     // с заметным отрывом от второго кандидата.
@@ -190,17 +194,19 @@ function matchUserByDescriptors(descriptors, candidates) {
     if (!strongSingle) return null;
   }
 
-  const second = ranked[1];
-  if (second) {
-    if (second.count === top.count && Math.abs(top.avgDistance - second.avgDistance) < 0.025) {
-      return null;
-    }
-    if (second.count === top.count && second.minDistance <= top.minDistance + 0.015) {
-      return null;
+  if (!singleCandidateMode) {
+    const second = ranked[1];
+    if (second) {
+      if (second.count === top.count && Math.abs(top.avgDistance - second.avgDistance) < 0.025) {
+        return null;
+      }
+      if (second.count === top.count && second.minDistance <= top.minDistance + 0.015) {
+        return null;
+      }
     }
   }
 
-  if (top.avgDistance > DIST_THRESHOLD) return null;
+  if (top.avgDistance > threshold) return null;
   return {
     user: top.user,
     distance: top.avgDistance,
@@ -209,13 +215,21 @@ function matchUserByDescriptors(descriptors, candidates) {
   };
 }
 
-async function loadFaceCandidates() {
+async function loadFaceCandidates(onlyUserId = null) {
+  const params = [];
+  let userFilterSql = '';
+  if (Number.isInteger(Number(onlyUserId)) && Number(onlyUserId) > 0) {
+    params.push(Number(onlyUserId));
+    userFilterSql = ` AND id = $${params.length}`;
+  }
   const r = await pool.query(
     `SELECT id, login, display_name, first_name, last_name, face_descriptor
      FROM users
      WHERE face_descriptor IS NOT NULL
        AND COALESCE(profile_active, true) = true
-       AND COALESCE(employment_status, 'working') <> 'fired'`,
+       AND COALESCE(employment_status, 'working') <> 'fired'
+       ${userFilterSql}`,
+    params,
   );
   return r.rows
     .map((row) => ({
@@ -319,8 +333,17 @@ router.post('/scan', requirePermission('can_face'), async (req, res) => {
   if (!descriptors) {
     return res.status(400).json({ error: 'Передайте descriptor (128 чисел) или descriptors (массив векторов)' });
   }
-  const candidates = await loadFaceCandidates();
-  const match = matchUserByDescriptors(descriptors, candidates);
+  const selfOnlyUserId = req.user.role === 'admin'
+    ? null
+    : Number(req.session.userId || req.user.id || 0);
+  const candidates = await loadFaceCandidates(selfOnlyUserId);
+  if (selfOnlyUserId && !candidates.length) {
+    return res.status(404).json({ error: 'У вас не записан шаблон лица. Обратитесь к администратору.' });
+  }
+  const match = matchUserByDescriptors(descriptors, candidates, {
+    threshold: selfOnlyUserId ? DIST_SELF_THRESHOLD : DIST_THRESHOLD,
+    singleCandidateMode: !!selfOnlyUserId,
+  });
   if (!match) {
     return res.status(404).json({ error: 'Лицо не распознано. Зарегистрируйте шаблон в профиле или у администратора.' });
   }
