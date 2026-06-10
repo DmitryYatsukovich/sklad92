@@ -75,6 +75,20 @@ export const APP_PERMISSIONS = [
     group: 'Посещаемость',
   },
   {
+    key: 'can_face_all',
+    label: 'Отметка всех сотрудников',
+    description: 'Разрешает отмечать по лицу всех сотрудников (иначе — только себя)',
+    group: 'Посещаемость',
+    faceScopeOption: true,
+  },
+  {
+    key: 'can_face_same_org',
+    label: 'Отметка своей организации',
+    description: 'Ограничивает отметку по лицу только сотрудниками своей организации',
+    group: 'Посещаемость',
+    faceScopeOption: true,
+  },
+  {
     key: 'can_attendance',
     label: 'Журнал посещений',
     description: 'Доступ к табелю посещений',
@@ -226,6 +240,13 @@ export function permissionsFromBody(body = {}) {
     perms.can_attendance_export = false;
     perms.can_attendance_import = false;
     perms.can_attendance_change_month = false;
+  }
+  if (!perms.can_face) {
+    perms.can_face_all = false;
+    perms.can_face_same_org = false;
+  }
+  if (!perms.can_face_all) {
+    perms.can_face_same_org = false;
   }
   if (!perms.can_attendance_pay) perms.can_attendance_edit_rates = false;
   if (!perms.can_attendance_all) {

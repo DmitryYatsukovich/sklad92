@@ -215,20 +215,30 @@ function matchUserByDescriptors(descriptors, candidates, options = {}) {
   };
 }
 
-async function loadFaceCandidates(onlyUserId = null) {
+async function loadFaceCandidates({ onlyUserId = null, organizationName = null } = {}) {
   const params = [];
-  let userFilterSql = '';
+  const whereParts = [
+    'u.face_descriptor IS NOT NULL',
+    "COALESCE(u.profile_active, true) = true",
+    "COALESCE(u.employment_status, 'working') <> 'fired'",
+  ];
+
   if (Number.isInteger(Number(onlyUserId)) && Number(onlyUserId) > 0) {
     params.push(Number(onlyUserId));
-    userFilterSql = ` AND id = $${params.length}`;
+    whereParts.push(`u.id = $${params.length}`);
   }
+
+  const normalizedOrg = normalizeOrgName(organizationName);
+  if (normalizedOrg) {
+    params.push(normalizedOrg);
+    whereParts.push(`LOWER(TRIM(COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')))) = $${params.length}`);
+  }
+
   const r = await pool.query(
-    `SELECT id, login, display_name, first_name, last_name, face_descriptor
-     FROM users
-     WHERE face_descriptor IS NOT NULL
-       AND COALESCE(profile_active, true) = true
-       AND COALESCE(employment_status, 'working') <> 'fired'
-       ${userFilterSql}`,
+    `SELECT u.id, u.login, u.display_name, u.first_name, u.last_name, u.face_descriptor
+     FROM users u
+     LEFT JOIN organizations o ON o.id = u.organization_id
+     WHERE ${whereParts.join('\n       AND ')}`,
     params,
   );
   return r.rows
@@ -333,16 +343,34 @@ router.post('/scan', requirePermission('can_face'), async (req, res) => {
   if (!descriptors) {
     return res.status(400).json({ error: 'Передайте descriptor (128 чисел) или descriptors (массив векторов)' });
   }
-  const selfOnlyUserId = req.user.role === 'admin'
-    ? null
-    : Number(req.session.userId || req.user.id || 0);
-  const candidates = await loadFaceCandidates(selfOnlyUserId);
-  if (selfOnlyUserId && !candidates.length) {
+  const currentUserId = Number(req.session.userId || req.user.id || 0) || null;
+  const canMarkAll = req.user.role === 'admin' || (!!req.user.can_face_all && !req.user.can_face_same_org);
+  const canMarkSameOrg = req.user.role !== 'admin' && !!req.user.can_face_all && !!req.user.can_face_same_org;
+  let faceScope = 'self';
+  if (canMarkAll) faceScope = 'all';
+  else if (canMarkSameOrg) faceScope = 'same_org';
+
+  let candidates = [];
+  if (faceScope === 'all') {
+    candidates = await loadFaceCandidates();
+  } else if (faceScope === 'same_org') {
+    const orgName = normalizeOrgName(req.user.organization_name);
+    if (!orgName) {
+      return res.status(403).json({
+        error: 'Для этой роли отметка ограничена своей организацией, но у пользователя не указана организация',
+      });
+    }
+    candidates = await loadFaceCandidates({ organizationName: orgName });
+  } else {
+    candidates = await loadFaceCandidates({ onlyUserId: currentUserId });
+  }
+
+  if (faceScope === 'self' && !candidates.length) {
     return res.status(404).json({ error: 'У вас не записан шаблон лица. Обратитесь к администратору.' });
   }
   const match = matchUserByDescriptors(descriptors, candidates, {
-    threshold: selfOnlyUserId ? DIST_SELF_THRESHOLD : DIST_THRESHOLD,
-    singleCandidateMode: !!selfOnlyUserId,
+    threshold: faceScope === 'self' ? DIST_SELF_THRESHOLD : DIST_THRESHOLD,
+    singleCandidateMode: faceScope === 'self',
   });
   if (!match) {
     return res.status(404).json({ error: 'Лицо не распознано. Зарегистрируйте шаблон в профиле или у администратора.' });

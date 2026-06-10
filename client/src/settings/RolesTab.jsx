@@ -108,6 +108,13 @@ export default function RolesTab() {
       if (key === 'can_tools' && !value) {
         next.can_tools_delete = false;
       }
+      if (key === 'can_face' && !value) {
+        next.can_face_all = false;
+        next.can_face_same_org = false;
+      }
+      if (key === 'can_face_all' && !value) {
+        next.can_face_same_org = false;
+      }
       if (key === 'can_attendance' && !value) {
         next.can_attendance_all = false;
         next.can_attendance_same_org = false;
@@ -126,6 +133,19 @@ export default function RolesTab() {
         next.can_attendance_import = false;
       }
       return next;
+    });
+  };
+
+  const setFaceScope = (scope) => {
+    if (editing?.is_admin_role) return;
+    setForm((f) => {
+      if (scope === 'all') {
+        return { ...f, can_face_all: true, can_face_same_org: false };
+      }
+      if (scope === 'same_org') {
+        return { ...f, can_face_all: true, can_face_same_org: true };
+      }
+      return { ...f, can_face_all: false, can_face_same_org: false };
     });
   };
 
@@ -303,7 +323,7 @@ export default function RolesTab() {
                       <p className="text-slate-500 text-2xs uppercase tracking-wide mb-2">{groupName}</p>
                       <div className="space-y-2">
                         {items
-                          .filter((p) => !p.attendanceScopeOption && !p.attendanceEditOption && !p.attendancePayOption && !p.attendanceRatesOption && !p.attendanceToolsOption && !p.attendanceMonthOption && !p.actionsScopeOption && !p.tasksScopeOption)
+                          .filter((p) => !p.faceScopeOption && !p.attendanceScopeOption && !p.attendanceEditOption && !p.attendancePayOption && !p.attendanceRatesOption && !p.attendanceToolsOption && !p.attendanceMonthOption && !p.actionsScopeOption && !p.tasksScopeOption)
                           .map((p) => {
                             const requiresTasks = p.key === 'can_task_notifications';
                             const requiresTools = p.key === 'can_tools_delete';
@@ -381,6 +401,44 @@ export default function RolesTab() {
                                       className="border-slate-600 text-brand-600"
                                     />
                                     Только свои задачи
+                                  </label>
+                                </div>
+                              )}
+                              {p.key === 'can_face' && (editing?.is_admin_role || form.can_face) && (
+                                <div className="ml-9 mt-1 mb-2 space-y-1.5 pl-3 border-l border-white/10">
+                                  <p className="text-slate-500 text-2xs">Область отметки по лицу</p>
+                                  <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      name="face_scope"
+                                      checked={editing?.is_admin_role ? false : !form.can_face_all}
+                                      disabled={!!editing?.is_admin_role}
+                                      onChange={() => setFaceScope('self')}
+                                      className="border-slate-600 text-brand-600"
+                                    />
+                                    Только себя
+                                  </label>
+                                  <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      name="face_scope"
+                                      checked={editing?.is_admin_role ? false : (!!form.can_face_all && !!form.can_face_same_org)}
+                                      disabled={!!editing?.is_admin_role}
+                                      onChange={() => setFaceScope('same_org')}
+                                      className="border-slate-600 text-brand-600"
+                                    />
+                                    Сотрудников своей организации
+                                  </label>
+                                  <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      name="face_scope"
+                                      checked={editing?.is_admin_role ? true : (!!form.can_face_all && !form.can_face_same_org)}
+                                      disabled={!!editing?.is_admin_role}
+                                      onChange={() => setFaceScope('all')}
+                                      className="border-slate-600 text-brand-600"
+                                    />
+                                    Всех сотрудников
                                   </label>
                                 </div>
                               )}
