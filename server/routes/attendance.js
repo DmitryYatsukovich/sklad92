@@ -255,6 +255,8 @@ function normalizeOrgName(value) {
 
 async function resolveAttendanceOrganizationScope(user) {
   if (!canAttendanceScopeToOwnOrganization(user)) return null;
+  const orgFromSession = String(user?.organization_name || '').trim();
+  if (orgFromSession) return { organizationName: orgFromSession };
   const r = await pool.query(
     `SELECT COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')) AS organization_name
      FROM users u

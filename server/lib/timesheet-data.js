@@ -424,23 +424,18 @@ export async function loadTimesheet(opts) {
   const monthKey = monthKeyFromDateStr(fromStr);
 
   const recParams = [fromStr, toStr];
-  let recSql = `${ATTENDANCE_DAY_SELECT}
+  let recSql = ATTENDANCE_DAY_SELECT;
+  if (hasOrgScope) {
+    // Для фильтра по организации избегаем коррелированных подзапросов на каждую запись.
+    recSql += `
+      LEFT JOIN users ts_u ON ts_u.id = a.user_id
+      LEFT JOIN organizations ts_o ON ts_o.id = ts_u.organization_id`;
+  }
+  recSql += `
      WHERE a.visit_date >= $1::date AND a.visit_date <= $2::date`;
   if (hasOrgScope) {
     recSql += `
-      AND LOWER(TRIM(COALESCE(
-        (
-          SELECT o_scope.name
-          FROM users u_scope
-          LEFT JOIN organizations o_scope ON o_scope.id = u_scope.organization_id
-          WHERE u_scope.id = a.user_id
-        ),
-        (
-          SELECT NULLIF(TRIM(u_scope2.employment_org), '')
-          FROM users u_scope2
-          WHERE u_scope2.id = a.user_id
-        )
-      ))) = LOWER(TRIM($${recParams.length + 1}))`;
+      AND LOWER(TRIM(COALESCE(ts_o.name, NULLIF(TRIM(ts_u.employment_org), '')))) = LOWER(TRIM($${recParams.length + 1}))`;
     recParams.push(scopeOrganizationName);
   }
   if (!isAdmin) {
