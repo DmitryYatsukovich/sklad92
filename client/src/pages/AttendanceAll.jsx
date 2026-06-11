@@ -3,6 +3,8 @@ import { attendance as attendanceApi, isOfflineQueuedError } from '../api';
 import { usePendingMutations } from '../hooks/usePendingMutations';
 import { useAutoRefreshOnVisible } from '../hooks/useAutoRefreshOnVisible';
 import { withPendingRowClass } from '../lib/actionLog/applyOptimistic';
+import { peekPageCache, setPageCache, hydrateFromCaches } from '../lib/pageCache';
+import { isQuickDeviceEnabled } from '../lib/offlineCache';
 
 const WEEKDAYS = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
 const TZ_MSK = 'Europe/Moscow';
@@ -1280,23 +1282,65 @@ export default function AttendanceAll({ user }) {
     [pendingMutations],
   );
 
+  const monthRange = useMemo(() => monthToRange(month), [month]);
+  const timesheetCacheKey = useMemo(
+    () => `attendance:timesheet:${monthRange.from}:${monthRange.to}`,
+    [monthRange.from, monthRange.to],
+  );
+  const timesheetOfflinePath = useMemo(() => {
+    const q = new URLSearchParams();
+    if (monthRange.from) q.set('from', monthRange.from);
+    if (monthRange.to) q.set('to', monthRange.to);
+    const suffix = q.toString();
+    return `/api/attendance/timesheet${suffix ? `?${suffix}` : ''}`;
+  }, [monthRange.from, monthRange.to]);
+
   const load = useCallback(({ silent = false } = {}) => {
-    const { from, to } = monthToRange(month);
+    const { from, to } = monthRange;
     if (!from || !to) return;
     if (!silent) setLoading(true);
     setError('');
-    attendanceApi
+    return attendanceApi
       .timesheet(from, to)
-      .then((payload) => setData(normalizeTimesheetData(payload)))
+      .then((payload) => {
+        const normalized = normalizeTimesheetData(payload);
+        setData(normalized);
+        setPageCache(timesheetCacheKey, normalized);
+      })
       .catch((e) => setError(e.message))
       .finally(() => {
         if (!silent) setLoading(false);
       });
-  }, [month]);
+  }, [monthRange, timesheetCacheKey]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    const mem = peekPageCache(timesheetCacheKey);
+    if (mem) {
+      setData(normalizeTimesheetData(mem));
+      setLoading(false);
+    } else {
+      hydrateFromCaches({
+        memoryKey: timesheetCacheKey,
+        offlinePath: timesheetOfflinePath,
+        quickDevice: isQuickDeviceEnabled(),
+        onData: (payload) => {
+          if (cancelled) return;
+          setData(normalizeTimesheetData(payload));
+          setLoading(false);
+        },
+      }).catch(() => {});
+    }
+    load({ silent: Boolean(mem) });
+    return () => {
+      cancelled = true;
+    };
+  }, [timesheetCacheKey, timesheetOfflinePath, load]);
+
+  useEffect(() => {
+    if (!data) return;
+    setPageCache(timesheetCacheKey, data);
+  }, [data, timesheetCacheKey]);
 
   useAutoRefreshOnVisible(() => load({ silent: true }), { intervalMs: 10000 });
 

@@ -8,6 +8,7 @@ const MODEL = FACE_MODEL_BASE_PATH;
 
 let loadPromise = null;
 let useTinyDetector = false;
+let warmupPromise = null;
 
 function waitAnimationFrames(count = 2) {
   return new Promise((resolve) => {
@@ -37,38 +38,42 @@ function requiredModelBins() {
 }
 
 /** Проверка, что .bin доступны и не подменены HTML-страницей (иначе ArrayBuffer alignment error) */
-async function assertModelFiles(base) {
-  for (const name of requiredModelBins()) {
-    const url = `${base}/${name}`;
-    let res;
-    try {
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-        // В офлайне проверяем через GET, чтобы сработал кэш (HEAD не матчится на cached GET).
-        res = await fetch(url, { method: 'GET', cache: 'force-cache' });
-      } else {
-        res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-      }
-    } catch (e) {
-      throw new Error(`Нет доступа к ${url}: ${e.message || e}`);
+async function assertModelFile(url) {
+  let res;
+  try {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      // В офлайне проверяем через GET, чтобы сработал кэш (HEAD не матчится на cached GET).
+      res = await fetch(url, { method: 'GET', cache: 'force-cache' });
+    } else {
+      res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
     }
-    if (!res.ok) {
-      throw new Error(
-        `Файл модели не найден (${res.status}): ${url}. `
-        + 'На сервере выполните npm run build:client и проверьте папку server/public/models.',
-      );
-    }
-    const ct = (res.headers.get('content-type') || '').toLowerCase();
-    if (ct.includes('text/html')) {
-      throw new Error(
-        `Вместо модели пришла HTML-страница: ${url}. `
-        + 'Проверьте, что на сервере есть server/public/models/*.bin и маршрут /models не перехватывается SPA.',
-      );
-    }
-    const len = Number(res.headers.get('content-length') || 0);
-    if (len > 0 && len < 1000) {
-      throw new Error(`Файл модели повреждён (${len} байт): ${url}`);
-    }
+  } catch (e) {
+    throw new Error(`Нет доступа к ${url}: ${e.message || e}`);
   }
+  if (!res.ok) {
+    throw new Error(
+      `Файл модели не найден (${res.status}): ${url}. `
+      + 'На сервере выполните npm run build:client и проверьте папку server/public/models.',
+    );
+  }
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  if (ct.includes('text/html')) {
+    throw new Error(
+      `Вместо модели пришла HTML-страница: ${url}. `
+      + 'Проверьте, что на сервере есть server/public/models/*.bin и маршрут /models не перехватывается SPA.',
+    );
+  }
+  const len = Number(res.headers.get('content-length') || 0);
+  if (len > 0 && len < 1000) {
+    throw new Error(`Файл модели повреждён (${len} байт): ${url}`);
+  }
+}
+
+async function assertModelFiles(base) {
+  // Проверяем бинарники параллельно, чтобы не блокировать первый запуск лишними RTT.
+  await Promise.all(
+    requiredModelBins().map((name) => assertModelFile(`${base}/${name}`)),
+  );
 }
 
 async function initTfBackend(preferCpu = false) {
@@ -122,6 +127,46 @@ export function loadFaceModels() {
     });
   }
   return loadPromise;
+}
+
+function createWarmupCanvas(size = 224) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, size, size);
+  }
+  return canvas;
+}
+
+async function runFaceWarmupInference() {
+  const canvas = createWarmupCanvas();
+  const opts = faceDetectorOptions(0.25);
+  try {
+    await faceapi.detectSingleFace(canvas, opts).withFaceLandmarks().withFaceDescriptor();
+  } catch {
+    /* best effort */
+  }
+  try {
+    await faceapi.detectAllFaces(canvas, opts).withFaceLandmarks().withFaceDescriptors();
+  } catch {
+    /* best effort */
+  }
+}
+
+export function warmupFacePipeline() {
+  if (!warmupPromise) {
+    warmupPromise = (async () => {
+      await loadFaceModels();
+      await runFaceWarmupInference();
+    })().catch((err) => {
+      warmupPromise = null;
+      throw err;
+    });
+  }
+  return warmupPromise;
 }
 
 function faceDetectorOptions(minConfidence = 0.4) {

@@ -84,6 +84,7 @@ export default function App() {
   const [taskToasts, setTaskToasts] = useState([]);
   const userRef = useRef(null);
   const warmedBundleKeyRef = useRef('');
+  const warmedFaceModelsKeyRef = useRef('');
   const taskSeenIdsRef = useRef(new Set());
   const taskSeenStorageKeyRef = useRef('');
   userRef.current = user;
@@ -230,6 +231,27 @@ export default function App() {
       load().catch(() => { failed = true; }).finally(() => schedule(runNext, 1500));
     };
     setTimeout(() => schedule(runNext, 1500), 900);
+  }, []);
+
+  const prewarmFaceModels = useCallback((u) => {
+    if (!u?.can_face || !navigator.onLine) return;
+    const warmKey = `${u.id}|face`;
+    if (warmedFaceModelsKeyRef.current === warmKey) return;
+    warmedFaceModelsKeyRef.current = warmKey;
+    const schedule = (fn) => {
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(fn, { timeout: 1800 });
+      } else {
+        setTimeout(fn, 300);
+      }
+    };
+    schedule(() => {
+      import('./lib/faceClient')
+        .then((m) => (m.warmupFacePipeline ? m.warmupFacePipeline() : m.loadFaceModels()))
+        .catch(() => {
+          warmedFaceModelsKeyRef.current = '';
+        });
+    });
   }, []);
 
   useEffect(() => {
@@ -490,15 +512,17 @@ export default function App() {
     const onOnline = () => {
       const currentUser = userRef.current;
       prewarmTabBundles(currentUser);
+      prewarmFaceModels(currentUser);
       if (currentUser && isQuickDeviceEnabled() && canUseOfflineMode(currentUser)) {
         refreshOfflineCacheIfNeeded(currentUser, { silent: false }).catch(() => {});
       }
       auth.me().then(({ user: u }) => { if (u) setUser(u); }).catch(() => {});
     };
     prewarmTabBundles(user);
+    prewarmFaceModels(user);
     window.addEventListener('online', onOnline);
     return () => window.removeEventListener('online', onOnline);
-  }, [user?.id, prewarmTabBundles]);
+  }, [user?.id, prewarmTabBundles, prewarmFaceModels]);
 
   useEffect(() => {
     if (!user || !navigator.onLine) return;
