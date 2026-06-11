@@ -1,7 +1,7 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { attendance as attendanceApi, isOfflineQueuedError } from '../api';
 import { recordAction } from '../lib/actionLog';
-import { loadFaceModels, captureFaceDescriptor } from '../lib/faceClient';
+import { loadFaceModels, captureFaceDescriptor, warmupFacePipeline } from '../lib/faceClient';
 import FaceCamera from '../components/FaceCamera';
 
 const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -77,6 +77,9 @@ export default function FaceCheckIn({ user }) {
   const [msg, setMsg] = useState('');
   const [msgKind, setMsgKind] = useState('');
   const [visitRows, setVisitRows] = useState([]);
+  const didFirstScanRef = useRef(false);
+  const didVideoWarmupRef = useRef(false);
+  const [pipelineWarm, setPipelineWarm] = useState(false);
 
   const loadVisits = () =>
     attendanceApi.my(90).then(setVisitRows).catch(() => {});
@@ -106,11 +109,40 @@ export default function FaceCheckIn({ user }) {
     loadModels();
   }, [loadModels]);
 
+  useEffect(() => {
+    if (modelsState !== 'ready') {
+      setPipelineWarm(false);
+      return undefined;
+    }
+    let cancelled = false;
+    warmupFacePipeline()
+      .then(() => {
+        if (!cancelled) setPipelineWarm(true);
+      })
+      .catch(() => {
+        if (!cancelled) setPipelineWarm(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [modelsState]);
+
   const onVideoReady = useCallback((el) => {
     setVideoEl(el);
   }, []);
 
   const modelsOk = modelsState === 'ready';
+
+  useEffect(() => {
+    if (!modelsOk || !videoEl || didVideoWarmupRef.current) return;
+    didVideoWarmupRef.current = true;
+    captureFaceDescriptor(videoEl, {
+      stableSamples: 1,
+      maxSampleAttempts: 1,
+      maxDescriptorDrift: 0.4,
+      minScore: 0,
+    }).catch(() => {});
+  }, [modelsOk, videoEl]);
 
   const scan = async () => {
     if (!modelsOk) {
@@ -129,8 +161,11 @@ export default function FaceCheckIn({ user }) {
     setBusy(true);
     setStatus('');
     try {
+      const firstScan = !didFirstScanRef.current;
+      const targetDescriptors = firstScan ? 2 : 3;
+      const maxAttempts = firstScan ? 4 : 6;
       const descriptors = [];
-      for (let attempt = 0; attempt < 6 && descriptors.length < 3; attempt += 1) {
+      for (let attempt = 0; attempt < maxAttempts && descriptors.length < targetDescriptors; attempt += 1) {
         const d = await captureFaceDescriptor(videoEl, {
           stableSamples: 1,
           maxSampleAttempts: 4,
@@ -138,7 +173,7 @@ export default function FaceCheckIn({ user }) {
           minScore: 0.24,
         });
         if (d) descriptors.push(d);
-        if (attempt < 5 && descriptors.length < 3) {
+        if (attempt < (maxAttempts - 1) && descriptors.length < targetDescriptors) {
           await new Promise((resolve) => setTimeout(resolve, 70));
         }
       }
@@ -189,6 +224,7 @@ export default function FaceCheckIn({ user }) {
       }
       setStatus(e.message || 'Ошибка', 'error');
     } finally {
+      didFirstScanRef.current = true;
       setBusy(false);
     }
   };
@@ -233,6 +269,9 @@ export default function FaceCheckIn({ user }) {
           </div>
           {modelsState === 'loading' && (
             <p className="text-zinc-500 text-2xs">Загрузка нейросети…</p>
+          )}
+          {modelsOk && !pipelineWarm && (
+            <p className="text-zinc-500 text-2xs">Подготовка распознавания для быстрого первого скана…</p>
           )}
           {msg && (
             <p className={`text-xs rounded-lg border px-3 py-2 ${msgClass}`}>
