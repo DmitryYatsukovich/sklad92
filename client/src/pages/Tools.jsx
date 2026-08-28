@@ -8,6 +8,11 @@ import {
   getWebBluetoothUnavailableReason,
   printQrSvgViaBluetooth,
 } from '../lib/bluetoothQrPrinter';
+import {
+  buildIosPrintPayload,
+  canUseIosPrintBridge,
+  openIosPrintBridge,
+} from '../lib/iosPrintBridge';
 
 function parseId(value) {
   const id = Number.parseInt(value, 10);
@@ -224,6 +229,7 @@ export default function Tools({ user }) {
   const canDeleteTools = !!(user?.role === 'admin' || user?.can_tools_delete);
   const bluetoothPrintAvailable = canUseWebBluetoothPrinting();
   const bluetoothPrintHint = getWebBluetoothUnavailableReason();
+  const iosPrintBridgeAvailable = canUseIosPrintBridge();
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -573,6 +579,15 @@ export default function Tools({ user }) {
       setBlePrintPending(false);
     }
   }, [blePrintPending, qrPreviewTool]);
+
+  const printQrViaIosBridge = useCallback(() => {
+    if (!qrPreviewTool) return;
+    const qrText = qrPreviewTool.code || `tool-${qrPreviewTool.id}`;
+    const payload = buildIosPrintPayload(qrPreviewTool, qrText);
+    openIosPrintBridge(payload);
+    setQrPrintError('');
+    setQrPrintInfo('Открываем iOS Bridge для прямой печати…');
+  }, [qrPreviewTool]);
 
   const onScan = async (decoded) => {
     const code = String(decoded || '').trim();
@@ -1308,6 +1323,11 @@ export default function Tools({ user }) {
             {!bluetoothPrintAvailable && (
               <p className="text-zinc-500 text-2xs mt-3">{bluetoothPrintHint}</p>
             )}
+            {iosPrintBridgeAvailable && (
+              <p className="text-zinc-500 text-2xs mt-3">
+                Для прямой печати на iPhone используйте установленное приложение Sklad Print Bridge.
+              </p>
+            )}
             <div className="flex flex-wrap gap-2 mt-4">
               <button type="button" className="btn-primary text-sm" onClick={printQrPreview} disabled={blePrintPending}>
                 Распечатать QR
@@ -1316,10 +1336,20 @@ export default function Tools({ user }) {
                 type="button"
                 className="btn-secondary text-sm"
                 onClick={printQrViaBluetooth}
-                disabled={blePrintPending}
+                disabled={!bluetoothPrintAvailable || blePrintPending}
               >
                 {blePrintPending ? 'Отправка…' : 'Печать по Bluetooth'}
               </button>
+              {iosPrintBridgeAvailable && (
+                <button
+                  type="button"
+                  className="btn-secondary text-sm"
+                  onClick={printQrViaIosBridge}
+                  disabled={blePrintPending}
+                >
+                  Печать на iPhone
+                </button>
+              )}
               <button type="button" className="btn-ghost text-sm" onClick={closeQrPreview}>
                 Закрыть
               </button>
