@@ -3,6 +3,11 @@ import { QRCodeSVG } from 'qrcode.react';
 import { tools as toolsApi } from '../api';
 import QrScanner from '../components/QrScanner';
 import { useAutoRefreshOnVisible } from '../hooks/useAutoRefreshOnVisible';
+import {
+  canUseWebBluetoothPrinting,
+  getWebBluetoothUnavailableReason,
+  printQrSvgViaBluetooth,
+} from '../lib/bluetoothQrPrinter';
 
 function parseId(value) {
   const id = Number.parseInt(value, 10);
@@ -213,8 +218,12 @@ export default function Tools({ user }) {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [qrPreviewTool, setQrPreviewTool] = useState(null);
   const [qrPrintError, setQrPrintError] = useState('');
+  const [qrPrintInfo, setQrPrintInfo] = useState('');
+  const [blePrintPending, setBlePrintPending] = useState(false);
   const qrPreviewRef = useRef(null);
   const canDeleteTools = !!(user?.role === 'admin' || user?.can_tools_delete);
+  const bluetoothPrintAvailable = canUseWebBluetoothPrinting();
+  const bluetoothPrintHint = getWebBluetoothUnavailableReason();
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -498,11 +507,14 @@ export default function Tools({ user }) {
   const openQrPreview = (tool) => {
     setQrPreviewTool(tool);
     setQrPrintError('');
+    setQrPrintInfo('');
   };
 
   const closeQrPreview = () => {
     setQrPreviewTool(null);
     setQrPrintError('');
+    setQrPrintInfo('');
+    setBlePrintPending(false);
   };
 
   const printQrPreview = useCallback(() => {
@@ -513,6 +525,7 @@ export default function Tools({ user }) {
       return;
     }
     setQrPrintError('');
+    setQrPrintInfo('');
     const html = buildToolQrPrintHtml(qrPreviewTool, svg);
     const iframe = document.createElement('iframe');
     iframe.setAttribute('aria-hidden', 'true');
@@ -540,6 +553,26 @@ export default function Tools({ user }) {
       setQrPrintError('Не удалось открыть печать');
     }
   }, [qrPreviewTool]);
+
+  const printQrViaBluetooth = useCallback(async () => {
+    if (!qrPreviewTool || blePrintPending) return;
+    const svg = qrPreviewRef.current?.querySelector('svg');
+    if (!svg) {
+      setQrPrintError('Не удалось подготовить QR для Bluetooth-печати');
+      return;
+    }
+    setBlePrintPending(true);
+    setQrPrintError('');
+    setQrPrintInfo('');
+    try {
+      const result = await printQrSvgViaBluetooth(svg);
+      setQrPrintInfo(`QR отправлен на принтер: ${result.deviceName}`);
+    } catch (e) {
+      setQrPrintError(e?.message || 'Не удалось отправить QR на Bluetooth-принтер');
+    } finally {
+      setBlePrintPending(false);
+    }
+  }, [blePrintPending, qrPreviewTool]);
 
   const onScan = async (decoded) => {
     const code = String(decoded || '').trim();
@@ -1269,9 +1302,23 @@ export default function Tools({ user }) {
             {qrPrintError && (
               <p className="text-rose-300 text-2xs mt-3">{qrPrintError}</p>
             )}
-            <div className="flex gap-2 mt-4">
-              <button type="button" className="btn-primary text-sm" onClick={printQrPreview}>
+            {qrPrintInfo && (
+              <p className="text-emerald-300 text-2xs mt-3">{qrPrintInfo}</p>
+            )}
+            {!bluetoothPrintAvailable && (
+              <p className="text-zinc-500 text-2xs mt-3">{bluetoothPrintHint}</p>
+            )}
+            <div className="flex flex-wrap gap-2 mt-4">
+              <button type="button" className="btn-primary text-sm" onClick={printQrPreview} disabled={blePrintPending}>
                 Распечатать QR
+              </button>
+              <button
+                type="button"
+                className="btn-secondary text-sm"
+                onClick={printQrViaBluetooth}
+                disabled={blePrintPending}
+              >
+                {blePrintPending ? 'Отправка…' : 'Печать по Bluetooth'}
               </button>
               <button type="button" className="btn-ghost text-sm" onClick={closeQrPreview}>
                 Закрыть
