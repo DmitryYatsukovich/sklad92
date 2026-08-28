@@ -1,0 +1,19 @@
+<!-- Add into iOS target Info.plist -->
+<key>CFBundleURLTypes</key>
+<array>
+  <dict>
+    <key>CFBundleTypeRole</key>
+    <string>Editor</string>
+    <key>CFBundleURLName</key>
+    <string>ru.sklad92.printbridge</string>
+    <key>CFBundleURLSchemes</key>
+    <array>
+      <string>sklad92print</string>
+    </array>
+  </dict>
+</array>
+
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>Нужно для печати QR-этикеток на Bluetooth принтере.</string>
+<key>NSBluetoothPeripheralUsageDescription</key>
+<string>Нужно для подключения к Bluetooth принтеру.</string>
