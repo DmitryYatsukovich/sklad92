@@ -97,6 +97,7 @@ function escapeHtml(s) {
 }
 
 function buildToolQrPrintHtml(tool, svgEl) {
+  const toolName = String(tool?.name || '').trim() || 'Инструмент';
   const serialNumber = String(tool?.serial_number || '').trim() || '—';
   const svgClone = svgEl.cloneNode(true);
   svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
@@ -119,12 +120,34 @@ function buildToolQrPrintHtml(tool, svgEl) {
     .label {
       width: 29mm;
       height: 90mm;
-      padding: 2mm 1.6mm 1.6mm;
+      padding: 1.6mm 1.6mm 1.6mm;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: flex-start;
-      gap: 1.2mm;
+      gap: 0.9mm;
+      overflow: hidden;
+    }
+    .name-caption {
+      margin: 0;
+      width: 100%;
+      text-align: center;
+      font-size: 2.2mm;
+      line-height: 1.1;
+      color: #333;
+      letter-spacing: 0.08mm;
+      text-transform: uppercase;
+    }
+    .name {
+      margin: 0;
+      width: 100%;
+      text-align: center;
+      font-size: 3.1mm;
+      line-height: 1.08;
+      font-weight: 700;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      max-height: 11mm;
       overflow: hidden;
     }
     .qr {
@@ -167,6 +190,8 @@ function buildToolQrPrintHtml(tool, svgEl) {
 </head>
 <body>
   <div class="label">
+    <p class="name-caption">Инструмент</p>
+    <p class="name">${escapeHtml(toolName)}</p>
     <div class="qr">${svgClone.outerHTML}</div>
     <p class="serial-caption">Серийный номер</p>
     <p class="serial">${escapeHtml(serialNumber)}</p>
