@@ -110,15 +110,26 @@ function buildToolQrPrintHtml(tool, svgEl) {
   <style>
     @page { size: 29mm 90mm; margin: 0; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    html, body { margin: 0; padding: 0; width: 29mm; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 29mm;
+      height: 90mm;
+      overflow: hidden;
+    }
     body {
+      position: relative;
       font-family: system-ui, -apple-system, sans-serif;
       color: #111;
       background: #fff;
     }
     .label {
+      position: absolute;
+      top: 0;
+      left: 0;
       width: 29mm;
-      padding: 1mm;
+      height: 90mm;
+      padding: 0.8mm 1mm 0;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -127,6 +138,10 @@ function buildToolQrPrintHtml(tool, svgEl) {
       overflow: hidden;
       page-break-inside: avoid;
       break-inside: avoid;
+    }
+    @media print {
+      html, body { height: 90mm !important; }
+      .label { top: 0 !important; left: 0 !important; }
     }
     .qr {
       width: 27mm;
