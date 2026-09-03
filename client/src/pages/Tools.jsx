@@ -96,6 +96,68 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
+const LABEL_WIDTH_MM = 29;
+const LABEL_HEIGHT_MM = 89.5; // Немного меньше 90мм, чтобы iOS не дробил на 2 страницы из-за округления.
+const LABEL_PIXELS_PER_MM = 16;
+const QR_BOX_MM = 27.2;
+const QR_QUIET_ZONE_MM = 1.2;
+
+function mmToPx(mm) {
+  return Math.max(1, Math.round(mm * LABEL_PIXELS_PER_MM));
+}
+
+function loadImageFromSrc(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Image load failed'));
+    image.src = src;
+  });
+}
+
+function wrapTextLines(ctx, text, maxWidthPx, maxLines = 2) {
+  const source = String(text || '').trim();
+  if (!source) return [];
+  const words = source.split(/\s+/);
+  const lines = [];
+  let line = '';
+
+  const pushLine = (value) => {
+    if (!value) return;
+    if (lines.length < maxLines) lines.push(value);
+  };
+
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (ctx.measureText(next).width <= maxWidthPx) {
+      line = next;
+      continue;
+    }
+    if (!line) {
+      let chunk = '';
+      for (const ch of word) {
+        const test = chunk + ch;
+        if (ctx.measureText(test).width <= maxWidthPx) {
+          chunk = test;
+        } else {
+          pushLine(chunk);
+          chunk = ch;
+          if (lines.length >= maxLines) break;
+        }
+      }
+      line = chunk;
+      if (lines.length >= maxLines) break;
+      continue;
+    }
+    pushLine(line);
+    line = word;
+    if (lines.length >= maxLines) break;
+  }
+
+  if (lines.length < maxLines && line) pushLine(line);
+  return lines.slice(0, maxLines);
+}
+
 function svgToPngDataUrl(svgEl, sizePx = 1200) {
   return new Promise((resolve, reject) => {
     try {
@@ -133,7 +195,53 @@ function svgToPngDataUrl(svgEl, sizePx = 1200) {
   });
 }
 
-function buildToolQrPrintHtml(tool, qrImageSrc) {
+async function buildToolLabelImageDataUrl(tool, svgEl) {
+  const labelWidthPx = mmToPx(LABEL_WIDTH_MM);
+  const labelHeightPx = mmToPx(LABEL_HEIGHT_MM);
+  const canvas = document.createElement('canvas');
+  canvas.width = labelWidthPx;
+  canvas.height = labelHeightPx;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('Canvas context unavailable');
+
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const qrSourceUrl = await svgToPngDataUrl(svgEl, 1600);
+  const qrImage = await loadImageFromSrc(qrSourceUrl);
+  const qrBoxPx = mmToPx(QR_BOX_MM);
+  const qrInsetPx = mmToPx(QR_QUIET_ZONE_MM);
+  const qrContentPx = Math.max(1, qrBoxPx - (qrInsetPx * 2));
+  const qrX = Math.round((labelWidthPx - qrBoxPx) / 2);
+  const qrY = mmToPx(0.8);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(
+    qrImage,
+    qrX + qrInsetPx,
+    qrY + qrInsetPx,
+    qrContentPx,
+    qrContentPx,
+  );
+
+  const toolName = String(tool?.name || '').trim() || 'Инструмент';
+  const nameTopPx = qrY + qrBoxPx + mmToPx(1.0);
+  const horizontalPadPx = mmToPx(1.2);
+  const maxTextWidthPx = labelWidthPx - (horizontalPadPx * 2);
+  const fontSizePx = mmToPx(2.2);
+  const lineHeightPx = Math.round(fontSizePx * 1.12);
+  ctx.fillStyle = '#111';
+  ctx.font = `600 ${fontSizePx}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  const lines = wrapTextLines(ctx, toolName, maxTextWidthPx, 2);
+  lines.forEach((line, index) => {
+    ctx.fillText(line, Math.round(labelWidthPx / 2), nameTopPx + (lineHeightPx * index), maxTextWidthPx);
+  });
+
+  return canvas.toDataURL('image/png');
+}
+
+function buildToolQrPrintHtml(tool, labelImageSrc) {
   const toolName = String(tool?.name || '').trim() || 'Инструмент';
   return `<!DOCTYPE html>
 <html lang="ru">
@@ -141,63 +249,14 @@ function buildToolQrPrintHtml(tool, qrImageSrc) {
   <meta charset="utf-8" />
   <title>Этикетка — ${escapeHtml(toolName)}</title>
   <style>
-    @page { size: 29mm 90mm; margin: 0; }
+    @page { size: ${LABEL_WIDTH_MM}mm ${LABEL_HEIGHT_MM}mm; margin: 0; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    html, body { margin: 0; padding: 0; width: 29mm; background: #fff; }
-    body {
-      font-family: system-ui, -apple-system, sans-serif;
-      color: #111;
-    }
-    .label {
-      width: 29mm;
-      padding: 0.6mm 0.8mm 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-start;
-      gap: 0.8mm;
-      page-break-inside: avoid;
-      break-inside: avoid;
-    }
-    @media print {
-      html, body {
-        margin: 0 !important;
-        padding: 0 !important;
-      }
-    }
-    .qr {
-      width: 28mm;
-      height: 28mm;
-      border: 0;
-      border-radius: 0;
-      padding: 0;
-      background: #fff;
-    }
-    .qr img {
-      width: 28mm;
-      height: 28mm;
-      display: block;
-      image-rendering: -webkit-optimize-contrast;
-      image-rendering: pixelated;
-      object-fit: contain;
-    }
-    .name {
-      margin: 0;
-      width: 28mm;
-      text-align: center;
-      font-size: 2.2mm;
-      line-height: 1.15;
-      font-weight: 600;
-      word-break: break-word;
-      overflow-wrap: anywhere;
-    }
+    html, body { margin: 0; padding: 0; width: ${LABEL_WIDTH_MM}mm; height: ${LABEL_HEIGHT_MM}mm; overflow: hidden; background: #fff; }
+    .sheet { display: block; width: ${LABEL_WIDTH_MM}mm; height: ${LABEL_HEIGHT_MM}mm; object-fit: fill; margin: 0; padding: 0; }
   </style>
 </head>
 <body>
-  <div class="label">
-    <div class="qr"><img src="${qrImageSrc}" alt="QR" /></div>
-    <p class="name">${escapeHtml(toolName)}</p>
-  </div>
+  <img class="sheet" src="${labelImageSrc}" alt="${escapeHtml(toolName)}" />
 </body>
 </html>`;
 }
@@ -578,14 +637,14 @@ export default function Tools({ user }) {
       return;
     }
     setQrPrintError('');
-    let qrImageSrc = '';
+    let labelImageSrc = '';
     try {
-      qrImageSrc = await svgToPngDataUrl(svg, 1400);
+      labelImageSrc = await buildToolLabelImageDataUrl(qrPreviewTool, svg);
     } catch {
       setQrPrintError('Не удалось подготовить QR для печати');
       return;
     }
-    const html = buildToolQrPrintHtml(qrPreviewTool, qrImageSrc);
+    const html = buildToolQrPrintHtml(qrPreviewTool, labelImageSrc);
     const iframe = document.createElement('iframe');
     iframe.setAttribute('aria-hidden', 'true');
     iframe.style.cssText = 'position:fixed;left:-10000px;top:0;width:420px;height:920px;border:0;opacity:0;pointer-events:none;';
@@ -603,10 +662,17 @@ export default function Tools({ user }) {
       doc.write(html);
       doc.close();
       win.addEventListener('afterprint', cleanup, { once: true });
-      setTimeout(() => {
+      const runPrint = () => setTimeout(() => {
         win.focus();
         win.print();
-      }, 180);
+      }, 140);
+      const sheet = doc.querySelector('.sheet');
+      if (sheet && !sheet.complete) {
+        sheet.addEventListener('load', runPrint, { once: true });
+        sheet.addEventListener('error', () => setQrPrintError('Не удалось подготовить QR для печати'), { once: true });
+      } else {
+        runPrint();
+      }
     } catch {
       cleanup();
       setQrPrintError('Не удалось открыть печать');
