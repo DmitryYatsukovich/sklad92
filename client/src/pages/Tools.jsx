@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { QRCodeSVG } from 'qrcode.react';
+import { QRCodeCanvas, QRCodeSVG } from 'qrcode.react';
 import { tools as toolsApi } from '../api';
 import QrScanner from '../components/QrScanner';
 import { useAutoRefreshOnVisible } from '../hooks/useAutoRefreshOnVisible';
+import { buildIosPrintPayload, canUseIosPrintBridge, openIosPrintBridge } from '../lib/iosPrintBridge';
 
 function parseId(value) {
   const id = Number.parseInt(value, 10);
@@ -97,11 +98,11 @@ function escapeHtml(s) {
 }
 
 const LABEL_WIDTH_MM = 29;
-const LABEL_PAGE_HEIGHT_MM = 90;
-const LABEL_CONTENT_HEIGHT_MM = 88.8; // Контент немного ниже формата бумаги, чтобы Safari/iOS не добавлял пустую вторую страницу.
+const LABEL_PAGE_HEIGHT_MM = 89; // Занижаем страницу для iPhone/Safari, чтобы не появлялась пустая страница 2.
+const LABEL_CONTENT_HEIGHT_MM = 78; // Печатаем только верхнюю часть ленты, остальное остаётся пустым.
 const LABEL_PIXELS_PER_MM = 16;
-const QR_BOX_MM = 28.6;
-const QR_QUIET_ZONE_MM = 0.45;
+const QR_BOX_MM = 28.8;
+const QR_QUIET_ZONE_MM = 0.25;
 
 function mmToPx(mm) {
   return Math.max(1, Math.round(mm * LABEL_PIXELS_PER_MM));
@@ -114,6 +115,13 @@ function loadImageFromSrc(src) {
     image.onerror = () => reject(new Error('Image load failed'));
     image.src = src;
   });
+}
+
+function canvasToPngDataUrl(canvasEl) {
+  if (!canvasEl || typeof canvasEl.toDataURL !== 'function') {
+    throw new Error('Canvas unavailable');
+  }
+  return canvasEl.toDataURL('image/png');
 }
 
 function wrapTextLines(ctx, text, maxWidthPx, maxLines = 2) {
@@ -159,44 +167,7 @@ function wrapTextLines(ctx, text, maxWidthPx, maxLines = 2) {
   return lines.slice(0, maxLines);
 }
 
-function svgToPngDataUrl(svgEl, sizePx = 1200) {
-  return new Promise((resolve, reject) => {
-    try {
-      const svgText = new XMLSerializer().serializeToString(svgEl);
-      const svgBlob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
-      const objectUrl = URL.createObjectURL(svgBlob);
-      const image = new Image();
-      image.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = sizePx;
-          canvas.height = sizePx;
-          const ctx = canvas.getContext('2d', { willReadFrequently: true });
-          if (!ctx) throw new Error('Canvas context unavailable');
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.imageSmoothingEnabled = false;
-          ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-          const dataUrl = canvas.toDataURL('image/png');
-          URL.revokeObjectURL(objectUrl);
-          resolve(dataUrl);
-        } catch (error) {
-          URL.revokeObjectURL(objectUrl);
-          reject(error);
-        }
-      };
-      image.onerror = () => {
-        URL.revokeObjectURL(objectUrl);
-        reject(new Error('QR image conversion failed'));
-      };
-      image.src = objectUrl;
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-async function buildToolLabelImageDataUrl(tool, svgEl) {
+async function buildToolLabelImageDataUrl(tool, qrImageSrc) {
   const labelWidthPx = mmToPx(LABEL_WIDTH_MM);
   const labelHeightPx = mmToPx(LABEL_CONTENT_HEIGHT_MM);
   const canvas = document.createElement('canvas');
@@ -208,13 +179,12 @@ async function buildToolLabelImageDataUrl(tool, svgEl) {
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  const qrSourceUrl = await svgToPngDataUrl(svgEl, 1600);
-  const qrImage = await loadImageFromSrc(qrSourceUrl);
+  const qrImage = await loadImageFromSrc(qrImageSrc);
   const qrBoxPx = mmToPx(QR_BOX_MM);
   const qrInsetPx = mmToPx(QR_QUIET_ZONE_MM);
   const qrContentPx = Math.max(1, qrBoxPx - (qrInsetPx * 2));
   const qrX = Math.round((labelWidthPx - qrBoxPx) / 2);
-  const qrY = mmToPx(0.35);
+  const qrY = mmToPx(0.25);
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(
     qrImage,
@@ -660,15 +630,39 @@ export default function Tools({ user }) {
 
   const printQrPreview = useCallback(async () => {
     if (!qrPreviewTool) return;
-    const svg = qrPreviewRef.current?.querySelector('svg');
-    if (!svg) {
+    const qrCanvas = qrPreviewRef.current?.querySelector('canvas');
+    if (!qrCanvas) {
       setQrPrintError('Не удалось подготовить QR для печати');
       return;
     }
     setQrPrintError('');
+    const qrValue = qrPreviewTool.code || `tool-${qrPreviewTool.id}`;
+
+    // На iPhone системная печать Safari добавляет дату и номер страницы.
+    // Пробуем открыть native bridge; если не удалось — используем веб-печать как запасной вариант.
+    if (canUseIosPrintBridge()) {
+      let bridgeAppOpened = false;
+      const onVisibilityChange = () => {
+        if (document.visibilityState === 'hidden') bridgeAppOpened = true;
+      };
+      document.addEventListener('visibilitychange', onVisibilityChange);
+      try {
+        openIosPrintBridge(buildIosPrintPayload(qrPreviewTool, qrValue));
+        await new Promise((resolve) => setTimeout(resolve, 900));
+      } catch {
+        // fallback ниже
+      } finally {
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+      }
+      if (bridgeAppOpened) return;
+      setQrPrintError('Для iPhone без даты/страниц установите SkladPrintBridge. Выполняется обычная печать.');
+    }
+
+    let qrImageSrc = '';
     let labelImageSrc = '';
     try {
-      labelImageSrc = await buildToolLabelImageDataUrl(qrPreviewTool, svg);
+      qrImageSrc = canvasToPngDataUrl(qrCanvas);
+      labelImageSrc = await buildToolLabelImageDataUrl(qrPreviewTool, qrImageSrc);
     } catch {
       setQrPrintError('Не удалось подготовить QR для печати');
       return;
@@ -1430,7 +1424,7 @@ export default function Tools({ user }) {
             <p className="text-zinc-500 text-2xs mb-3">{qrPreviewTool.code}</p>
             <div className="flex justify-center">
               <div ref={qrPreviewRef} className="rounded-xl bg-white p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
-                <QRCodeSVG value={qrPreviewTool.code || `tool-${qrPreviewTool.id}`} size={260} level="M" />
+                <QRCodeCanvas value={qrPreviewTool.code || `tool-${qrPreviewTool.id}`} size={260} level="M" includeMargin={false} />
               </div>
             </div>
             {qrPrintError && (
