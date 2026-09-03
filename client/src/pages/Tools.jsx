@@ -101,7 +101,7 @@ const LABEL_WIDTH_MM = 29;
 const LABEL_PAGE_HEIGHT_MM = 89; // Занижаем страницу для iPhone/Safari, чтобы не появлялась пустая страница 2.
 const LABEL_CONTENT_HEIGHT_MM = 78; // Печатаем только верхнюю часть ленты, остальное остаётся пустым.
 const LABEL_PIXELS_PER_MM = 16;
-const QR_BOX_MM = 27.4; // Дополнительно уменьшаем QR для стабильной печати по ширине на ПК.
+const QR_BOX_MM = 26.9; // Ещё немного уменьшаем QR, чтобы гарантированно оставался запас по ширине.
 const QR_QUIET_ZONE_MM = 0.65; // Небольшой запас по краям, чтобы исключить подрезание крайних модулей.
 
 function mmToPx(mm) {
@@ -184,7 +184,7 @@ async function buildToolLabelImageDataUrl(tool, qrImageSrc) {
   const qrInsetPx = mmToPx(QR_QUIET_ZONE_MM);
   const qrContentPx = Math.max(1, qrBoxPx - (qrInsetPx * 2));
   const qrX = Math.round((labelWidthPx - qrBoxPx) / 2);
-  const qrY = mmToPx(0.25);
+  const qrY = mmToPx(0.9); // Опускаем QR чуть ниже относительно верхнего края этикетки.
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(
     qrImage,
