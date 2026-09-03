@@ -98,20 +98,19 @@ function escapeHtml(s) {
 
 function buildToolQrPrintHtml(tool, svgEl) {
   const toolName = String(tool?.name || '').trim() || 'Инструмент';
-  const serialNumber = String(tool?.serial_number || '').trim() || '—';
   const svgClone = svgEl.cloneNode(true);
   svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  if (!svgClone.getAttribute('width')) svgClone.setAttribute('width', '384');
-  if (!svgClone.getAttribute('height')) svgClone.setAttribute('height', '384');
+  if (!svgClone.getAttribute('width')) svgClone.setAttribute('width', '512');
+  if (!svgClone.getAttribute('height')) svgClone.setAttribute('height', '512');
   return `<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <title>Этикетка — ${escapeHtml(serialNumber)}</title>
+  <title>Этикетка — ${escapeHtml(toolName)}</title>
   <style>
     @page { size: 29mm 90mm; margin: 0; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    html, body { margin: 0; padding: 0; width: 29mm; height: 90mm; }
+    html, body { margin: 0; padding: 0; width: 29mm; }
     body {
       font-family: system-ui, -apple-system, sans-serif;
       color: #111;
@@ -119,70 +118,37 @@ function buildToolQrPrintHtml(tool, svgEl) {
     }
     .label {
       width: 29mm;
-      height: 90mm;
-      padding: 1.6mm 1.6mm 1.6mm;
+      padding: 1mm;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: flex-start;
-      gap: 0.9mm;
+      gap: 1.1mm;
       overflow: hidden;
-    }
-    .name-caption {
-      margin: 0;
-      width: 100%;
-      text-align: center;
-      font-size: 2.2mm;
-      line-height: 1.1;
-      color: #333;
-      letter-spacing: 0.08mm;
-      text-transform: uppercase;
-    }
-    .name {
-      margin: 0;
-      width: 100%;
-      text-align: center;
-      font-size: 3.1mm;
-      line-height: 1.08;
-      font-weight: 700;
-      word-break: break-word;
-      overflow-wrap: anywhere;
-      max-height: 11mm;
-      overflow: hidden;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }
     .qr {
-      width: 24.5mm;
-      height: 24.5mm;
-      border: 0.25mm solid #111;
-      border-radius: 1mm;
-      padding: 0.9mm;
+      width: 27mm;
+      height: 27mm;
+      border: 0;
+      border-radius: 0;
+      padding: 0;
       background: #fff;
     }
     .qr svg {
-      width: 100%;
-      height: 100%;
+      width: 27mm !important;
+      height: 27mm !important;
       display: block;
       shape-rendering: crispEdges;
     }
-    .serial-caption {
-      margin: 0.6mm 0 0;
-      width: 100%;
-      text-align: center;
-      font-size: 2.3mm;
-      line-height: 1.1;
-      color: #333;
-      letter-spacing: 0.1mm;
-      text-transform: uppercase;
-    }
-    .serial {
+    .name {
       margin: 0;
-      width: 100%;
+      width: 27mm;
       text-align: center;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 4.2mm;
-      line-height: 1.05;
-      font-weight: 700;
-      letter-spacing: 0.12mm;
+      font-size: 2.5mm;
+      line-height: 1.15;
+      font-weight: 600;
       word-break: break-word;
       overflow-wrap: anywhere;
     }
@@ -190,11 +156,8 @@ function buildToolQrPrintHtml(tool, svgEl) {
 </head>
 <body>
   <div class="label">
-    <p class="name-caption">Инструмент</p>
-    <p class="name">${escapeHtml(toolName)}</p>
     <div class="qr">${svgClone.outerHTML}</div>
-    <p class="serial-caption">Серийный номер</p>
-    <p class="serial">${escapeHtml(serialNumber)}</p>
+    <p class="name">${escapeHtml(toolName)}</p>
   </div>
 </body>
 </html>`;
