@@ -3,16 +3,6 @@ import { QRCodeSVG } from 'qrcode.react';
 import { tools as toolsApi } from '../api';
 import QrScanner from '../components/QrScanner';
 import { useAutoRefreshOnVisible } from '../hooks/useAutoRefreshOnVisible';
-import {
-  canUseWebBluetoothPrinting,
-  getWebBluetoothUnavailableReason,
-  printQrSvgViaBluetooth,
-} from '../lib/bluetoothQrPrinter';
-import {
-  buildIosPrintPayload,
-  canUseIosPrintBridge,
-  openIosPrintBridge,
-} from '../lib/iosPrintBridge';
 
 function parseId(value) {
   const id = Number.parseInt(value, 10);
@@ -107,42 +97,80 @@ function escapeHtml(s) {
 }
 
 function buildToolQrPrintHtml(tool, svgEl) {
+  const serialNumber = String(tool?.serial_number || '').trim() || '—';
   const svgClone = svgEl.cloneNode(true);
   svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  if (!svgClone.getAttribute('width')) svgClone.setAttribute('width', '280');
-  if (!svgClone.getAttribute('height')) svgClone.setAttribute('height', '280');
+  if (!svgClone.getAttribute('width')) svgClone.setAttribute('width', '384');
+  if (!svgClone.getAttribute('height')) svgClone.setAttribute('height', '384');
   return `<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <title>QR — ${escapeHtml(tool?.name || '')}</title>
+  <title>Этикетка — ${escapeHtml(serialNumber)}</title>
   <style>
-    * { box-sizing: border-box; }
+    @page { size: 29mm 90mm; margin: 0; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    html, body { margin: 0; padding: 0; width: 29mm; height: 90mm; }
     body {
-      margin: 0;
-      padding: 28px;
       font-family: system-ui, -apple-system, sans-serif;
       color: #111;
-      text-align: center;
+      background: #fff;
+    }
+    .label {
+      width: 29mm;
+      height: 90mm;
+      padding: 2mm 1.6mm 1.6mm;
       display: flex;
       flex-direction: column;
       align-items: center;
+      justify-content: flex-start;
+      gap: 1.2mm;
+      overflow: hidden;
     }
-    h1 { font-size: 20px; margin: 0 0 8px; }
-    .code { margin: 0 0 16px; color: #444; font-family: ui-monospace, monospace; font-size: 13px; }
     .qr {
-      border: 1px solid #ddd;
-      border-radius: 14px;
-      padding: 16px;
+      width: 24.5mm;
+      height: 24.5mm;
+      border: 0.25mm solid #111;
+      border-radius: 1mm;
+      padding: 0.9mm;
       background: #fff;
     }
-    .qr svg { width: 280px; height: 280px; display: block; }
+    .qr svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+      shape-rendering: crispEdges;
+    }
+    .serial-caption {
+      margin: 0.6mm 0 0;
+      width: 100%;
+      text-align: center;
+      font-size: 2.3mm;
+      line-height: 1.1;
+      color: #333;
+      letter-spacing: 0.1mm;
+      text-transform: uppercase;
+    }
+    .serial {
+      margin: 0;
+      width: 100%;
+      text-align: center;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 4.2mm;
+      line-height: 1.05;
+      font-weight: 700;
+      letter-spacing: 0.12mm;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
   </style>
 </head>
 <body>
-  <h1>${escapeHtml(tool?.name || 'Инструмент')}</h1>
-  <p class="code">${escapeHtml(tool?.code || '')}</p>
-  <div class="qr">${svgClone.outerHTML}</div>
+  <div class="label">
+    <div class="qr">${svgClone.outerHTML}</div>
+    <p class="serial-caption">Серийный номер</p>
+    <p class="serial">${escapeHtml(serialNumber)}</p>
+  </div>
 </body>
 </html>`;
 }
@@ -223,13 +251,8 @@ export default function Tools({ user }) {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [qrPreviewTool, setQrPreviewTool] = useState(null);
   const [qrPrintError, setQrPrintError] = useState('');
-  const [qrPrintInfo, setQrPrintInfo] = useState('');
-  const [blePrintPending, setBlePrintPending] = useState(false);
   const qrPreviewRef = useRef(null);
   const canDeleteTools = !!(user?.role === 'admin' || user?.can_tools_delete);
-  const bluetoothPrintAvailable = canUseWebBluetoothPrinting();
-  const bluetoothPrintHint = getWebBluetoothUnavailableReason();
-  const iosPrintBridgeAvailable = canUseIosPrintBridge();
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -513,14 +536,11 @@ export default function Tools({ user }) {
   const openQrPreview = (tool) => {
     setQrPreviewTool(tool);
     setQrPrintError('');
-    setQrPrintInfo('');
   };
 
   const closeQrPreview = () => {
     setQrPreviewTool(null);
     setQrPrintError('');
-    setQrPrintInfo('');
-    setBlePrintPending(false);
   };
 
   const printQrPreview = useCallback(() => {
@@ -531,7 +551,6 @@ export default function Tools({ user }) {
       return;
     }
     setQrPrintError('');
-    setQrPrintInfo('');
     const html = buildToolQrPrintHtml(qrPreviewTool, svg);
     const iframe = document.createElement('iframe');
     iframe.setAttribute('aria-hidden', 'true');
@@ -558,35 +577,6 @@ export default function Tools({ user }) {
       cleanup();
       setQrPrintError('Не удалось открыть печать');
     }
-  }, [qrPreviewTool]);
-
-  const printQrViaBluetooth = useCallback(async () => {
-    if (!qrPreviewTool || blePrintPending) return;
-    const svg = qrPreviewRef.current?.querySelector('svg');
-    if (!svg) {
-      setQrPrintError('Не удалось подготовить QR для Bluetooth-печати');
-      return;
-    }
-    setBlePrintPending(true);
-    setQrPrintError('');
-    setQrPrintInfo('');
-    try {
-      const result = await printQrSvgViaBluetooth(svg);
-      setQrPrintInfo(`QR отправлен на принтер: ${result.deviceName}`);
-    } catch (e) {
-      setQrPrintError(e?.message || 'Не удалось отправить QR на Bluetooth-принтер');
-    } finally {
-      setBlePrintPending(false);
-    }
-  }, [blePrintPending, qrPreviewTool]);
-
-  const printQrViaIosBridge = useCallback(() => {
-    if (!qrPreviewTool) return;
-    const qrText = qrPreviewTool.code || `tool-${qrPreviewTool.id}`;
-    const payload = buildIosPrintPayload(qrPreviewTool, qrText);
-    openIosPrintBridge(payload);
-    setQrPrintError('');
-    setQrPrintInfo('Открываем iOS Bridge для прямой печати…');
   }, [qrPreviewTool]);
 
   const onScan = async (decoded) => {
@@ -1317,39 +1307,10 @@ export default function Tools({ user }) {
             {qrPrintError && (
               <p className="text-rose-300 text-2xs mt-3">{qrPrintError}</p>
             )}
-            {qrPrintInfo && (
-              <p className="text-emerald-300 text-2xs mt-3">{qrPrintInfo}</p>
-            )}
-            {!bluetoothPrintAvailable && (
-              <p className="text-zinc-500 text-2xs mt-3">{bluetoothPrintHint}</p>
-            )}
-            {iosPrintBridgeAvailable && (
-              <p className="text-zinc-500 text-2xs mt-3">
-                Для прямой печати на iPhone используйте установленное приложение Sklad Print Bridge.
-              </p>
-            )}
             <div className="flex flex-wrap gap-2 mt-4">
-              <button type="button" className="btn-primary text-sm" onClick={printQrPreview} disabled={blePrintPending}>
+              <button type="button" className="btn-primary text-sm" onClick={printQrPreview}>
                 Распечатать QR
               </button>
-              <button
-                type="button"
-                className="btn-secondary text-sm"
-                onClick={printQrViaBluetooth}
-                disabled={!bluetoothPrintAvailable || blePrintPending}
-              >
-                {blePrintPending ? 'Отправка…' : 'Печать по Bluetooth'}
-              </button>
-              {iosPrintBridgeAvailable && (
-                <button
-                  type="button"
-                  className="btn-secondary text-sm"
-                  onClick={printQrViaIosBridge}
-                  disabled={blePrintPending}
-                >
-                  Печать на iPhone
-                </button>
-              )}
               <button type="button" className="btn-ghost text-sm" onClick={closeQrPreview}>
                 Закрыть
               </button>
