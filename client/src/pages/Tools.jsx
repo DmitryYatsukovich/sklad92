@@ -101,8 +101,8 @@ const LABEL_WIDTH_MM = 29;
 const LABEL_PAGE_HEIGHT_MM = 89; // Занижаем страницу для iPhone/Safari, чтобы не появлялась пустая страница 2.
 const LABEL_CONTENT_HEIGHT_MM = 78; // Печатаем только верхнюю часть ленты, остальное остаётся пустым.
 const LABEL_PIXELS_PER_MM = 16;
-const QR_BOX_MM = 27.9; // Чуть уменьшаем, чтобы QR гарантированно помещался по ширине на ПК-принтерах.
-const QR_QUIET_ZONE_MM = 0.55; // Добавляем безопасное поле от края, чтобы не обрезались крайние модули.
+const QR_BOX_MM = 27.4; // Дополнительно уменьшаем QR для стабильной печати по ширине на ПК.
+const QR_QUIET_ZONE_MM = 0.65; // Небольшой запас по краям, чтобы исключить подрезание крайних модулей.
 
 function mmToPx(mm) {
   return Math.max(1, Math.round(mm * LABEL_PIXELS_PER_MM));
