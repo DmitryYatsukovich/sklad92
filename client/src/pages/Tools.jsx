@@ -96,12 +96,45 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
-function buildToolQrPrintHtml(tool, svgEl) {
+function svgToPngDataUrl(svgEl, sizePx = 1200) {
+  return new Promise((resolve, reject) => {
+    try {
+      const svgText = new XMLSerializer().serializeToString(svgEl);
+      const svgBlob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+      const objectUrl = URL.createObjectURL(svgBlob);
+      const image = new Image();
+      image.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = sizePx;
+          canvas.height = sizePx;
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          if (!ctx) throw new Error('Canvas context unavailable');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/png');
+          URL.revokeObjectURL(objectUrl);
+          resolve(dataUrl);
+        } catch (error) {
+          URL.revokeObjectURL(objectUrl);
+          reject(error);
+        }
+      };
+      image.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('QR image conversion failed'));
+      };
+      image.src = objectUrl;
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function buildToolQrPrintHtml(tool, qrImageSrc) {
   const toolName = String(tool?.name || '').trim() || 'Инструмент';
-  const svgClone = svgEl.cloneNode(true);
-  svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  if (!svgClone.getAttribute('width')) svgClone.setAttribute('width', '512');
-  if (!svgClone.getAttribute('height')) svgClone.setAttribute('height', '512');
   return `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -110,58 +143,49 @@ function buildToolQrPrintHtml(tool, svgEl) {
   <style>
     @page { size: 29mm 90mm; margin: 0; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 29mm;
-      height: 90mm;
-      overflow: hidden;
-    }
+    html, body { margin: 0; padding: 0; width: 29mm; background: #fff; }
     body {
-      position: relative;
       font-family: system-ui, -apple-system, sans-serif;
       color: #111;
-      background: #fff;
     }
     .label {
-      position: absolute;
-      top: 0;
-      left: 0;
       width: 29mm;
-      height: 90mm;
-      padding: 0.8mm 1mm 0;
+      padding: 0.6mm 0.8mm 0;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: flex-start;
-      gap: 1.1mm;
-      overflow: hidden;
+      gap: 0.8mm;
       page-break-inside: avoid;
       break-inside: avoid;
     }
     @media print {
-      html, body { height: 90mm !important; }
-      .label { top: 0 !important; left: 0 !important; }
+      html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+      }
     }
     .qr {
-      width: 27mm;
-      height: 27mm;
+      width: 28mm;
+      height: 28mm;
       border: 0;
       border-radius: 0;
       padding: 0;
       background: #fff;
     }
-    .qr svg {
-      width: 27mm !important;
-      height: 27mm !important;
+    .qr img {
+      width: 28mm;
+      height: 28mm;
       display: block;
-      shape-rendering: crispEdges;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: pixelated;
+      object-fit: contain;
     }
     .name {
       margin: 0;
-      width: 27mm;
+      width: 28mm;
       text-align: center;
-      font-size: 2.5mm;
+      font-size: 2.2mm;
       line-height: 1.15;
       font-weight: 600;
       word-break: break-word;
@@ -171,7 +195,7 @@ function buildToolQrPrintHtml(tool, svgEl) {
 </head>
 <body>
   <div class="label">
-    <div class="qr">${svgClone.outerHTML}</div>
+    <div class="qr"><img src="${qrImageSrc}" alt="QR" /></div>
     <p class="name">${escapeHtml(toolName)}</p>
   </div>
 </body>
@@ -546,7 +570,7 @@ export default function Tools({ user }) {
     setQrPrintError('');
   };
 
-  const printQrPreview = useCallback(() => {
+  const printQrPreview = useCallback(async () => {
     if (!qrPreviewTool) return;
     const svg = qrPreviewRef.current?.querySelector('svg');
     if (!svg) {
@@ -554,10 +578,17 @@ export default function Tools({ user }) {
       return;
     }
     setQrPrintError('');
-    const html = buildToolQrPrintHtml(qrPreviewTool, svg);
+    let qrImageSrc = '';
+    try {
+      qrImageSrc = await svgToPngDataUrl(svg, 1400);
+    } catch {
+      setQrPrintError('Не удалось подготовить QR для печати');
+      return;
+    }
+    const html = buildToolQrPrintHtml(qrPreviewTool, qrImageSrc);
     const iframe = document.createElement('iframe');
     iframe.setAttribute('aria-hidden', 'true');
-    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    iframe.style.cssText = 'position:fixed;left:-10000px;top:0;width:420px;height:920px;border:0;opacity:0;pointer-events:none;';
     document.body.appendChild(iframe);
     const win = iframe.contentWindow;
     if (!win) {
