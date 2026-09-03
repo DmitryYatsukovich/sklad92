@@ -184,7 +184,7 @@ async function buildToolLabelImageDataUrl(tool, qrImageSrc) {
   const qrInsetPx = mmToPx(QR_QUIET_ZONE_MM);
   const qrContentPx = Math.max(1, qrBoxPx - (qrInsetPx * 2));
   const qrX = Math.round((labelWidthPx - qrBoxPx) / 2);
-  const qrY = mmToPx(1.6); // Дополнительно опускаем QR ниже по запросу для печати с компьютера.
+  const qrY = mmToPx(4); // Дополнительно опускаем QR ниже по запросу для печати с компьютера.
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(
     qrImage,
