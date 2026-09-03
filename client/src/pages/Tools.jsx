@@ -97,10 +97,11 @@ function escapeHtml(s) {
 }
 
 const LABEL_WIDTH_MM = 29;
-const LABEL_HEIGHT_MM = 89.5; // Немного меньше 90мм, чтобы iOS не дробил на 2 страницы из-за округления.
+const LABEL_PAGE_HEIGHT_MM = 90;
+const LABEL_CONTENT_HEIGHT_MM = 88.8; // Контент немного ниже формата бумаги, чтобы Safari/iOS не добавлял пустую вторую страницу.
 const LABEL_PIXELS_PER_MM = 16;
-const QR_BOX_MM = 27.2;
-const QR_QUIET_ZONE_MM = 1.2;
+const QR_BOX_MM = 28.6;
+const QR_QUIET_ZONE_MM = 0.45;
 
 function mmToPx(mm) {
   return Math.max(1, Math.round(mm * LABEL_PIXELS_PER_MM));
@@ -197,7 +198,7 @@ function svgToPngDataUrl(svgEl, sizePx = 1200) {
 
 async function buildToolLabelImageDataUrl(tool, svgEl) {
   const labelWidthPx = mmToPx(LABEL_WIDTH_MM);
-  const labelHeightPx = mmToPx(LABEL_HEIGHT_MM);
+  const labelHeightPx = mmToPx(LABEL_CONTENT_HEIGHT_MM);
   const canvas = document.createElement('canvas');
   canvas.width = labelWidthPx;
   canvas.height = labelHeightPx;
@@ -213,7 +214,7 @@ async function buildToolLabelImageDataUrl(tool, svgEl) {
   const qrInsetPx = mmToPx(QR_QUIET_ZONE_MM);
   const qrContentPx = Math.max(1, qrBoxPx - (qrInsetPx * 2));
   const qrX = Math.round((labelWidthPx - qrBoxPx) / 2);
-  const qrY = mmToPx(0.8);
+  const qrY = mmToPx(0.35);
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(
     qrImage,
@@ -249,14 +250,42 @@ function buildToolQrPrintHtml(tool, labelImageSrc) {
   <meta charset="utf-8" />
   <title>Этикетка — ${escapeHtml(toolName)}</title>
   <style>
-    @page { size: ${LABEL_WIDTH_MM}mm ${LABEL_HEIGHT_MM}mm; margin: 0; }
+    @page { size: ${LABEL_WIDTH_MM}mm ${LABEL_PAGE_HEIGHT_MM}mm; margin: 0; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    html, body { margin: 0; padding: 0; width: ${LABEL_WIDTH_MM}mm; height: ${LABEL_HEIGHT_MM}mm; overflow: hidden; background: #fff; }
-    .sheet { display: block; width: ${LABEL_WIDTH_MM}mm; height: ${LABEL_HEIGHT_MM}mm; object-fit: fill; margin: 0; padding: 0; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: ${LABEL_WIDTH_MM}mm;
+      background: #fff;
+      font-size: 0;
+      line-height: 0;
+      overflow: hidden;
+    }
+    .page {
+      width: ${LABEL_WIDTH_MM}mm;
+      height: ${LABEL_CONTENT_HEIGHT_MM}mm;
+      overflow: hidden;
+      margin: 0;
+      padding: 0;
+      break-inside: avoid;
+      page-break-inside: avoid;
+      break-after: avoid-page;
+      page-break-after: avoid;
+    }
+    .sheet {
+      display: block;
+      width: ${LABEL_WIDTH_MM}mm;
+      height: ${LABEL_CONTENT_HEIGHT_MM}mm;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      object-fit: fill;
+      vertical-align: top;
+    }
   </style>
 </head>
 <body>
-  <img class="sheet" src="${labelImageSrc}" alt="${escapeHtml(toolName)}" />
+  <div class="page"><img class="sheet" src="${labelImageSrc}" alt="${escapeHtml(toolName)}" /></div>
 </body>
 </html>`;
 }
