@@ -20,7 +20,7 @@ function parseId(v) {
 router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req, res) => {
   try {
     const [
-      objects, warehouses, racks, categories,
+      objects, warehouses, racks, categories, systems, organizations,
       workEntrances, workFloors, workApartments, workRooms, toolTypes,
     ] = await Promise.all([
       pool.query('SELECT id, name FROM warehouse_objects ORDER BY name'),
@@ -33,6 +33,8 @@ router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req,
          FROM warehouse_racks r JOIN warehouses w ON w.id = r.warehouse_id ORDER BY w.name, r.name`
       ),
       pool.query('SELECT id, name FROM material_categories ORDER BY name'),
+      pool.query('SELECT id, name FROM material_systems ORDER BY name'),
+      pool.query('SELECT id, name FROM organizations ORDER BY name'),
       pool.query(
         `SELECT e.id, e.name, e.object_id, o.name AS object_name
          FROM work_entrances e
@@ -73,6 +75,8 @@ router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req,
       warehouses: warehouses.rows,
       racks: racks.rows,
       categories: categories.rows,
+      systems: systems.rows,
+      organizations: organizations.rows,
       work_entrances: workEntrances.rows,
       work_floors: workFloors.rows,
       work_apartments: workApartments.rows,
@@ -354,6 +358,54 @@ router.delete('/categories/:id', requirePermission('can_settings_categories'), a
   const used = await pool.query('SELECT 1 FROM materials WHERE category_id = $1 LIMIT 1', [id]);
   if (used.rowCount) return res.status(400).json({ error: 'Категория используется в материалах' });
   const r = await pool.query('DELETE FROM material_categories WHERE id = $1 RETURNING id', [id]);
+  if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
+  res.json({ ok: true });
+});
+
+// ——— Системы ———
+router.get('/systems', requirePermission('can_settings_categories'), async (_req, res) => {
+  const r = await pool.query('SELECT id, name, created_at FROM material_systems ORDER BY name');
+  res.json(r.rows);
+});
+
+router.post('/systems', requirePermission('can_settings_categories'), async (req, res) => {
+  const name = (req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Укажите название системы' });
+  try {
+    const r = await pool.query(
+      'INSERT INTO material_systems (name) VALUES ($1) RETURNING id, name, created_at',
+      [name],
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'Такая система уже есть' });
+    throw e;
+  }
+});
+
+router.put('/systems/:id', requirePermission('can_settings_categories'), async (req, res) => {
+  const id = parseId(req.params.id);
+  const name = (req.body?.name || '').trim();
+  if (!id || !name) return res.status(400).json({ error: 'Неверные данные' });
+  try {
+    const r = await pool.query(
+      'UPDATE material_systems SET name = $1 WHERE id = $2 RETURNING id, name, created_at',
+      [name, id],
+    );
+    if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
+    res.json(r.rows[0]);
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'Такое название уже есть' });
+    throw e;
+  }
+});
+
+router.delete('/systems/:id', requirePermission('can_settings_categories'), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Неверный id' });
+  const used = await pool.query('SELECT 1 FROM materials WHERE system_id = $1 LIMIT 1', [id]);
+  if (used.rowCount) return res.status(400).json({ error: 'Система используется в материалах' });
+  const r = await pool.query('DELETE FROM material_systems WHERE id = $1 RETURNING id', [id]);
   if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
   res.json({ ok: true });
 });

@@ -93,6 +93,36 @@ export default function MaterialLocationFields({ catalog, form, setForm, showCat
             </select>
           </div>
         )}
+        {showCategory && (
+          <div>
+            <label className="label">Система</label>
+            <select
+              value={form.system_id || ''}
+              onChange={(e) => setForm((f) => ({ ...f, system_id: e.target.value }))}
+              className={selectCls}
+            >
+              <option value="">— Не указана —</option>
+              {(catalog?.systems || []).map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {showCategory && (
+          <div>
+            <label className="label">Организация</label>
+            <select
+              value={form.organization_id || ''}
+              onChange={(e) => setForm((f) => ({ ...f, organization_id: e.target.value }))}
+              className={selectCls}
+            >
+              <option value="">— Не указана —</option>
+              {(catalog?.organizations || []).map((o) => (
+                <option key={o.id} value={o.id}>{o.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
       {!catalog?.objects?.length && (
         <p className="text-amber-400/90 text-xs mt-2">

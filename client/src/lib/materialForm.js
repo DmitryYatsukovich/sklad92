@@ -10,6 +10,8 @@ export const emptyMaterialForm = () => ({
   warehouse_id: '',
   rack_id: '',
   category_id: '',
+  system_id: '',
+  organization_id: '',
 });
 
 export function materialToForm(m) {
@@ -24,6 +26,8 @@ export function materialToForm(m) {
     warehouse_id: m.warehouse_id ? String(m.warehouse_id) : '',
     rack_id: m.rack_id ? String(m.rack_id) : '',
     category_id: m.category_id ? String(m.category_id) : '',
+    system_id: m.system_id ? String(m.system_id) : '',
+    organization_id: m.organization_id ? String(m.organization_id) : '',
   };
 }
 
@@ -146,6 +150,8 @@ export function formToPayload(form, { includeQuantity = false, includePartLabel 
     warehouse_id: form.warehouse_id || null,
     rack_id: form.rack_id || null,
     category_id: form.category_id || null,
+    system_id: form.system_id || null,
+    organization_id: form.organization_id || null,
   };
   if (includeQuantity) body.quantity = parseFloat(form.quantity) || 0;
   if (includePartLabel && form.part_label != null) {

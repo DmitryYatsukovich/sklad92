@@ -15,6 +15,7 @@ const MAIN_TABS = [
   { id: 'organizations', label: 'Организации', perm: SETTINGS_TAB_PERMISSIONS.organizations },
   { id: 'warehouses', label: 'Склады', perm: SETTINGS_TAB_PERMISSIONS.warehouses },
   { id: 'categories', label: 'Категории', perm: SETTINGS_TAB_PERMISSIONS.categories },
+  { id: 'systems', label: 'Система', perm: SETTINGS_TAB_PERMISSIONS.systems },
   { id: 'work', label: 'Место проведения работ', perm: SETTINGS_TAB_PERMISSIONS.work },
   { id: 'tools', label: 'Виды инструмента', perm: SETTINGS_TAB_PERMISSIONS.tools },
 ];
@@ -37,6 +38,8 @@ const EMPTY_CATALOG = {
   warehouses: [],
   racks: [],
   categories: [],
+  systems: [],
+  organizations: [],
   work_entrances: [],
   work_floors: [],
   work_apartments: [],
@@ -61,6 +64,8 @@ function normalizeCatalog(value) {
     warehouses: asArrayOfObjects(safe.warehouses),
     racks: asArrayOfObjects(safe.racks),
     categories: asArrayOfObjects(safe.categories),
+    systems: asArrayOfObjects(safe.systems),
+    organizations: asArrayOfObjects(safe.organizations),
     work_entrances: asArrayOfObjects(safe.work_entrances),
     work_floors: asArrayOfObjects(safe.work_floors),
     work_apartments: asArrayOfObjects(safe.work_apartments),
@@ -210,6 +215,7 @@ export default function Settings({ user }) {
         _extra: r.warehouse_name || catalog.warehouses.find((w) => w.id === r.warehouse_id)?.name,
       }));
     }
+    if (tab === 'systems') return catalog.systems.map((s) => ({ ...s }));
     if (tab === 'tools') return catalog.tool_types.map((t) => ({ ...t }));
     if (tab === 'categories') return catalog.categories.map((c) => ({ ...c }));
 
@@ -264,6 +270,9 @@ export default function Settings({ user }) {
       } else if (tab === 'categories') {
         if (editing) await settingsApi.categories.update(editing.id, { name: n });
         else await settingsApi.categories.create({ name: n });
+      } else if (tab === 'systems') {
+        if (editing) await settingsApi.systems.update(editing.id, { name: n });
+        else await settingsApi.systems.create({ name: n });
       } else if (tab === 'tools') {
         if (editing) await settingsApi.toolTypes.update(editing.id, { name: n });
         else await settingsApi.toolTypes.create({ name: n });
@@ -315,6 +324,7 @@ export default function Settings({ user }) {
       else if (effectiveWarehouseTab === 'warehouses') await settingsApi.warehouses.delete(row.id);
       else if (effectiveWarehouseTab === 'storage') await settingsApi.racks.delete(row.id);
       else if (tab === 'categories') await settingsApi.categories.delete(row.id);
+      else if (tab === 'systems') await settingsApi.systems.delete(row.id);
       else if (tab === 'tools') await settingsApi.toolTypes.delete(row.id);
       else if (effectiveWorkTab === 'entrances') await settingsApi.workEntrances.delete(row.id);
       else if (effectiveWorkTab === 'floors') await settingsApi.workFloors.delete(row.id);
@@ -343,6 +353,7 @@ export default function Settings({ user }) {
       const what = labels[effectiveWarehouseTab] || 'запись';
       return editing ? `Редактирование: ${what}` : `Добавить ${what}`;
     }
+    if (tab === 'systems') return editing ? 'Редактирование: система' : 'Добавить систему';
     if (tab === 'tools') return editing ? 'Редактирование: вид инструмента' : 'Добавить вид инструмента';
     if (tab !== 'work') return editing ? 'Редактирование' : 'Добавить';
     const labels = {
@@ -462,7 +473,7 @@ export default function Settings({ user }) {
       <div>
         <h2 className="page-title">Настройка</h2>
         <p className="text-zinc-400 text-sm mt-1">
-          Справочники склада и мест проведения работ: склады и места хранения, категории; объекты, подъезды, этажи, квартиры и помещения — во вкладке «Место проведения работ».
+          Справочники склада и мест проведения работ: склады и места хранения, категории и системы; объекты, подъезды, этажи, квартиры и помещения — во вкладке «Место проведения работ».
         </p>
       </div>
 

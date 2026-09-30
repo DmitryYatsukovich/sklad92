@@ -95,7 +95,14 @@ function ThWithSum({ label, column, sortBy, sortDir, onSort, sum, sumClassName =
 
 export default function Warehouse({ user }) {
   const [list, setList] = useState([]);
-  const [catalog, setCatalog] = useState({ objects: [], warehouses: [], racks: [], categories: [] });
+  const [catalog, setCatalog] = useState({
+    objects: [],
+    warehouses: [],
+    racks: [],
+    categories: [],
+    systems: [],
+    organizations: [],
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showAdd, setShowAdd] = useState(false);
@@ -1305,8 +1312,28 @@ export default function Warehouse({ user }) {
                   </button>
                 </th>
                 <th>
-                  <button type="button" onClick={() => toggleSort('location')} className="sort-btn">
-                    Место <SortIcon column="location" />
+                  <button type="button" onClick={() => toggleSort('object_name')} className="sort-btn">
+                    Объект <SortIcon column="object_name" />
+                  </button>
+                </th>
+                <th>
+                  <button type="button" onClick={() => toggleSort('warehouse_name')} className="sort-btn">
+                    Склад <SortIcon column="warehouse_name" />
+                  </button>
+                </th>
+                <th>
+                  <button type="button" onClick={() => toggleSort('rack_name')} className="sort-btn">
+                    Стеллаж <SortIcon column="rack_name" />
+                  </button>
+                </th>
+                <th>
+                  <button type="button" onClick={() => toggleSort('system_name')} className="sort-btn">
+                    Система <SortIcon column="system_name" />
+                  </button>
+                </th>
+                <th>
+                  <button type="button" onClick={() => toggleSort('organization_name')} className="sort-btn">
+                    Организация <SortIcon column="organization_name" />
                   </button>
                 </th>
                 <th>
@@ -1443,11 +1470,20 @@ export default function Warehouse({ user }) {
                           </>
                         )}
                       </td>
-                      <td
-                        className="text-zinc-500 max-w-[12rem] truncate text-2xs"
-                        title={materialRowLocation(row, { parts: isGroup && !isChild ? childParts : undefined })}
-                      >
-                        {materialRowLocation(row, { parts: isGroup && !isChild ? childParts : undefined })}
+                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.object_name || ''}>
+                        {row.object_name || '—'}
+                      </td>
+                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.warehouse_name || ''}>
+                        {row.warehouse_name || '—'}
+                      </td>
+                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.rack_name || ''}>
+                        {row.rack_name || '—'}
+                      </td>
+                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.system_name || ''}>
+                        {row.system_name || '—'}
+                      </td>
+                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.organization_name || ''}>
+                        {row.organization_name || '—'}
                       </td>
                       <td className="text-zinc-500 truncate max-w-[5rem]" title={row.category_name || ''}>
                         {row.category_name || '—'}
@@ -1513,7 +1549,7 @@ export default function Warehouse({ user }) {
                       <tr className="bg-zinc-900/50">
                         <td />
                         <td />
-                        <td colSpan={10} className="text-2xs text-zinc-500 py-2 pl-4">
+                        <td colSpan={15} className="text-2xs text-zinc-500 py-2 pl-4">
                           Загрузка частей…
                         </td>
                       </tr>
