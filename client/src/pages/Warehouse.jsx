@@ -686,6 +686,43 @@ export default function Warehouse({ user }) {
     return items;
   }, [filteredList, sortBy, sortDir]);
 
+  const knownMaterialNames = useMemo(() => {
+    const byLower = new Map();
+    for (const row of displayList) {
+      const name = String(row?.name || '').trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (!byLower.has(key)) byLower.set(key, name);
+    }
+    return Array.from(byLower.values()).sort((a, b) => a.localeCompare(b, 'ru'));
+  }, [displayList]);
+
+  const materialNameSuggestions = useMemo(() => {
+    if (editing || !showAdd) return [];
+    const query = String(form.name || '').trim().toLowerCase();
+    if (!query) return [];
+    const matched = knownMaterialNames.filter((name) => {
+      const lower = name.toLowerCase();
+      return lower.includes(query) && lower !== query;
+    });
+    matched.sort((a, b) => {
+      const aStarts = a.toLowerCase().startsWith(query) ? 0 : 1;
+      const bStarts = b.toLowerCase().startsWith(query) ? 0 : 1;
+      if (aStarts !== bStarts) return aStarts - bStarts;
+      return a.localeCompare(b, 'ru');
+    });
+    return matched.slice(0, 8);
+  }, [editing, showAdd, form.name, knownMaterialNames]);
+
+  const applyMaterialName = (value) => {
+    const next = String(value || '');
+    setForm((f) => ({ ...f, name: next }));
+    if (splitEnabled) {
+      setSplitParts((prev) => syncSplitPartLabels(prev, next));
+      setSplitSaved(false);
+    }
+  };
+
   const totals = useMemo(() => {
     let quantity = 0;
     let price = 0;
@@ -1613,18 +1650,25 @@ export default function Warehouse({ user }) {
                 <input
                   type="text"
                   value={form.name}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setForm((f) => ({ ...f, name: v }));
-                    if (splitEnabled) {
-                      setSplitParts((prev) => syncSplitPartLabels(prev, v));
-                      setSplitSaved(false);
-                    }
-                  }}
+                  onChange={(e) => applyMaterialName(e.target.value)}
                   className="input"
                   required
                   disabled={editing && isMaterialPart(editing)}
                 />
+                {!editing && materialNameSuggestions.length > 0 && (
+                  <div className="mt-2 rounded-lg border border-white/10 bg-surface-900/95 overflow-hidden">
+                    {materialNameSuggestions.map((suggestedName) => (
+                      <button
+                        key={suggestedName}
+                        type="button"
+                        onClick={() => applyMaterialName(suggestedName)}
+                        className="block w-full px-3 py-2 text-left text-sm text-zinc-200 hover:bg-white/10"
+                      >
+                        {suggestedName}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {editing && isMaterialPart(editing) && (
                   <p className="text-2xs text-zinc-500 mt-1">Наименование общее для всех частей материала</p>
                 )}
