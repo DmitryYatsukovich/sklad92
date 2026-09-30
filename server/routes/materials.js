@@ -46,17 +46,21 @@ const upload = multer({
 });
 
 async function loadCatalog(client) {
-  const [objects, warehouses, racks, categories] = await Promise.all([
+  const [objects, warehouses, racks, categories, systems, organizations] = await Promise.all([
     client.query('SELECT id, name FROM warehouse_objects ORDER BY name'),
     client.query('SELECT id, name, object_id FROM warehouses ORDER BY name'),
     client.query('SELECT id, name, warehouse_id FROM warehouse_racks ORDER BY name'),
     client.query('SELECT id, name FROM material_categories ORDER BY name'),
+    client.query('SELECT id, name FROM material_systems ORDER BY name'),
+    client.query('SELECT id, name FROM organizations ORDER BY name'),
   ]);
   return {
     objects: objects.rows,
     warehouses: warehouses.rows,
     racks: racks.rows,
     categories: categories.rows,
+    systems: systems.rows,
+    organizations: organizations.rows,
   };
 }
 
@@ -102,6 +106,27 @@ async function validateLocation(client, { object_id, warehouse_id, rack_id }) {
   return { object_id: null, warehouse_id: null, rack_id: null };
 }
 
+async function validateMaterialRefs(client, { category_id, system_id, organization_id }) {
+  const categoryId = parseId(category_id);
+  const systemId = parseId(system_id);
+  const organizationId = parseId(organization_id);
+
+  if (categoryId) {
+    const cat = (await client.query('SELECT id FROM material_categories WHERE id = $1', [categoryId])).rows[0];
+    if (!cat) return { error: 'Категория не найдена' };
+  }
+  if (systemId) {
+    const sys = (await client.query('SELECT id FROM material_systems WHERE id = $1', [systemId])).rows[0];
+    if (!sys) return { error: 'Система не найдена' };
+  }
+  if (organizationId) {
+    const org = (await client.query('SELECT id FROM organizations WHERE id = $1', [organizationId])).rows[0];
+    if (!org) return { error: 'Организация не найдена' };
+  }
+
+  return { categoryId, systemId, organizationId };
+}
+
 function generateCode() {
   return 'MAT-' + Date.now().toString(36).toUpperCase() + '-' + crypto.randomBytes(4).toString('hex').toUpperCase();
 }
@@ -129,19 +154,19 @@ async function fetchMaterialRow(client, id) {
 
 async function insertMaterial(client, {
   code, name, unit, price, production_price, quantity,
-  object_id, warehouse_id, rack_id, category_id,
+  object_id, warehouse_id, rack_id, category_id, system_id, organization_id,
   parent_material_id, part_index, part_label,
 }) {
   const ins = await client.query(
     `INSERT INTO materials (
        code, name, unit, price, production_price, quantity,
-       object_id, warehouse_id, rack_id, category_id,
+       object_id, warehouse_id, rack_id, category_id, system_id, organization_id,
        parent_material_id, part_index, part_label
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
      RETURNING id`,
     [
       code, name.trim(), (unit || 'шт').trim(), price, production_price, quantity,
-      object_id, warehouse_id, rack_id, category_id,
+      object_id, warehouse_id, rack_id, category_id, system_id, organization_id,
       parent_material_id || null, part_index ?? null, part_label || null,
     ],
   );
@@ -200,7 +225,7 @@ router.get('/:id/parts', requirePermission('can_warehouse'), async (req, res) =>
 router.post('/', requirePermission('can_warehouse'), async (req, res) => {
   const {
     name, unit, price, production_price, quantity,
-    object_id, warehouse_id, rack_id, category_id,
+    object_id, warehouse_id, rack_id, category_id, system_id, organization_id,
     parts,
   } = req.body || {};
   if (!name?.trim()) {
@@ -215,14 +240,12 @@ router.post('/', requirePermission('can_warehouse'), async (req, res) => {
       const priceVal = parseFloat(price) || 0;
       const prodPrice = parseFloat(production_price) || 0;
       const unitVal = (unit || 'шт').trim();
-      const catId = parseId(category_id);
-      if (catId) {
-        const cat = (await client.query('SELECT id FROM material_categories WHERE id = $1', [catId])).rows[0];
-        if (!cat) {
-          await client.query('ROLLBACK');
-          return res.status(400).json({ error: 'Категория не найдена' });
-        }
+      const refs = await validateMaterialRefs(client, { category_id, system_id, organization_id });
+      if (refs.error) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: refs.error });
       }
+      const { categoryId, systemId, organizationId } = refs;
 
       let totalQty = 0;
       const normalized = [];
@@ -261,7 +284,9 @@ router.post('/', requirePermission('can_warehouse'), async (req, res) => {
         object_id: null,
         warehouse_id: null,
         rack_id: null,
-        category_id: catId,
+        category_id: categoryId,
+        system_id: systemId,
+        organization_id: organizationId,
       });
 
       const createdParts = [];
@@ -278,7 +303,9 @@ router.post('/', requirePermission('can_warehouse'), async (req, res) => {
           object_id: p.loc.object_id,
           warehouse_id: p.loc.warehouse_id,
           rack_id: p.loc.rack_id,
-          category_id: catId,
+          category_id: categoryId,
+          system_id: systemId,
+          organization_id: organizationId,
           parent_material_id: parentId,
           part_index: i + 1,
           part_label: p.part_label,
@@ -315,11 +342,11 @@ router.post('/', requirePermission('can_warehouse'), async (req, res) => {
     const loc = await validateLocation(client, { object_id, warehouse_id, rack_id });
     if (loc.error) return res.status(400).json({ error: loc.error });
 
-    const catId = parseId(category_id);
-    if (catId) {
-      const cat = (await client.query('SELECT id FROM material_categories WHERE id = $1', [catId])).rows[0];
-      if (!cat) return res.status(400).json({ error: 'Категория не найдена' });
+    const refs = await validateMaterialRefs(client, { category_id, system_id, organization_id });
+    if (refs.error) {
+      return res.status(400).json({ error: refs.error });
     }
+    const { categoryId, systemId, organizationId } = refs;
 
     const qty = parseFloat(quantity) || 0;
     const priceVal = parseFloat(price) || 0;
@@ -334,7 +361,9 @@ router.post('/', requirePermission('can_warehouse'), async (req, res) => {
       production_price: prodPrice,
       quantity: qty,
       ...loc,
-      category_id: catId,
+      category_id: categoryId,
+      system_id: systemId,
+      organization_id: organizationId,
     });
     if (qty > 0) {
       await logQuantityChange(client, {
@@ -362,7 +391,7 @@ router.post('/:id/split', requirePermission('can_warehouse'), async (req, res) =
 
   const {
     parts,
-    name, unit, price, production_price, category_id,
+    name, unit, price, production_price, category_id, system_id, organization_id,
   } = req.body || {};
   const splitParts = Array.isArray(parts) ? parts : [];
   if (splitParts.length < 1) {
@@ -373,7 +402,7 @@ router.post('/:id/split', requirePermission('can_warehouse'), async (req, res) =
   try {
     await client.query('BEGIN');
     const row = (await client.query(
-      `SELECT id, parent_material_id, quantity, name, unit, price, production_price, category_id
+      `SELECT id, parent_material_id, quantity, name, unit, price, production_price, category_id, system_id, organization_id
        FROM materials WHERE id = $1 FOR UPDATE`,
       [id],
     )).rows[0];
@@ -411,16 +440,25 @@ router.post('/:id/split', requirePermission('can_warehouse'), async (req, res) =
       return res.status(400).json({ error: 'Укажите наименование' });
     }
 
-    const catId = category_id === undefined
+    const categoryIdInput = category_id === undefined
       ? row.category_id
       : (category_id === null || category_id === '' ? null : parseId(category_id));
-    if (catId) {
-      const cat = (await client.query('SELECT id FROM material_categories WHERE id = $1', [catId])).rows[0];
-      if (!cat) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ error: 'Категория не найдена' });
-      }
+    const systemIdInput = system_id === undefined
+      ? row.system_id
+      : (system_id === null || system_id === '' ? null : parseId(system_id));
+    const organizationIdInput = organization_id === undefined
+      ? row.organization_id
+      : (organization_id === null || organization_id === '' ? null : parseId(organization_id));
+    const refs = await validateMaterialRefs(client, {
+      category_id: categoryIdInput,
+      system_id: systemIdInput,
+      organization_id: organizationIdInput,
+    });
+    if (refs.error) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: refs.error });
     }
+    const { categoryId, systemId, organizationId } = refs;
 
     let totalQty = 0;
     const normalized = [];
@@ -457,11 +495,11 @@ router.post('/:id/split', requirePermission('can_warehouse'), async (req, res) =
 
     await client.query(
       `UPDATE materials SET
-        name = $1, unit = $2, price = $3, production_price = $4, category_id = $5,
+        name = $1, unit = $2, price = $3, production_price = $4, category_id = $5, system_id = $6, organization_id = $7,
         quantity = 0, object_id = NULL, warehouse_id = NULL, rack_id = NULL,
         updated_at = NOW()
-       WHERE id = $6`,
-      [nameVal, unitVal, priceVal, prodPrice, catId, id],
+       WHERE id = $8`,
+      [nameVal, unitVal, priceVal, prodPrice, categoryId, systemId, organizationId, id],
     );
 
     await logQuantityChange(client, {
@@ -487,7 +525,9 @@ router.post('/:id/split', requirePermission('can_warehouse'), async (req, res) =
         object_id: p.loc.object_id,
         warehouse_id: p.loc.warehouse_id,
         rack_id: p.loc.rack_id,
-        category_id: catId,
+        category_id: categoryId,
+        system_id: systemId,
+        organization_id: organizationId,
         parent_material_id: id,
         part_index: i + 1,
         part_label: p.part_label,
@@ -537,7 +577,7 @@ router.post('/:id/parts', requirePermission('can_warehouse'), async (req, res) =
     }
 
     const parent = (await client.query(
-      'SELECT id, name, unit, price, production_price, category_id, parent_material_id FROM materials WHERE id = $1',
+      'SELECT id, name, unit, price, production_price, category_id, system_id, organization_id, parent_material_id FROM materials WHERE id = $1',
       [parentId],
     )).rows[0];
     if (!parent) {
@@ -549,7 +589,7 @@ router.post('/:id/parts', requirePermission('can_warehouse'), async (req, res) =
     let base = parent;
     if (parent.parent_material_id) {
       base = (await client.query(
-        'SELECT id, name, unit, price, production_price, category_id FROM materials WHERE id = $1',
+        'SELECT id, name, unit, price, production_price, category_id, system_id, organization_id FROM materials WHERE id = $1',
         [groupParentId],
       )).rows[0];
     } else {
@@ -586,6 +626,8 @@ router.post('/:id/parts', requirePermission('can_warehouse'), async (req, res) =
       warehouse_id: loc.warehouse_id,
       rack_id: loc.rack_id,
       category_id: base.category_id,
+      system_id: base.system_id,
+      organization_id: base.organization_id,
       parent_material_id: groupParentId,
       part_index: nextIndex,
       part_label: (part_label || `Часть ${nextIndex}`).trim(),
@@ -617,7 +659,7 @@ router.put('/:id', requirePermission('can_warehouse'), async (req, res) => {
 
   const {
     name, unit, price, production_price, quantity, part_label,
-    object_id, warehouse_id, rack_id, category_id,
+    object_id, warehouse_id, rack_id, category_id, system_id, organization_id,
   } = req.body || {};
 
   const client = await pool.connect();
@@ -659,15 +701,23 @@ router.put('/:id', requirePermission('can_warehouse'), async (req, res) => {
       return res.status(400).json({ error: loc.error });
     }
 
-    const catId = category_id === null || category_id === ''
+    const categoryId = category_id === null || category_id === ''
       ? null
       : parseId(category_id);
-    if (catId) {
-      const cat = (await client.query('SELECT id FROM material_categories WHERE id = $1', [catId])).rows[0];
-      if (!cat) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ error: 'Категория не найдена' });
-      }
+    const systemId = system_id === null || system_id === ''
+      ? null
+      : parseId(system_id);
+    const organizationId = organization_id === null || organization_id === ''
+      ? null
+      : parseId(organization_id);
+    const refs = await validateMaterialRefs(client, {
+      category_id: categoryId,
+      system_id: systemId,
+      organization_id: organizationId,
+    });
+    if (refs.error) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: refs.error });
     }
 
     const fields = [];
@@ -703,7 +753,15 @@ router.put('/:id', requirePermission('can_warehouse'), async (req, res) => {
     }
     if (category_id !== undefined) {
       fields.push(`category_id = $${i++}`);
-      vals.push(catId);
+      vals.push(refs.categoryId);
+    }
+    if (system_id !== undefined) {
+      fields.push(`system_id = $${i++}`);
+      vals.push(refs.systemId);
+    }
+    if (organization_id !== undefined) {
+      fields.push(`organization_id = $${i++}`);
+      vals.push(refs.organizationId);
     }
 
     if (part_label !== undefined) {
@@ -761,6 +819,8 @@ router.put('/:id', requirePermission('can_warehouse'), async (req, res) => {
       || production_price !== undefined
       || unit !== undefined
       || category_id !== undefined
+      || system_id !== undefined
+      || organization_id !== undefined
     ) {
       const parentId = exists.parent_material_id || (hasChildren ? id : null);
       if (parentId) {
@@ -781,7 +841,15 @@ router.put('/:id', requirePermission('can_warehouse'), async (req, res) => {
         }
         if (category_id !== undefined) {
           childFields.push(`category_id = $${ci++}`);
-          childVals.push(catId);
+          childVals.push(refs.categoryId);
+        }
+        if (system_id !== undefined) {
+          childFields.push(`system_id = $${ci++}`);
+          childVals.push(refs.systemId);
+        }
+        if (organization_id !== undefined) {
+          childFields.push(`organization_id = $${ci++}`);
+          childVals.push(refs.organizationId);
         }
         if (childFields.length) {
           childFields.push('updated_at = NOW()');

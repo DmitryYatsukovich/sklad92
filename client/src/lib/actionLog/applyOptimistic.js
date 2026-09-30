@@ -92,11 +92,15 @@ function catalogNames(catalog, body) {
   const wh = (catalog.warehouses || []).find((w) => w.id === body.warehouse_id);
   const rack = (catalog.racks || []).find((r) => r.id === body.rack_id);
   const cat = (catalog.categories || []).find((c) => c.id === body.category_id);
+  const system = (catalog.systems || []).find((s) => s.id === body.system_id);
+  const organization = (catalog.organizations || []).find((o) => o.id === body.organization_id);
   return {
     object_name: obj?.name || null,
     warehouse_name: wh?.name || null,
     rack_name: rack?.name || null,
     category_name: cat?.name || null,
+    system_name: system?.name || null,
+    organization_name: organization?.name || null,
   };
 }
 

@@ -28,16 +28,23 @@ const statements = [
     name VARCHAR(200) NOT NULL UNIQUE,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
+  `CREATE TABLE IF NOT EXISTS material_systems (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(200) NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
   `ALTER TABLE materials ADD COLUMN IF NOT EXISTS object_id INTEGER REFERENCES warehouse_objects(id) ON DELETE SET NULL`,
   `ALTER TABLE materials ADD COLUMN IF NOT EXISTS warehouse_id INTEGER REFERENCES warehouses(id) ON DELETE SET NULL`,
   `ALTER TABLE materials ADD COLUMN IF NOT EXISTS rack_id INTEGER REFERENCES warehouse_racks(id) ON DELETE SET NULL`,
   `ALTER TABLE materials ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES material_categories(id) ON DELETE SET NULL`,
+  `ALTER TABLE materials ADD COLUMN IF NOT EXISTS system_id INTEGER REFERENCES material_systems(id) ON DELETE SET NULL`,
   `ALTER TABLE materials ADD COLUMN IF NOT EXISTS price DECIMAL(18,2) DEFAULT 0`,
   `ALTER TABLE materials ADD COLUMN IF NOT EXISTS production_price DECIMAL(18,2) DEFAULT 0`,
   `ALTER TABLE materials ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
   `CREATE INDEX IF NOT EXISTS idx_materials_object ON materials(object_id)`,
   `CREATE INDEX IF NOT EXISTS idx_materials_warehouse ON materials(warehouse_id)`,
   `CREATE INDEX IF NOT EXISTS idx_materials_category ON materials(category_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_materials_system ON materials(system_id)`,
   `ALTER TABLE materials ADD COLUMN IF NOT EXISTS parent_material_id INTEGER REFERENCES materials(id) ON DELETE CASCADE`,
   `ALTER TABLE materials ADD COLUMN IF NOT EXISTS part_index INTEGER`,
   `ALTER TABLE materials ADD COLUMN IF NOT EXISTS part_label VARCHAR(120)`,
@@ -225,7 +232,9 @@ const statements = [
     UNIQUE (name)
   )`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL`,
+  `ALTER TABLE materials ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL`,
   `CREATE INDEX IF NOT EXISTS idx_users_organization ON users(organization_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_materials_organization ON materials(organization_id)`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_active BOOLEAN DEFAULT true`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS employment_status VARCHAR(20) DEFAULT 'working'`,
   `UPDATE users SET profile_active = true WHERE profile_active IS NULL`,

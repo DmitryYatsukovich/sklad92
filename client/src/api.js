@@ -379,6 +379,12 @@ export const settings = {
     update: (id, body) => request(`/api/settings/categories/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
     delete: (id) => request(`/api/settings/categories/${id}`, { method: 'DELETE' }),
   },
+  systems: {
+    list: () => request('/api/settings/systems'),
+    create: (body) => request('/api/settings/systems', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => request(`/api/settings/systems/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    delete: (id) => request(`/api/settings/systems/${id}`, { method: 'DELETE' }),
+  },
   workEntrances: {
     list: (objectId) => request(`/api/settings/work-entrances${objectId ? `?object_id=${objectId}` : ''}`),
     create: (body) => request('/api/settings/work-entrances', { method: 'POST', body: JSON.stringify(body) }),
