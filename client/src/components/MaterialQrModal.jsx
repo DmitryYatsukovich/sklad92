@@ -1,8 +1,8 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
-import { QRCodeSVG } from 'qrcode.react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { materials as materialsApi } from '../api';
 import { locationLabel } from '../lib/materialForm';
-import { formatStockMoney, materialStockTotals } from '../lib/materialStock';
+import { materialStockTotals } from '../lib/materialStock';
 import {
   materialGroupSummary,
   materialDisplayName,
@@ -21,6 +21,162 @@ function escapeHtml(s) {
 
 function formatQty(n) {
   return (Number(n) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 });
+}
+
+const LABEL_WIDTH_MM = 29;
+const LABEL_PAGE_HEIGHT_MM = 89;
+const LABEL_CONTENT_HEIGHT_MM = 78;
+const LABEL_PIXELS_PER_MM = 16;
+const QR_BOX_MM = 26.9;
+const QR_QUIET_ZONE_MM = 0.65;
+const QR_TOP_MM = 4;
+
+function mmToPx(mm) {
+  return Math.max(1, Math.round(mm * LABEL_PIXELS_PER_MM));
+}
+
+function loadImageFromSrc(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Image load failed'));
+    image.src = src;
+  });
+}
+
+function canvasToPngDataUrl(canvasEl) {
+  if (!canvasEl || typeof canvasEl.toDataURL !== 'function') {
+    throw new Error('Canvas unavailable');
+  }
+  return canvasEl.toDataURL('image/png');
+}
+
+function wrapTextLines(ctx, text, maxWidthPx, maxLines = 2) {
+  const source = String(text || '').trim();
+  if (!source) return [];
+  const words = source.split(/\s+/);
+  const lines = [];
+  let line = '';
+
+  const pushLine = (value) => {
+    if (!value) return;
+    if (lines.length < maxLines) lines.push(value);
+  };
+
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (ctx.measureText(next).width <= maxWidthPx) {
+      line = next;
+      continue;
+    }
+    if (!line) {
+      let chunk = '';
+      for (const ch of word) {
+        const test = chunk + ch;
+        if (ctx.measureText(test).width <= maxWidthPx) {
+          chunk = test;
+        } else {
+          pushLine(chunk);
+          chunk = ch;
+          if (lines.length >= maxLines) break;
+        }
+      }
+      line = chunk;
+      if (lines.length >= maxLines) break;
+      continue;
+    }
+    pushLine(line);
+    line = word;
+    if (lines.length >= maxLines) break;
+  }
+
+  if (lines.length < maxLines && line) pushLine(line);
+  return lines.slice(0, maxLines);
+}
+
+async function buildMaterialLabelImageDataUrl(title, qrImageSrc) {
+  const labelWidthPx = mmToPx(LABEL_WIDTH_MM);
+  const labelHeightPx = mmToPx(LABEL_CONTENT_HEIGHT_MM);
+  const canvas = document.createElement('canvas');
+  canvas.width = labelWidthPx;
+  canvas.height = labelHeightPx;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('Canvas context unavailable');
+
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const qrImage = await loadImageFromSrc(qrImageSrc);
+  const qrBoxPx = mmToPx(QR_BOX_MM);
+  const qrInsetPx = mmToPx(QR_QUIET_ZONE_MM);
+  const qrContentPx = Math.max(1, qrBoxPx - (qrInsetPx * 2));
+  const qrX = Math.round((labelWidthPx - qrBoxPx) / 2);
+  const qrY = mmToPx(QR_TOP_MM);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(qrImage, qrX + qrInsetPx, qrY + qrInsetPx, qrContentPx, qrContentPx);
+
+  const nameTopPx = qrY + qrBoxPx + mmToPx(1.0);
+  const horizontalPadPx = mmToPx(1.2);
+  const maxTextWidthPx = labelWidthPx - (horizontalPadPx * 2);
+  const fontSizePx = mmToPx(2.2);
+  const lineHeightPx = Math.round(fontSizePx * 1.12);
+  ctx.fillStyle = '#111';
+  ctx.font = `600 ${fontSizePx}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  const lines = wrapTextLines(ctx, title, maxTextWidthPx, 2);
+  lines.forEach((line, index) => {
+    ctx.fillText(line, Math.round(labelWidthPx / 2), nameTopPx + (lineHeightPx * index), maxTextWidthPx);
+  });
+
+  return canvas.toDataURL('image/png');
+}
+
+function buildMaterialPrintHtml(title, labelImageSrc) {
+  return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Этикетка — ${escapeHtml(title)}</title>
+  <style>
+    @page { size: ${LABEL_WIDTH_MM}mm ${LABEL_PAGE_HEIGHT_MM}mm; margin: 0; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: ${LABEL_WIDTH_MM}mm;
+      background: #fff;
+      font-size: 0;
+      line-height: 0;
+      overflow: hidden;
+    }
+    .page {
+      width: ${LABEL_WIDTH_MM}mm;
+      height: ${LABEL_CONTENT_HEIGHT_MM}mm;
+      overflow: hidden;
+      margin: 0;
+      padding: 0;
+      break-inside: avoid;
+      page-break-inside: avoid;
+      break-after: avoid-page;
+      page-break-after: avoid;
+    }
+    .sheet {
+      display: block;
+      width: ${LABEL_WIDTH_MM}mm;
+      height: ${LABEL_CONTENT_HEIGHT_MM}mm;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      object-fit: fill;
+      vertical-align: top;
+    }
+  </style>
+</head>
+<body>
+  <div class="page"><img class="sheet" src="${labelImageSrc}" alt="${escapeHtml(title)}" /></div>
+</body>
+</html>`;
 }
 
 export default function MaterialQrModal({ material, groupInfo: groupInfoProp, onClose }) {
@@ -55,89 +211,22 @@ export default function MaterialQrModal({ material, groupInfo: groupInfoProp, on
   const displayTitle = materialDisplayName(material) || material?.name || material?.code;
   const isPart = isMaterialPart(material);
 
-  const buildPrintHtml = useCallback((svgEl) => {
-    const loc = locationLabel(material);
-    const title = displayTitle;
-    const locHtml = loc ? `<p class="loc">${escapeHtml(loc)}</p>` : '';
-    const stock = materialStockTotals(material);
-    const groupHtml = groupInfo
-      ? `<div class="group">
-  <p><strong>Всего на складе:</strong> ${formatQty(groupInfo.totalQty)} ${escapeHtml(groupInfo.unit)}</p>
-  <p><strong>Частей:</strong> ${groupInfo.partsCount}</p>
-  ${isPart && groupInfo.partIndex ? `<p><strong>Эта часть:</strong> ${escapeHtml(groupInfo.partLabel || `Часть ${groupInfo.partIndex}`)} — ${formatQty(groupInfo.partQty)} ${escapeHtml(groupInfo.unit)}</p>` : ''}
-</div>`
-      : '';
-    const partsHtml = partsList.length
-      ? `<ul class="parts">${partsList.map((p) => `<li>${escapeHtml(p.part_label || `Часть ${p.part_index}`)}: ${formatQty(p.quantity)} ${escapeHtml(material.unit || '')} — ${escapeHtml(locationLabel(p))}</li>`).join('')}</ul>`
-      : '';
-    const stockHtml = material.quantity != null || material.price != null || material.production_price != null
-      ? `<div class="stock">
-  <p><strong>${isPart ? 'Количество части' : 'На складе'}:</strong> ${formatQty(stock.qty)} ${escapeHtml(stock.unit)}</p>
-  <p>Стоимость за ед.: ${escapeHtml(formatStockMoney(stock.unitPrice))}</p>
-  <p>Стоимость: ${escapeHtml(formatStockMoney(stock.costTotal))}</p>
-  <p>СМР за ед.: ${escapeHtml(formatStockMoney(stock.unitSmr))}</p>
-  <p>СМР: ${escapeHtml(formatStockMoney(stock.smrTotal))}</p>
-</div>`
-      : '';
-    const svgClone = svgEl.cloneNode(true);
-    svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-    if (!svgClone.getAttribute('width')) svgClone.setAttribute('width', '220');
-    if (!svgClone.getAttribute('height')) svgClone.setAttribute('height', '220');
-    return `<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8" />
-  <title>QR — ${escapeHtml(title)}</title>
-  <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      padding: 32px 24px;
-      font-family: system-ui, -apple-system, sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      color: #111;
-    }
-    h1 { font-size: 18px; font-weight: 600; margin: 0 0 8px; max-width: 320px; line-height: 1.3; }
-    .code { font-family: ui-monospace, monospace; font-size: 13px; color: #555; margin-bottom: 6px; }
-    .loc { font-size: 12px; color: #777; margin-bottom: 12px; max-width: 300px; }
-    .group, .stock { font-size: 12px; color: #333; margin-bottom: 12px; text-align: left; max-width: 300px; }
-    .group p, .stock p { margin: 4px 0; }
-    .parts { font-size: 11px; text-align: left; max-width: 300px; margin: 0 0 16px; padding-left: 18px; }
-    .parts li { margin: 4px 0; }
-    .qr {
-      padding: 16px;
-      background: #fff;
-      border: 1px solid #e5e5e5;
-      border-radius: 12px;
-      display: inline-block;
-    }
-    .qr svg { display: block; width: 220px; height: 220px; }
-    @media print { body { padding: 16px; } }
-  </style>
-</head>
-<body>
-  <h1>${escapeHtml(title)}</h1>
-  <p class="code">${escapeHtml(material.code)}</p>
-  ${locHtml}
-  ${groupHtml}
-  ${partsHtml}
-  ${stockHtml}
-  <div class="qr">${svgClone.outerHTML}</div>
-</body>
-</html>`;
-  }, [material, displayTitle, groupInfo, isPart, partsList]);
-
-  const handlePrint = useCallback(() => {
-    const svg = qrRef.current?.querySelector('svg');
-    if (!svg || !material?.code) return;
+  const handlePrint = useCallback(async () => {
+    const qrCanvas = qrRef.current?.querySelector('canvas');
+    if (!qrCanvas || !material?.code) return;
     setActionError('');
-    const html = buildPrintHtml(svg);
+    let labelImageSrc = '';
+    try {
+      const qrImageSrc = canvasToPngDataUrl(qrCanvas);
+      labelImageSrc = await buildMaterialLabelImageDataUrl(displayTitle, qrImageSrc);
+    } catch {
+      setActionError('Не удалось подготовить QR для печати');
+      return;
+    }
+    const html = buildMaterialPrintHtml(displayTitle, labelImageSrc);
     const iframe = document.createElement('iframe');
     iframe.setAttribute('aria-hidden', 'true');
-    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    iframe.style.cssText = 'position:fixed;left:-10000px;top:0;width:420px;height:920px;border:0;opacity:0;pointer-events:none;';
     document.body.appendChild(iframe);
     const win = iframe.contentWindow;
     if (!win) {
@@ -154,15 +243,22 @@ export default function MaterialQrModal({ material, groupInfo: groupInfoProp, on
       doc.write(html);
       doc.close();
       win.addEventListener('afterprint', cleanup, { once: true });
-      setTimeout(() => {
+      const runPrint = () => setTimeout(() => {
         win.focus();
         win.print();
-      }, 200);
+      }, 140);
+      const sheet = doc.querySelector('.sheet');
+      if (sheet && !sheet.complete) {
+        sheet.addEventListener('load', runPrint, { once: true });
+        sheet.addEventListener('error', () => setActionError('Не удалось подготовить QR для печати'), { once: true });
+      } else {
+        runPrint();
+      }
     } catch {
       cleanup();
       setActionError('Не удалось открыть печать');
     }
-  }, [material, buildPrintHtml]);
+  }, [material, displayTitle]);
 
   const handleDownloadPdf = useCallback(async () => {
     if (!material?.code) return;
@@ -268,7 +364,7 @@ export default function MaterialQrModal({ material, groupInfo: groupInfoProp, on
             ref={qrRef}
             className="rounded-xl bg-white p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_8px_32px_rgba(0,0,0,0.4)]"
           >
-            <QRCodeSVG value={material.code} size={220} level="M" />
+            <QRCodeCanvas value={material.code} size={220} level="M" includeMargin={false} />
           </div>
           {actionError && (
             <p className="text-red-400 text-2xs mt-4 w-full">{actionError}</p>
