@@ -108,6 +108,7 @@ export default function Warehouse({ user }) {
   const [addQtyAmount, setAddQtyAmount] = useState('');
   const [issueQty, setIssueQty] = useState('');
   const [issueToUserId, setIssueToUserId] = useState('');
+  const [issueUserQuery, setIssueUserQuery] = useState('');
   const [users, setUsers] = useState([]);
   const [showQrMaterial, setShowQrMaterial] = useState(null);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -488,12 +489,26 @@ export default function Warehouse({ user }) {
     materialsApi.usersForIssuance().then(setUsers).catch(() => setUsers([]));
   };
 
+  const filteredIssueUsers = useMemo(() => {
+    const query = issueUserQuery.trim().toLowerCase();
+    const selectedUserId = String(issueToUserId || '');
+    if (!query) return users;
+    const matched = users.filter((u) => {
+      const haystack = `${u.display_name || ''} ${u.login || ''}`.toLowerCase();
+      return haystack.includes(query);
+    });
+    if (!selectedUserId || matched.some((u) => String(u.id) === selectedUserId)) return matched;
+    const selected = users.find((u) => String(u.id) === selectedUserId);
+    return selected ? [selected, ...matched] : matched;
+  }, [users, issueUserQuery, issueToUserId]);
+
   const openMaterialMenu = (m) => {
     setActiveMaterial(m);
     setActiveStep('menu');
     setAddQtyAmount('');
     setIssueQty('');
     setIssueToUserId('');
+    setIssueUserQuery('');
     setError('');
     loadUsers();
   };
@@ -504,6 +519,7 @@ export default function Warehouse({ user }) {
     setAddQtyAmount('');
     setIssueQty('');
     setIssueToUserId('');
+    setIssueUserQuery('');
     setMoveForm(emptyMaterialForm());
   };
 
@@ -1947,6 +1963,13 @@ export default function Warehouse({ user }) {
             <form onSubmit={handleIssue} className="space-y-3">
               <div>
                 <label className="label">Получатель</label>
+                <input
+                  type="text"
+                  value={issueUserQuery}
+                  onChange={(e) => setIssueUserQuery(e.target.value)}
+                  className="input mb-2"
+                  placeholder="Поиск по имени или логину"
+                />
                 <select
                   value={issueToUserId}
                   onChange={(e) => setIssueToUserId(e.target.value)}
@@ -1954,10 +1977,13 @@ export default function Warehouse({ user }) {
                   required
                 >
                   <option value="">— Выберите —</option>
-                  {users.map((u) => (
+                  {filteredIssueUsers.map((u) => (
                     <option key={u.id} value={u.id}>{u.display_name || u.login}</option>
                   ))}
                 </select>
+                {issueUserQuery && filteredIssueUsers.length === 0 && (
+                  <p className="text-2xs text-zinc-500 mt-2">Пользователи не найдены</p>
+                )}
               </div>
               <div>
                 <label className="label">Количество</label>
