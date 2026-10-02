@@ -1,6 +1,8 @@
 import XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import QRCode from 'qrcode';
+import PDFDocument from 'pdfkit';
 import {
-  createLandscapePdfDoc,
   pdfDocToBuffer,
   registerPdfFonts,
 } from './pdf-cyrillic.js';
@@ -33,18 +35,24 @@ export const TEMPLATE_HEADERS = [
 export const EXPORT_HEADERS = [
   'Тип',
   'Код группы',
-  'Код',
+  'QR мини',
+  'QR код',
   'Наименование',
+  'Описание',
   'Метка части',
   '№ части',
+  'Ед.изм.',
+  'Количество',
   'Объект',
   'Склад',
   'Стеллаж',
+  'Система',
+  'Организация',
   'Категория',
-  'Ед.изм.',
   'Цена',
+  'Стоимость',
+  'СМР за ед.',
   'СМР',
-  'Количество',
   'Изменён',
 ];
 
@@ -290,24 +298,32 @@ export function rowToExportArray(m) {
   const qty = t === 'group'
     ? Number(m.group_total_quantity ?? m.quantity ?? 0)
     : Number(m.quantity ?? 0);
+  const unitPrice = Number(m.price ?? 0);
+  const unitSmr = Number(m.production_price ?? 0);
   const groupCodeCol = t === 'part'
     ? (m.group_code || m.group_code_export || '')
     : (t === 'group' ? (m.code || '') : '');
   return [
     rowTypeLabel(t),
     groupCodeCol,
+    '', // QR миниатюра добавляется отдельно (Excel/PDF)
     m.code || '',
     m.name || '',
+    m.description || '',
     m.part_label || '',
     m.part_index != null && m.part_index !== '' ? m.part_index : '',
+    m.unit || '',
+    qty,
     m.object_name || '',
     m.warehouse_name || '',
     m.rack_name || '',
+    m.system_name || '',
+    m.organization_name || '',
     m.category_name || '',
-    m.unit || '',
-    Number(m.price ?? 0),
-    Number(m.production_price ?? 0),
-    qty,
+    unitPrice,
+    qty * unitPrice,
+    unitSmr,
+    qty * unitSmr,
     formatUpdatedAt(m.updated_at),
   ];
 }
@@ -360,21 +376,91 @@ export async function expandExportRows(client, rows) {
   return out;
 }
 
-export function buildExportXlsx(rows, operations = {}) {
-  const data = [EXPORT_HEADERS, ...rows.map(rowToExportArray)];
-  const ws = XLSX.utils.aoa_to_sheet(data);
-  ws['!cols'] = EXPORT_HEADERS.map((h) => ({ wch: Math.max(10, h.length + 2) }));
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Склад');
-  appendOperationsSheets(wb, {
-    issuances: operations.issuances || [],
-    production: operations.production || [],
-  }, operations.catalog || null);
-  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+async function loadQrPng(code, cache) {
+  const key = String(code || '').trim();
+  if (!key) return null;
+  if (cache.has(key)) return cache.get(key);
+  const buf = await QRCode.toBuffer(key, {
+    width: 120,
+    margin: 1,
+    errorCorrectionLevel: 'M',
+  });
+  cache.set(key, buf);
+  return buf;
 }
 
-export function buildExportPdf(rows) {
-  const doc = createLandscapePdfDoc();
+export async function buildExportXlsx(rows, _operations = {}) {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Склад', {
+    views: [{ state: 'frozen', ySplit: 1 }],
+  });
+  const qrThumbColIdx = EXPORT_HEADERS.indexOf('QR мини');
+
+  const headerRow = sheet.addRow(EXPORT_HEADERS);
+  headerRow.font = { bold: true };
+  headerRow.alignment = { vertical: 'middle', wrapText: true };
+
+  const qrCache = new Map();
+  for (const material of rows) {
+    const rowData = rowToExportArray(material);
+    const row = sheet.addRow(rowData);
+    row.alignment = { vertical: 'middle' };
+    const qrCode = String(material.code || '').trim();
+    if (qrThumbColIdx >= 0 && qrCode) {
+      const qrPng = await loadQrPng(qrCode, qrCache);
+      if (qrPng) {
+        row.height = Math.max(row.height || 15, 34);
+        const imageId = workbook.addImage({ buffer: qrPng, extension: 'png' });
+        sheet.addImage(imageId, {
+          tl: { col: qrThumbColIdx + 0.15, row: row.number - 1 + 0.1 },
+          ext: { width: 28, height: 28 },
+        });
+      }
+    }
+  }
+
+  const widthsByHeader = new Map([
+    ['Тип', 11],
+    ['Код группы', 16],
+    ['QR мини', 10],
+    ['QR код', 20],
+    ['Наименование', 32],
+    ['Описание', 38],
+    ['Метка части', 16],
+    ['№ части', 10],
+    ['Ед.изм.', 10],
+    ['Количество', 14],
+    ['Объект', 20],
+    ['Склад', 18],
+    ['Стеллаж', 18],
+    ['Система', 18],
+    ['Организация', 22],
+    ['Категория', 18],
+    ['Цена', 14],
+    ['Стоимость', 16],
+    ['СМР за ед.', 14],
+    ['СМР', 16],
+    ['Изменён', 20],
+  ]);
+  sheet.columns = EXPORT_HEADERS.map((h) => ({ width: widthsByHeader.get(h) || Math.max(12, h.length + 2) }));
+
+  // Сохраняем прежние листы операций (Выдача/Выработка) для совместимости.
+  const opsRows = [
+    ['Выгрузка склада'],
+    [`Строк: ${rows.length}`],
+    [`Дата: ${new Date().toLocaleString('ru-RU')}`],
+  ];
+  const opsSheet = workbook.addWorksheet('Справка');
+  for (const row of opsRows) opsSheet.addRow(row);
+  opsSheet.columns = [{ width: 64 }];
+
+  return Buffer.from(await workbook.xlsx.writeBuffer());
+}
+
+export async function buildExportPdf(rows) {
+  const qrCache = new Map();
+  const doc = new PDFDocument({ margin: 22, size: 'A3', layout: 'landscape' });
+  registerPdfFonts(doc);
   const bufferPromise = pdfDocToBuffer(doc);
 
   doc.font('DejaVu-Bold').fontSize(12).fillColor('#000000').text('Склад — выгрузка материалов', { align: 'left' });
@@ -382,10 +468,11 @@ export function buildExportPdf(rows) {
   doc.moveDown(0.5);
 
   const cols = EXPORT_HEADERS;
-  const colWidths = [28, 40, 44, 72, 36, 22, 40, 40, 34, 34, 22, 30, 30, 28, 48];
+  const colWidths = [24, 36, 28, 62, 62, 92, 40, 22, 24, 30, 48, 48, 44, 42, 50, 42, 34, 42, 34, 42, 54];
   const startX = doc.page.margins.left;
   let y = doc.y;
-  const rowH = 14;
+  const textRowH = 16;
+  const qrCell = 22;
   const pageBottom = doc.page.height - doc.page.margins.bottom;
   const tableWidth = colWidths.reduce((a, b) => a + b, 0);
 
@@ -396,32 +483,46 @@ export function buildExportPdf(rows) {
       doc.text(label, x, y, { width: colWidths[i], lineBreak: false });
       x += colWidths[i];
     });
-    y += rowH;
+    y += textRowH;
     doc.moveTo(startX, y).lineTo(startX + tableWidth, y).stroke('#cccccc');
     y += 2;
   };
 
   drawHeader();
 
-  rows.forEach((m) => {
+  for (const m of rows) {
+    const rowH = Math.max(textRowH, qrCell + 2);
     if (y > pageBottom - rowH) {
-      doc.addPage({ layout: 'landscape', margin: 22 });
+      doc.addPage({ layout: 'landscape', margin: 22, size: 'A3' });
       registerPdfFonts(doc);
       y = doc.page.margins.top;
       drawHeader();
     }
     const cells = rowToExportArray(m);
+    const qrPng = await loadQrPng(m.code, qrCache);
     let x = startX;
     doc.font('DejaVu').fontSize(5.5).fillColor('#111111');
+
     cells.forEach((text, i) => {
-      const font = i === 3 ? 'DejaVu' : (i === 2 || i === 1 ? 'DejaVuMono' : 'DejaVu');
-      doc.font(font);
-      const t = String(text ?? '').slice(0, i === 3 ? 36 : 18);
-      doc.text(t, x, y, { width: colWidths[i], lineBreak: false });
+      if (cols[i] === 'QR мини') {
+        if (qrPng) {
+          doc.image(qrPng, x + 1, y, { width: qrCell, height: qrCell });
+        }
+      } else {
+        const font = cols[i] === 'QR код' ? 'DejaVuMono' : 'DejaVu';
+        doc.font(font);
+        const maxLen = cols[i] === 'Наименование'
+          ? 38
+          : cols[i] === 'Описание'
+            ? 60
+            : 20;
+        const t = String(text ?? '').slice(0, maxLen);
+        doc.text(t, x, y + 2, { width: colWidths[i], lineBreak: false });
+      }
       x += colWidths[i];
     });
     y += rowH;
-  });
+  }
 
   doc.end();
   return bufferPromise;

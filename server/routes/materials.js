@@ -14,11 +14,8 @@ import {
 } from '../lib/material-excel.js';
 import { importMaterialsFromExcel, previewMaterialsImport } from '../lib/material-import-excel.js';
 import {
-  collectMaterialIdsFromExpanded,
   importIssuancesFromExcel,
   importProductionFromExcel,
-  loadIssuancesForExport,
-  loadProductionForExport,
   previewIssuancesImport,
   previewProductionImport,
 } from '../lib/warehouse-operations-excel.js';
@@ -1329,26 +1326,13 @@ router.post('/export', requirePermission('can_warehouse'), async (req, res) => {
       return res.status(400).json({ error: 'Нет данных для выгрузки' });
     }
     const expanded = await expandExportRows(client, sourceRows);
-    const materialIds = collectMaterialIdsFromExpanded(expanded);
-    const catalog = await loadCatalog(client);
-    const workCatalog = {
-      objects: catalog.objects,
-      work_entrances: [],
-      work_floors: [],
-      work_apartments: [],
-      work_rooms: [],
-    };
-    const [issuances, production] = await Promise.all([
-      loadIssuancesForExport(client, materialIds),
-      loadProductionForExport(client, materialIds, workCatalog),
-    ]);
     if (fmt === 'pdf') {
       const buf = await buildExportPdf(expanded);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', 'attachment; filename="materials.pdf"');
       return res.send(buf);
     }
-    const buf = buildExportXlsx(expanded, { issuances, production, catalog: workCatalog });
+    const buf = await buildExportXlsx(expanded);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="materials.xlsx"');
     res.send(buf);

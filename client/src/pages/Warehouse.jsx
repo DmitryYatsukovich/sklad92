@@ -180,6 +180,7 @@ export default function Warehouse({ user }) {
   const [showQrMaterial, setShowQrMaterial] = useState(null);
   const [filters, setFilters] = useState(() => createEmptyFilters());
   const [nameSearch, setNameSearch] = useState('');
+  const [descriptionSearch, setDescriptionSearch] = useState('');
   const [sortBy, setSortBy] = useState('name');
   const [sortDir, setSortDir] = useState('asc');
   const [importPreviewing, setImportPreviewing] = useState(false);
@@ -320,6 +321,19 @@ export default function Warehouse({ user }) {
       cancelled = true;
       clearInterval(t);
     };
+  }, []);
+
+  useEffect(() => {
+    const onPointerDown = (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('.filter-field')) return;
+      document.querySelectorAll('.filter-field[open]').forEach((node) => {
+        node.removeAttribute('open');
+      });
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
   }, []);
 
   const resetSplitState = () => {
@@ -702,13 +716,19 @@ export default function Warehouse({ user }) {
   }, [catalog.racks, filters.warehouse_ids]);
 
   const hasActiveFilters = useMemo(
-    () => Object.values(filters).some((values) => Array.isArray(values) && values.length > 0) || Boolean(nameSearch.trim()),
-    [filters, nameSearch],
+    () => (
+      Object.values(filters).some((values) => Array.isArray(values) && values.length > 0)
+      || Boolean(nameSearch.trim())
+      || Boolean(descriptionSearch.trim())
+    ),
+    [filters, nameSearch, descriptionSearch],
   );
 
   const filteredList = useMemo(() => displayList.filter((m) => {
-    const query = nameSearch.trim().toLowerCase();
-    if (query && !String(m.name || '').toLowerCase().includes(query)) return false;
+    const nameQuery = nameSearch.trim().toLowerCase();
+    const descriptionQuery = descriptionSearch.trim().toLowerCase();
+    if (nameQuery && !String(m.name || '').toLowerCase().includes(nameQuery)) return false;
+    if (descriptionQuery && !String(m.description || '').toLowerCase().includes(descriptionQuery)) return false;
     if (filters.object_ids.length && !filters.object_ids.includes(String(m.object_id || ''))) return false;
     if (filters.warehouse_ids.length && !filters.warehouse_ids.includes(String(m.warehouse_id || ''))) return false;
     if (filters.rack_ids.length && !filters.rack_ids.includes(String(m.rack_id || ''))) return false;
@@ -717,7 +737,7 @@ export default function Warehouse({ user }) {
     if (filters.organization_ids.length && !filters.organization_ids.includes(String(m.organization_id || ''))) return false;
     if (filters.updated_dates.length && !filters.updated_dates.includes(updatedDayKey(m.updated_at))) return false;
     return true;
-  }), [displayList, filters, nameSearch]);
+  }), [displayList, filters, nameSearch, descriptionSearch]);
 
   const sortedList = useMemo(() => {
     const items = [...filteredList];
@@ -828,8 +848,11 @@ export default function Warehouse({ user }) {
   const rackFilterOptions = useMemo(
     () => [...racksForFilter]
       .sort((a, b) => naturalStringCompare(a.name, b.name))
-      .map((r) => ({ value: String(r.id), label: r.name })),
-    [racksForFilter],
+      .map((r) => {
+        const count = Number(rackNameCounts[String(r.id)] || 0);
+        return { value: String(r.id), label: `${r.name} (${count})` };
+      }),
+    [racksForFilter, rackNameCounts],
   );
 
   const categoryFilterOptions = useMemo(
@@ -873,8 +896,12 @@ export default function Warehouse({ user }) {
   }, [sortedList]);
 
   const paginationResetKey = useMemo(
-    () => JSON.stringify({ filters, nameSearch: nameSearch.trim().toLowerCase() }),
-    [filters, nameSearch],
+    () => JSON.stringify({
+      filters,
+      nameSearch: nameSearch.trim().toLowerCase(),
+      descriptionSearch: descriptionSearch.trim().toLowerCase(),
+    }),
+    [filters, nameSearch, descriptionSearch],
   );
   const pagination = useListPagination(sortedList, 'warehouse-page-size', paginationResetKey);
 
@@ -894,6 +921,7 @@ export default function Warehouse({ user }) {
   const resetFilters = () => {
     setFilters(createEmptyFilters());
     setNameSearch('');
+    setDescriptionSearch('');
   };
 
   const toggleFilterValue = (key, value) => {
@@ -1464,13 +1492,20 @@ export default function Warehouse({ user }) {
             onToggle={(value) => toggleFilterValue('updated_dates', value)}
           />
         </div>
-        <div className="px-2 pb-2 bg-surface-850 border-b border-white/10">
+        <div className="px-2 pb-2 bg-surface-850 border-b border-white/10 space-y-2">
           <input
             type="text"
             value={nameSearch}
             onChange={(e) => setNameSearch(e.target.value)}
             className="filter-input"
             placeholder="Поиск по наименованию"
+          />
+          <input
+            type="text"
+            value={descriptionSearch}
+            onChange={(e) => setDescriptionSearch(e.target.value)}
+            className="filter-input"
+            placeholder="Поиск по описанию"
           />
         </div>
         <div className="overflow-x-auto max-h-[calc(100vh-7.5rem)] overflow-y-auto">
