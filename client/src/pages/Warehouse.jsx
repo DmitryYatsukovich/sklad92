@@ -94,6 +94,13 @@ function formatUpdatedDayKey(dayKey) {
   return `${d}.${m}.${y}`;
 }
 
+function naturalStringCompare(a, b) {
+  return String(a ?? '').localeCompare(String(b ?? ''), 'ru', {
+    numeric: true,
+    sensitivity: 'base',
+  });
+}
+
 function MultiSelectFilter({ label, options, selectedValues, onToggle }) {
   const selectedCount = selectedValues.length;
   return (
@@ -714,25 +721,26 @@ export default function Warehouse({ user }) {
     const items = [...filteredList];
     if (!sortBy) return items;
     items.sort((a, b) => {
-      let va;
-      let vb;
+      let cmp = 0;
       if (sortBy === 'updated_at') {
-        va = new Date(a.updated_at || 0).getTime();
-        vb = new Date(b.updated_at || 0).getTime();
+        const va = new Date(a.updated_at || 0).getTime();
+        const vb = new Date(b.updated_at || 0).getTime();
+        cmp = va < vb ? -1 : va > vb ? 1 : 0;
       } else if (sortBy === 'cost_total') {
-        va = (Number(a.quantity) || 0) * (Number(a.price) || 0);
-        vb = (Number(b.quantity) || 0) * (Number(b.price) || 0);
+        const va = (Number(a.quantity) || 0) * (Number(a.price) || 0);
+        const vb = (Number(b.quantity) || 0) * (Number(b.price) || 0);
+        cmp = va < vb ? -1 : va > vb ? 1 : 0;
       } else if (sortBy === 'smr_total') {
-        va = (Number(a.quantity) || 0) * (Number(a.production_price) || 0);
-        vb = (Number(b.quantity) || 0) * (Number(b.production_price) || 0);
+        const va = (Number(a.quantity) || 0) * (Number(a.production_price) || 0);
+        const vb = (Number(b.quantity) || 0) * (Number(b.production_price) || 0);
+        cmp = va < vb ? -1 : va > vb ? 1 : 0;
       } else if (NUMERIC_SORT_COLS.has(sortBy)) {
-        va = Number(a[sortBy]) || 0;
-        vb = Number(b[sortBy]) || 0;
+        const va = Number(a[sortBy]) || 0;
+        const vb = Number(b[sortBy]) || 0;
+        cmp = va < vb ? -1 : va > vb ? 1 : 0;
       } else {
-        va = (a[sortBy] ?? '').toString().toLowerCase();
-        vb = (b[sortBy] ?? '').toString().toLowerCase();
+        cmp = naturalStringCompare(a[sortBy], b[sortBy]);
       }
-      const cmp = va < vb ? -1 : va > vb ? 1 : 0;
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return items;
@@ -777,14 +785,14 @@ export default function Warehouse({ user }) {
 
   const codeFilterOptions = useMemo(
     () => Array.from(new Set(displayList.map((row) => String(row.code || '').trim()).filter(Boolean)))
-      .sort((a, b) => a.localeCompare(b, 'ru'))
+      .sort(naturalStringCompare)
       .map((value) => ({ value, label: value })),
     [displayList],
   );
 
   const unitFilterOptions = useMemo(
     () => Array.from(new Set(displayList.map((row) => String(row.unit || '').trim()).filter(Boolean)))
-      .sort((a, b) => a.localeCompare(b, 'ru'))
+      .sort(naturalStringCompare)
       .map((value) => ({ value, label: value })),
     [displayList],
   );
@@ -814,6 +822,48 @@ export default function Warehouse({ user }) {
     }
     return counts;
   }, [displayList]);
+
+  const objectFilterOptions = useMemo(
+    () => [...catalog.objects]
+      .sort((a, b) => naturalStringCompare(a.name, b.name))
+      .map((o) => ({ value: String(o.id), label: o.name })),
+    [catalog.objects],
+  );
+
+  const warehouseFilterOptions = useMemo(
+    () => [...warehousesForFilter]
+      .sort((a, b) => naturalStringCompare(a.name, b.name))
+      .map((w) => ({ value: String(w.id), label: w.name })),
+    [warehousesForFilter],
+  );
+
+  const rackFilterOptions = useMemo(
+    () => [...racksForFilter]
+      .sort((a, b) => naturalStringCompare(a.name, b.name))
+      .map((r) => ({ value: String(r.id), label: r.name })),
+    [racksForFilter],
+  );
+
+  const categoryFilterOptions = useMemo(
+    () => [...catalog.categories]
+      .sort((a, b) => naturalStringCompare(a.name, b.name))
+      .map((c) => ({ value: String(c.id), label: c.name })),
+    [catalog.categories],
+  );
+
+  const systemFilterOptions = useMemo(
+    () => [...catalog.systems]
+      .sort((a, b) => naturalStringCompare(a.name, b.name))
+      .map((s) => ({ value: String(s.id), label: s.name })),
+    [catalog.systems],
+  );
+
+  const organizationFilterOptions = useMemo(
+    () => [...catalog.organizations]
+      .sort((a, b) => naturalStringCompare(a.name, b.name))
+      .map((o) => ({ value: String(o.id), label: o.name })),
+    [catalog.organizations],
+  );
 
   const totals = useMemo(() => {
     let quantity = 0;
@@ -1387,37 +1437,37 @@ export default function Warehouse({ user }) {
           />
           <MultiSelectFilter
             label="Объект"
-            options={catalog.objects.map((o) => ({ value: String(o.id), label: o.name }))}
+            options={objectFilterOptions}
             selectedValues={filters.object_ids}
             onToggle={toggleObjectFilter}
           />
           <MultiSelectFilter
             label="Склад"
-            options={warehousesForFilter.map((w) => ({ value: String(w.id), label: w.name }))}
+            options={warehouseFilterOptions}
             selectedValues={filters.warehouse_ids}
             onToggle={toggleWarehouseFilter}
           />
           <MultiSelectFilter
             label="Стеллаж"
-            options={racksForFilter.map((r) => ({ value: String(r.id), label: r.name }))}
+            options={rackFilterOptions}
             selectedValues={filters.rack_ids}
             onToggle={(value) => toggleFilterValue('rack_ids', value)}
           />
           <MultiSelectFilter
             label="Катег."
-            options={catalog.categories.map((c) => ({ value: String(c.id), label: c.name }))}
+            options={categoryFilterOptions}
             selectedValues={filters.category_ids}
             onToggle={(value) => toggleFilterValue('category_ids', value)}
           />
           <MultiSelectFilter
             label="Система"
-            options={catalog.systems.map((s) => ({ value: String(s.id), label: s.name }))}
+            options={systemFilterOptions}
             selectedValues={filters.system_ids}
             onToggle={(value) => toggleFilterValue('system_ids', value)}
           />
           <MultiSelectFilter
             label="Орг."
-            options={catalog.organizations.map((o) => ({ value: String(o.id), label: o.name }))}
+            options={organizationFilterOptions}
             selectedValues={filters.organization_ids}
             onToggle={(value) => toggleFilterValue('organization_ids', value)}
           />

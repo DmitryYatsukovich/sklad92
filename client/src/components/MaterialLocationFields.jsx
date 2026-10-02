@@ -17,8 +17,20 @@ export default function MaterialLocationFields({
   showCategory = true,
   rackNameCounts = null,
 }) {
+  const byNaturalName = (a, b) => (
+    String(a?.name || '').localeCompare(String(b?.name || ''), 'ru', {
+      numeric: true,
+      sensitivity: 'base',
+    })
+  );
   const warehouses = warehousesForObject(catalog, form.object_id);
   const racks = racksForWarehouse(catalog, form.warehouse_id);
+  const sortedObjects = [...(catalog?.objects || [])].sort(byNaturalName);
+  const sortedWarehouses = [...warehouses].sort(byNaturalName);
+  const sortedRacks = [...racks].sort(byNaturalName);
+  const sortedCategories = [...(catalog?.categories || [])].sort(byNaturalName);
+  const sortedSystems = [...(catalog?.systems || [])].sort(byNaturalName);
+  const sortedOrganizations = [...(catalog?.organizations || [])].sort(byNaturalName);
   const selectCls = 'select';
   const rackLabel = (rack) => {
     if (!rackNameCounts) return rack.name;
@@ -56,7 +68,7 @@ export default function MaterialLocationFields({
           <label className="label">Объект</label>
           <select value={form.object_id} onChange={(e) => onObject(e.target.value)} className={selectCls}>
             <option value="">— Не указан —</option>
-            {(catalog?.objects || []).map((o) => (
+            {sortedObjects.map((o) => (
               <option key={o.id} value={o.id}>{o.name}</option>
             ))}
           </select>
@@ -70,7 +82,7 @@ export default function MaterialLocationFields({
             disabled={!form.object_id}
           >
             <option value="">— Не указан —</option>
-            {warehouses.map((w) => (
+            {sortedWarehouses.map((w) => (
               <option key={w.id} value={w.id}>{w.name}</option>
             ))}
           </select>
@@ -84,7 +96,7 @@ export default function MaterialLocationFields({
             disabled={!form.warehouse_id}
           >
             <option value="">— Не указан —</option>
-            {racks.map((r) => (
+            {sortedRacks.map((r) => (
               <option key={r.id} value={r.id}>{rackLabel(r)}</option>
             ))}
           </select>
@@ -98,7 +110,7 @@ export default function MaterialLocationFields({
               className={selectCls}
             >
               <option value="">— Не указана —</option>
-              {(catalog?.categories || []).map((c) => (
+              {sortedCategories.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
@@ -113,7 +125,7 @@ export default function MaterialLocationFields({
               className={selectCls}
             >
               <option value="">— Не указана —</option>
-              {(catalog?.systems || []).map((s) => (
+              {sortedSystems.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
@@ -128,7 +140,7 @@ export default function MaterialLocationFields({
               className={selectCls}
             >
               <option value="">— Не указана —</option>
-              {(catalog?.organizations || []).map((o) => (
+              {sortedOrganizations.map((o) => (
                 <option key={o.id} value={o.id}>{o.name}</option>
               ))}
             </select>
