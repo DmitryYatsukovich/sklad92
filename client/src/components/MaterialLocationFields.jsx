@@ -10,10 +10,21 @@ export function racksForWarehouse(catalog, warehouseId) {
   return (catalog?.racks || []).filter((r) => r.warehouse_id === wid);
 }
 
-export default function MaterialLocationFields({ catalog, form, setForm, showCategory = true }) {
+export default function MaterialLocationFields({
+  catalog,
+  form,
+  setForm,
+  showCategory = true,
+  rackNameCounts = null,
+}) {
   const warehouses = warehousesForObject(catalog, form.object_id);
   const racks = racksForWarehouse(catalog, form.warehouse_id);
   const selectCls = 'select';
+  const rackLabel = (rack) => {
+    if (!rackNameCounts) return rack.name;
+    const count = Number(rackNameCounts[String(rack.id)] || 0);
+    return `${rack.name} (${count})`;
+  };
 
   const onObject = (v) => {
     const wh = warehousesForObject(catalog, v);
@@ -74,7 +85,7 @@ export default function MaterialLocationFields({ catalog, form, setForm, showCat
           >
             <option value="">— Не указан —</option>
             {racks.map((r) => (
-              <option key={r.id} value={r.id}>{r.name}</option>
+              <option key={r.id} value={r.id}>{rackLabel(r)}</option>
             ))}
           </select>
         </div>

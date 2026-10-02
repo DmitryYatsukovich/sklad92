@@ -798,6 +798,23 @@ export default function Warehouse({ user }) {
     [displayList],
   );
 
+  const rackNameCounts = useMemo(() => {
+    const byRack = new Map();
+    for (const row of displayList) {
+      const rackId = Number(row.rack_id);
+      if (!rackId || !materialHasStock(row)) continue;
+      const normalizedName = String(row.name || '').trim().toLowerCase();
+      if (!normalizedName) continue;
+      if (!byRack.has(rackId)) byRack.set(rackId, new Set());
+      byRack.get(rackId).add(normalizedName);
+    }
+    const counts = {};
+    for (const [rackId, names] of byRack.entries()) {
+      counts[String(rackId)] = names.size;
+    }
+    return counts;
+  }, [displayList]);
+
   const totals = useMemo(() => {
     let quantity = 0;
     let price = 0;
@@ -1793,7 +1810,12 @@ export default function Warehouse({ user }) {
                 )}
               </div>
               {((!editing && !splitEnabled) || (editing && isMaterialPart(editing)) || (editing && !isMaterialGroupRow(editing) && !isMaterialPart(editing) && !splitEnabled)) && (
-                <MaterialLocationFields catalog={catalog} form={form} setForm={setForm} />
+                <MaterialLocationFields
+                  catalog={catalog}
+                  form={form}
+                  setForm={setForm}
+                  rackNameCounts={rackNameCounts}
+                />
               )}
               {splitEnabled && canUseSplit && (
                 <div className="space-y-3 max-h-[40vh] overflow-y-auto border border-zinc-700 rounded-xl p-3 bg-zinc-900/50">
@@ -1871,6 +1893,7 @@ export default function Warehouse({ user }) {
                       <MaterialLocationFields
                         catalog={catalog}
                         form={p}
+                        rackNameCounts={rackNameCounts}
                         setForm={(updater) => {
                           setSplitParts((arr) => arr.map((row, i) => {
                             if (i !== idx) return row;
@@ -2088,6 +2111,7 @@ export default function Warehouse({ user }) {
                 form={moveForm}
                 setForm={setMoveForm}
                 showCategory={false}
+                rackNameCounts={rackNameCounts}
               />
               <div className="flex gap-2 justify-end">
                 <button type="button" onClick={() => { setActiveStep('menu'); setError(''); }} className="btn-ghost">
