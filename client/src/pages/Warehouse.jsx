@@ -786,7 +786,6 @@ export default function Warehouse({ user }) {
   }), [displayList, filters, nameSearch, descriptionSearch, groupPartsCache, hasActiveFilters]);
 
   useEffect(() => {
-    if (!hasActiveFilters) return;
     const groupRows = displayList.filter((row) => isMaterialGroupRow(row));
     const toLoad = groupRows.filter((row) => !groupPartsCache[row.id] && !loadingPartsIds.has(row.id));
     if (!toLoad.length) return;
@@ -799,7 +798,7 @@ export default function Warehouse({ user }) {
         parts_count: row.parts_count,
       },
     ).catch(() => null)));
-  }, [hasActiveFilters, displayList, groupPartsCache, loadingPartsIds]);
+  }, [displayList, groupPartsCache, loadingPartsIds]);
 
   const sortedList = useMemo(() => {
     const items = [...filteredList];
@@ -877,21 +876,30 @@ export default function Warehouse({ user }) {
   );
 
   const rackNameCounts = useMemo(() => {
-    const byRack = new Map();
-    for (const row of displayList) {
-      const rackId = Number(row.rack_id);
-      if (!rackId || !materialHasStock(row)) continue;
-      const normalizedName = String(row.name || '').trim().toLowerCase();
-      if (!normalizedName) continue;
-      if (!byRack.has(rackId)) byRack.set(rackId, new Set());
-      byRack.get(rackId).add(normalizedName);
-    }
     const counts = {};
-    for (const [rackId, names] of byRack.entries()) {
-      counts[String(rackId)] = names.size;
+    const seenMaterialIds = new Set();
+    const incrementRack = (rackIdRaw) => {
+      const rackId = Number(rackIdRaw);
+      if (!rackId) return;
+      const key = String(rackId);
+      counts[key] = (counts[key] || 0) + 1;
+    };
+
+    for (const row of displayList) {
+      if (!materialHasStock(row) || isMaterialGroupRow(row)) continue;
+      if (row?.id) seenMaterialIds.add(row.id);
+      incrementRack(row.rack_id);
+    }
+
+    for (const parts of Object.values(groupPartsCache)) {
+      for (const part of filterPartsInStock(parts || [])) {
+        if (part?.id && seenMaterialIds.has(part.id)) continue;
+        if (part?.id) seenMaterialIds.add(part.id);
+        incrementRack(part.rack_id);
+      }
     }
     return counts;
-  }, [displayList]);
+  }, [displayList, groupPartsCache]);
 
   const objectFilterOptions = useMemo(
     () => [...catalog.objects]
