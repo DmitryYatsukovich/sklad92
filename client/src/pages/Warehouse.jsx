@@ -759,20 +759,47 @@ export default function Warehouse({ user }) {
     [filters, nameSearch, descriptionSearch],
   );
 
-  const filteredList = useMemo(() => displayList.filter((m) => {
+  const materialMatchesActiveFilters = (row) => {
     const nameQuery = nameSearch.trim().toLowerCase();
     const descriptionQuery = descriptionSearch.trim().toLowerCase();
-    if (nameQuery && !String(m.name || '').toLowerCase().includes(nameQuery)) return false;
-    if (descriptionQuery && !String(m.description || '').toLowerCase().includes(descriptionQuery)) return false;
-    if (filters.object_ids.length && !filters.object_ids.includes(String(m.object_id || ''))) return false;
-    if (filters.warehouse_ids.length && !filters.warehouse_ids.includes(String(m.warehouse_id || ''))) return false;
-    if (filters.rack_ids.length && !filters.rack_ids.includes(String(m.rack_id || ''))) return false;
-    if (filters.category_ids.length && !filters.category_ids.includes(String(m.category_id || ''))) return false;
-    if (filters.system_ids.length && !filters.system_ids.includes(String(m.system_id || ''))) return false;
-    if (filters.organization_ids.length && !filters.organization_ids.includes(String(m.organization_id || ''))) return false;
-    if (filters.updated_dates.length && !filters.updated_dates.includes(updatedDayKey(m.updated_at))) return false;
+    if (nameQuery && !String(row.name || '').toLowerCase().includes(nameQuery)) return false;
+    if (descriptionQuery && !String(row.description || '').toLowerCase().includes(descriptionQuery)) return false;
+    if (filters.object_ids.length && !filters.object_ids.includes(String(row.object_id || ''))) return false;
+    if (filters.warehouse_ids.length && !filters.warehouse_ids.includes(String(row.warehouse_id || ''))) return false;
+    if (filters.rack_ids.length && !filters.rack_ids.includes(String(row.rack_id || ''))) return false;
+    if (filters.category_ids.length && !filters.category_ids.includes(String(row.category_id || ''))) return false;
+    if (filters.system_ids.length && !filters.system_ids.includes(String(row.system_id || ''))) return false;
+    if (filters.organization_ids.length && !filters.organization_ids.includes(String(row.organization_id || ''))) return false;
+    if (filters.updated_dates.length && !filters.updated_dates.includes(updatedDayKey(row.updated_at))) return false;
     return true;
-  }), [displayList, filters, nameSearch, descriptionSearch]);
+  };
+
+  const filteredList = useMemo(() => displayList.filter((row) => {
+    if (materialMatchesActiveFilters(row)) return true;
+    if (!isMaterialGroupRow(row)) return false;
+    const cachedParts = filterPartsInStock(groupPartsCache[row.id] || []);
+    if (cachedParts.length > 0) {
+      return cachedParts.some((part) => materialMatchesActiveFilters(part));
+    }
+    // Пока части группы не загружены, не прячем группу при активных фильтрах.
+    return hasActiveFilters;
+  }), [displayList, filters, nameSearch, descriptionSearch, groupPartsCache, hasActiveFilters]);
+
+  useEffect(() => {
+    if (!hasActiveFilters) return;
+    const groupRows = displayList.filter((row) => isMaterialGroupRow(row));
+    const toLoad = groupRows.filter((row) => !groupPartsCache[row.id] && !loadingPartsIds.has(row.id));
+    if (!toLoad.length) return;
+    void Promise.all(toLoad.map((row) => loadGroupPartsIntoCache(
+      row.id,
+      row.name,
+      {
+        id: row.id,
+        group_total_quantity: row.group_total_quantity,
+        parts_count: row.parts_count,
+      },
+    ).catch(() => null)));
+  }, [hasActiveFilters, displayList, groupPartsCache, loadingPartsIds]);
 
   const sortedList = useMemo(() => {
     const items = [...filteredList];
@@ -1653,8 +1680,12 @@ export default function Warehouse({ user }) {
                 const costTotal = qty * unitPrice;
                 const smrTotalRow = qty * unitSmr;
                 const isGroup = isMaterialGroupRow(m);
-                const expanded = expandedGroupIds.has(m.id);
+                const expandedManual = expandedGroupIds.has(m.id);
                 const childParts = filterPartsInStock(groupPartsCache[m.id] || []);
+                const filteredChildParts = hasActiveFilters
+                  ? childParts.filter((part) => materialMatchesActiveFilters(part))
+                  : childParts;
+                const shownExpanded = expandedManual || (hasActiveFilters && filteredChildParts.length > 0);
                 const partsLoading = loadingPartsIds.has(m.id);
                 const partsCount = materialPartsCount(m, childParts);
 
@@ -1684,10 +1715,10 @@ export default function Warehouse({ user }) {
                               type="button"
                               onClick={(e) => toggleGroupExpand(e, m)}
                               className="w-5 h-5 inline-flex items-center justify-center rounded hover:bg-white/10 text-zinc-400"
-                              title={expanded ? 'Свернуть части' : 'Показать части'}
-                              aria-expanded={expanded}
+                              title={shownExpanded ? 'Свернуть части' : 'Показать части'}
+                              aria-expanded={shownExpanded}
                             >
-                              {expanded ? '▼' : '▶'}
+                              {shownExpanded ? '▼' : '▶'}
                             </button>
                           ) : (
                             <span className="inline-block w-5" />
@@ -1799,14 +1830,14 @@ export default function Warehouse({ user }) {
                 return (
                   <Fragment key={m.id}>
                     {renderRow(m)}
-                    {isGroup && expanded && partsLoading && childParts.length === 0 && (
+                    {isGroup && shownExpanded && partsLoading && filteredChildParts.length === 0 && (
                       <tr className="bg-zinc-900/50">
                         <td colSpan={18} className="text-2xs text-zinc-500 py-2 pl-4">
                           Загрузка частей…
                         </td>
                       </tr>
                     )}
-                    {isGroup && expanded && childParts.map((part, i) => renderRow(part, { isChild: true, childIndex: i + 1 }))}
+                    {isGroup && shownExpanded && filteredChildParts.map((part, i) => renderRow(part, { isChild: true, childIndex: i + 1 }))}
                   </Fragment>
                 );
               })}
@@ -1834,6 +1865,7 @@ export default function Warehouse({ user }) {
         <MaterialPartsModal
           material={partsModalMaterial}
           catalog={catalog}
+          rackNameCounts={rackNameCounts}
           onClose={() => setPartsModalMaterial(null)}
           onUpdated={load}
           onOpenMenu={(m) => {

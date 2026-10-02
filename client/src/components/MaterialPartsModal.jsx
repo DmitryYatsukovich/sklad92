@@ -10,6 +10,7 @@ import { locationLabel, materialToForm, formToPayload, UNITS } from '../lib/mate
 export default function MaterialPartsModal({
   material,
   catalog,
+  rackNameCounts = null,
   onClose,
   onUpdated,
   onOpenMenu,
@@ -213,7 +214,12 @@ export default function MaterialPartsModal({
                   </select>
                 </div>
               </div>
-              <MaterialLocationFields catalog={catalog} form={partForm} setForm={setPartForm} />
+              <MaterialLocationFields
+                catalog={catalog}
+                form={partForm}
+                setForm={setPartForm}
+                rackNameCounts={rackNameCounts}
+              />
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="label">Стоимость за ед.</label>
@@ -278,7 +284,12 @@ export default function MaterialPartsModal({
                   placeholder="Бухта 5"
                 />
               </div>
-              <MaterialLocationFields catalog={catalog} form={addForm} setForm={setAddForm} />
+              <MaterialLocationFields
+                catalog={catalog}
+                form={addForm}
+                setForm={setAddForm}
+                rackNameCounts={rackNameCounts}
+              />
               <div className="flex justify-end gap-2">
                 <button type="button" className="btn-ghost text-sm" onClick={() => setAddPartOpen(false)}>
                   Отмена
