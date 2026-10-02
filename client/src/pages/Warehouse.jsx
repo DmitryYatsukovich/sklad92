@@ -30,7 +30,6 @@ import {
   materialGroupSummary,
   materialPartDisplayName,
   materialPartQuantity,
-  materialRowLocation,
   materialHasStock,
   filterPartsInStock,
 } from '../lib/materialDisplay';
@@ -43,16 +42,19 @@ import { applyPendingToMaterials, withPendingRowClass } from '../lib/actionLog/a
 import { peekPageCache, setPageCache, hydrateFromCaches } from '../lib/pageCache';
 import { isQuickDeviceEnabled } from '../lib/offlineCache';
 
-const EMPTY_FILTERS = {
-  code: '',
-  name: '',
-  object_id: '',
-  warehouse_id: '',
-  rack_id: '',
-  category_id: '',
-  unit: '',
-  stock: '',
-};
+function createEmptyFilters() {
+  return {
+    codes: [],
+    units: [],
+    object_ids: [],
+    warehouse_ids: [],
+    rack_ids: [],
+    category_ids: [],
+    system_ids: [],
+    organization_ids: [],
+    updated_dates: [],
+  };
+}
 
 const NUMERIC_SORT_COLS = new Set(['price', 'production_price', 'quantity', 'cost_total', 'smr_total']);
 
@@ -66,6 +68,59 @@ function formatSumMoney(n) {
 function formatSumQty(n) {
   const x = Number(n) || 0;
   return x.toLocaleString('ru-RU', { maximumFractionDigits: 4 });
+}
+
+function toggleMultiSelectValue(values, value) {
+  const raw = String(value ?? '');
+  if (!raw) return values;
+  if (values.includes(raw)) return values.filter((v) => v !== raw);
+  return [...values, raw];
+}
+
+function updatedDayKey(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function formatUpdatedDayKey(dayKey) {
+  if (!dayKey) return '—';
+  const [y, m, d] = dayKey.split('-');
+  if (!y || !m || !d) return dayKey;
+  return `${d}.${m}.${y}`;
+}
+
+function MultiSelectFilter({ label, options, selectedValues, onToggle }) {
+  const selectedCount = selectedValues.length;
+  return (
+    <details className="filter-field relative w-28">
+      <summary className={`${filterInputCls} cursor-pointer list-none`}>
+        <span className="inline-flex w-full items-center justify-between gap-2">
+          <span className="truncate">{label}</span>
+          <span className="text-zinc-500 text-2xs">{selectedCount ? `${selectedCount}` : '▼'}</span>
+        </span>
+      </summary>
+      <div className="absolute z-30 mt-1 w-56 max-h-64 overflow-y-auto rounded-lg border border-white/10 bg-surface-900 p-2 shadow-xl">
+        {options.length === 0 && (
+          <p className="px-1 py-1 text-2xs text-zinc-500">Нет вариантов</p>
+        )}
+        {options.map((option) => (
+          <label key={option.value} className="flex items-center gap-2 px-1 py-1.5 text-2xs text-zinc-200 hover:bg-white/5 rounded">
+            <input
+              type="checkbox"
+              checked={selectedValues.includes(option.value)}
+              onChange={() => onToggle(option.value)}
+            />
+            <span className="truncate">{option.label}</span>
+          </label>
+        ))}
+      </div>
+    </details>
+  );
 }
 
 function ThWithSum({ label, column, sortBy, sortDir, onSort, sum, sumClassName = 'text-zinc-500', align = 'right' }) {
@@ -118,7 +173,7 @@ export default function Warehouse({ user }) {
   const [issueUserQuery, setIssueUserQuery] = useState('');
   const [users, setUsers] = useState([]);
   const [showQrMaterial, setShowQrMaterial] = useState(null);
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [filters, setFilters] = useState(() => createEmptyFilters());
   const [sortBy, setSortBy] = useState('name');
   const [sortDir, setSortDir] = useState('asc');
   const [importPreviewing, setImportPreviewing] = useState(false);
@@ -629,29 +684,29 @@ export default function Warehouse({ user }) {
   };
 
   const warehousesForFilter = useMemo(() => {
-    if (!filters.object_id) return catalog.warehouses;
-    const oid = Number(filters.object_id);
-    return catalog.warehouses.filter((w) => w.object_id === oid);
-  }, [catalog.warehouses, filters.object_id]);
+    if (!filters.object_ids.length) return catalog.warehouses;
+    const objectIds = new Set(filters.object_ids.map((id) => Number(id)));
+    return catalog.warehouses.filter((w) => objectIds.has(Number(w.object_id)));
+  }, [catalog.warehouses, filters.object_ids]);
 
   const racksForFilter = useMemo(() => {
-    if (!filters.warehouse_id) return catalog.racks;
-    const wid = Number(filters.warehouse_id);
-    return catalog.racks.filter((r) => r.warehouse_id === wid);
-  }, [catalog.racks, filters.warehouse_id]);
+    if (!filters.warehouse_ids.length) return catalog.racks;
+    const warehouseIds = new Set(filters.warehouse_ids.map((id) => Number(id)));
+    return catalog.racks.filter((r) => warehouseIds.has(Number(r.warehouse_id)));
+  }, [catalog.racks, filters.warehouse_ids]);
 
-  const hasActiveFilters = Object.values(filters).some(Boolean);
+  const hasActiveFilters = Object.values(filters).some((values) => Array.isArray(values) && values.length > 0);
 
   const filteredList = useMemo(() => displayList.filter((m) => {
-    if (filters.code && !(m.code || '').toLowerCase().includes(filters.code.toLowerCase())) return false;
-    if (filters.name && !(m.name || '').toLowerCase().includes(filters.name.toLowerCase())) return false;
-    if (filters.object_id && String(m.object_id) !== filters.object_id) return false;
-    if (filters.warehouse_id && String(m.warehouse_id) !== filters.warehouse_id) return false;
-    if (filters.rack_id && String(m.rack_id) !== filters.rack_id) return false;
-    if (filters.category_id && String(m.category_id) !== filters.category_id) return false;
-    if (filters.unit && !(m.unit || '').toLowerCase().includes(filters.unit.toLowerCase())) return false;
-    if (filters.stock === 'zero' && Number(m.quantity) !== 0) return false;
-    if (filters.stock === 'positive' && !(Number(m.quantity) > 0)) return false;
+    if (filters.codes.length && !filters.codes.includes(String(m.code || ''))) return false;
+    if (filters.object_ids.length && !filters.object_ids.includes(String(m.object_id || ''))) return false;
+    if (filters.warehouse_ids.length && !filters.warehouse_ids.includes(String(m.warehouse_id || ''))) return false;
+    if (filters.rack_ids.length && !filters.rack_ids.includes(String(m.rack_id || ''))) return false;
+    if (filters.category_ids.length && !filters.category_ids.includes(String(m.category_id || ''))) return false;
+    if (filters.system_ids.length && !filters.system_ids.includes(String(m.system_id || ''))) return false;
+    if (filters.organization_ids.length && !filters.organization_ids.includes(String(m.organization_id || ''))) return false;
+    if (filters.units.length && !filters.units.includes(String(m.unit || ''))) return false;
+    if (filters.updated_dates.length && !filters.updated_dates.includes(updatedDayKey(m.updated_at))) return false;
     return true;
   }), [displayList, filters]);
 
@@ -661,10 +716,7 @@ export default function Warehouse({ user }) {
     items.sort((a, b) => {
       let va;
       let vb;
-      if (sortBy === 'location') {
-        va = materialRowLocation(a).toLowerCase();
-        vb = materialRowLocation(b).toLowerCase();
-      } else if (sortBy === 'updated_at') {
+      if (sortBy === 'updated_at') {
         va = new Date(a.updated_at || 0).getTime();
         vb = new Date(b.updated_at || 0).getTime();
       } else if (sortBy === 'cost_total') {
@@ -723,6 +775,29 @@ export default function Warehouse({ user }) {
     }
   };
 
+  const codeFilterOptions = useMemo(
+    () => Array.from(new Set(displayList.map((row) => String(row.code || '').trim()).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, 'ru'))
+      .map((value) => ({ value, label: value })),
+    [displayList],
+  );
+
+  const unitFilterOptions = useMemo(
+    () => Array.from(new Set(displayList.map((row) => String(row.unit || '').trim()).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, 'ru'))
+      .map((value) => ({ value, label: value })),
+    [displayList],
+  );
+
+  const updatedFilterOptions = useMemo(
+    () => Array.from(
+      new Set(displayList.map((row) => updatedDayKey(row.updated_at)).filter(Boolean)),
+    )
+      .sort((a, b) => b.localeCompare(a))
+      .map((value) => ({ value, label: formatUpdatedDayKey(value) })),
+    [displayList],
+  );
+
   const totals = useMemo(() => {
     let quantity = 0;
     let price = 0;
@@ -758,34 +833,50 @@ export default function Warehouse({ user }) {
     return sortDir === 'asc' ? <span>↑</span> : <span>↓</span>;
   };
 
-  const resetFilters = () => setFilters(EMPTY_FILTERS);
+  const resetFilters = () => setFilters(createEmptyFilters());
 
-  const onFilterObject = (objectId) => {
-    setFilters((f) => {
-      const wh = objectId
-        ? catalog.warehouses.filter((w) => String(w.object_id) === objectId)
+  const toggleFilterValue = (key, value) => {
+    setFilters((prev) => ({
+      ...prev,
+      [key]: toggleMultiSelectValue(prev[key], value),
+    }));
+  };
+
+  const toggleObjectFilter = (objectId) => {
+    setFilters((prev) => {
+      const nextObjectIds = toggleMultiSelectValue(prev.object_ids, objectId);
+      const allowedWarehouses = nextObjectIds.length
+        ? catalog.warehouses.filter((w) => nextObjectIds.includes(String(w.object_id)))
         : catalog.warehouses;
-      const keepWh = wh.some((w) => String(w.id) === f.warehouse_id);
-      const rackList = keepWh && f.warehouse_id
-        ? catalog.racks.filter((r) => String(r.warehouse_id) === f.warehouse_id)
-        : [];
-      const keepRack = rackList.some((r) => String(r.id) === f.rack_id);
+      const allowedWarehouseIds = new Set(allowedWarehouses.map((w) => String(w.id)));
+      const nextWarehouseIds = prev.warehouse_ids.filter((id) => allowedWarehouseIds.has(id));
+      const allowedRacks = nextWarehouseIds.length
+        ? catalog.racks.filter((r) => nextWarehouseIds.includes(String(r.warehouse_id)))
+        : catalog.racks;
+      const allowedRackIds = new Set(allowedRacks.map((r) => String(r.id)));
+      const nextRackIds = prev.rack_ids.filter((id) => allowedRackIds.has(id));
       return {
-        ...f,
-        object_id: objectId,
-        warehouse_id: keepWh ? f.warehouse_id : '',
-        rack_id: keepRack ? f.rack_id : '',
+        ...prev,
+        object_ids: nextObjectIds,
+        warehouse_ids: nextWarehouseIds,
+        rack_ids: nextRackIds,
       };
     });
   };
 
-  const onFilterWarehouse = (warehouseId) => {
-    setFilters((f) => {
-      const rackList = warehouseId
-        ? catalog.racks.filter((r) => String(r.warehouse_id) === warehouseId)
-        : [];
-      const keepRack = rackList.some((r) => String(r.id) === f.rack_id);
-      return { ...f, warehouse_id: warehouseId, rack_id: keepRack ? f.rack_id : '' };
+  const toggleWarehouseFilter = (warehouseId) => {
+    setFilters((prev) => {
+      const nextWarehouseIds = toggleMultiSelectValue(prev.warehouse_ids, warehouseId);
+      const allowedRacks = nextWarehouseIds.length
+        ? catalog.racks.filter((r) => nextWarehouseIds.includes(String(r.warehouse_id)))
+        : catalog.racks;
+      const allowedRackIds = new Set(allowedRacks.map((r) => String(r.id)));
+      const nextRackIds = prev.rack_ids.filter((id) => allowedRackIds.has(id));
+      return {
+        ...prev,
+        warehouse_ids: nextWarehouseIds,
+        rack_ids: nextRackIds,
+      };
     });
   };
 
@@ -945,6 +1036,13 @@ export default function Warehouse({ user }) {
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-1">
+          <button
+            type="button"
+            onClick={() => { closeMaterialAction(); setShowScan(true); setError(''); }}
+            className="btn-primary basis-full w-full sm:basis-auto sm:w-auto order-first py-3 sm:py-2 text-sm -mt-1 sm:mt-0"
+          >
+            Распознать QR код
+          </button>
           {hasActiveFilters && (
             <button type="button" onClick={resetFilters} className="btn-ghost">
               Сброс
@@ -983,13 +1081,6 @@ export default function Warehouse({ user }) {
             title="Выгрузить отображаемые строки в PDF"
           >
             PDF
-          </button>
-          <button
-            type="button"
-            onClick={() => { closeMaterialAction(); setShowScan(true); setError(''); }}
-            className="btn-primary"
-          >
-            QR
           </button>
           <button type="button" onClick={openAdd} className="btn-secondary">
             + Материал
@@ -1265,89 +1356,85 @@ export default function Warehouse({ user }) {
 
       <div className="table-wrap">
         <div className="filter-toolbar">
-          <div className="filter-field w-16">
-            <span className="filter-label">Код</span>
-            <input
-              type="text"
-              value={filters.code}
-              onChange={(e) => setFilters((f) => ({ ...f, code: e.target.value }))}
-              className={filterInputCls}
-            />
-          </div>
-          <div className="filter-field flex-1 min-w-[6rem]">
-            <span className="filter-label">Название</span>
-            <input
-              type="text"
-              value={filters.name}
-              onChange={(e) => setFilters((f) => ({ ...f, name: e.target.value }))}
-              className={filterInputCls}
-            />
-          </div>
-          <div className="filter-field w-20">
-            <span className="filter-label">Объект</span>
-            <select value={filters.object_id} onChange={(e) => onFilterObject(e.target.value)} className={filterInputCls}>
-              <option value="">—</option>
-              {catalog.objects.map((o) => (
-                <option key={o.id} value={o.id}>{o.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="filter-field w-20">
-            <span className="filter-label">Склад</span>
-            <select value={filters.warehouse_id} onChange={(e) => onFilterWarehouse(e.target.value)} className={filterInputCls}>
-              <option value="">—</option>
-              {warehousesForFilter.map((w) => (
-                <option key={w.id} value={w.id}>{w.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="filter-field w-20">
-            <span className="filter-label">Стеллаж</span>
-            <select value={filters.rack_id} onChange={(e) => setFilters((f) => ({ ...f, rack_id: e.target.value }))} className={filterInputCls}>
-              <option value="">—</option>
-              {racksForFilter.map((r) => (
-                <option key={r.id} value={r.id}>{r.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="filter-field w-20">
-            <span className="filter-label">Катег.</span>
-            <select value={filters.category_id} onChange={(e) => setFilters((f) => ({ ...f, category_id: e.target.value }))} className={filterInputCls}>
-              <option value="">—</option>
-              {catalog.categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="filter-field w-12">
-            <span className="filter-label">Ед.</span>
-            <input
-              type="text"
-              value={filters.unit}
-              onChange={(e) => setFilters((f) => ({ ...f, unit: e.target.value }))}
-              className={filterInputCls}
-            />
-          </div>
-          <div className="filter-field w-20">
-            <span className="filter-label">Остаток</span>
-            <select value={filters.stock} onChange={(e) => setFilters((f) => ({ ...f, stock: e.target.value }))} className={filterInputCls}>
-              <option value="">Все</option>
-              <option value="positive">Есть</option>
-              <option value="zero">Ноль</option>
-            </select>
-          </div>
+          <MultiSelectFilter
+            label="QR код"
+            options={codeFilterOptions}
+            selectedValues={filters.codes}
+            onToggle={(value) => toggleFilterValue('codes', value)}
+          />
+          <MultiSelectFilter
+            label="Ед."
+            options={unitFilterOptions}
+            selectedValues={filters.units}
+            onToggle={(value) => toggleFilterValue('units', value)}
+          />
+          <MultiSelectFilter
+            label="Объект"
+            options={catalog.objects.map((o) => ({ value: String(o.id), label: o.name }))}
+            selectedValues={filters.object_ids}
+            onToggle={toggleObjectFilter}
+          />
+          <MultiSelectFilter
+            label="Склад"
+            options={warehousesForFilter.map((w) => ({ value: String(w.id), label: w.name }))}
+            selectedValues={filters.warehouse_ids}
+            onToggle={toggleWarehouseFilter}
+          />
+          <MultiSelectFilter
+            label="Стеллаж"
+            options={racksForFilter.map((r) => ({ value: String(r.id), label: r.name }))}
+            selectedValues={filters.rack_ids}
+            onToggle={(value) => toggleFilterValue('rack_ids', value)}
+          />
+          <MultiSelectFilter
+            label="Катег."
+            options={catalog.categories.map((c) => ({ value: String(c.id), label: c.name }))}
+            selectedValues={filters.category_ids}
+            onToggle={(value) => toggleFilterValue('category_ids', value)}
+          />
+          <MultiSelectFilter
+            label="Система"
+            options={catalog.systems.map((s) => ({ value: String(s.id), label: s.name }))}
+            selectedValues={filters.system_ids}
+            onToggle={(value) => toggleFilterValue('system_ids', value)}
+          />
+          <MultiSelectFilter
+            label="Орг."
+            options={catalog.organizations.map((o) => ({ value: String(o.id), label: o.name }))}
+            selectedValues={filters.organization_ids}
+            onToggle={(value) => toggleFilterValue('organization_ids', value)}
+          />
+          <MultiSelectFilter
+            label="Изменён"
+            options={updatedFilterOptions}
+            selectedValues={filters.updated_dates}
+            onToggle={(value) => toggleFilterValue('updated_dates', value)}
+          />
         </div>
         <div className="overflow-x-auto max-h-[calc(100vh-7.5rem)] overflow-y-auto">
           <table className="table-compact">
             <thead className="sticky top-0 bg-surface-900 z-10">
               <tr>
-                <th className="w-8" aria-label="Развернуть" />
-                <th className="w-10 text-center text-zinc-500 text-2xs font-normal">№</th>
+                <th className="w-16 text-center text-zinc-500 text-2xs font-normal">№</th>
+                <th className="w-14 text-center text-zinc-500 text-2xs font-normal">QR</th>
                 <th>
                   <button type="button" onClick={() => toggleSort('name')} className="sort-btn">
                     Наимен. <SortIcon column="name" />
                   </button>
                 </th>
+                <th>
+                  <button type="button" onClick={() => toggleSort('unit')} className="sort-btn">
+                    Ед. <SortIcon column="unit" />
+                  </button>
+                </th>
+                <ThWithSum
+                  label="Кол."
+                  column="quantity"
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  onSort={toggleSort}
+                  sum={formatSumQty(totals.quantity)}
+                />
                 <th>
                   <button type="button" onClick={() => toggleSort('object_name')} className="sort-btn">
                     Объект <SortIcon column="object_name" />
@@ -1378,19 +1465,6 @@ export default function Warehouse({ user }) {
                     Кат. <SortIcon column="category_name" />
                   </button>
                 </th>
-                <th>
-                  <button type="button" onClick={() => toggleSort('unit')} className="sort-btn">
-                    Ед. <SortIcon column="unit" />
-                  </button>
-                </th>
-                <ThWithSum
-                  label="Кол."
-                  column="quantity"
-                  sortBy={sortBy}
-                  sortDir={sortDir}
-                  onSort={toggleSort}
-                  sum={formatSumQty(totals.quantity)}
-                />
                 <ThWithSum
                   label="Стоимость за ед."
                   column="price"
@@ -1466,21 +1540,37 @@ export default function Warehouse({ user }) {
                       title={row._pending ? 'Ожидает отправки на сервер' : undefined}
                       onClick={() => (isChild ? openMaterialMenu(row) : openMaterialRowClick(row))}
                     >
-                      <td className="w-8 text-center" onClick={(e) => e.stopPropagation()}>
-                        {!isChild && isGroup ? (
+                      <td className="text-center text-zinc-500 text-2xs tabular-nums whitespace-nowrap">
+                        <span className="inline-flex items-center justify-center gap-1 min-w-[3rem]">
+                          {!isChild && isGroup ? (
+                            <button
+                              type="button"
+                              onClick={(e) => toggleGroupExpand(e, m)}
+                              className="w-5 h-5 inline-flex items-center justify-center rounded hover:bg-white/10 text-zinc-400"
+                              title={expanded ? 'Свернуть части' : 'Показать части'}
+                              aria-expanded={expanded}
+                            >
+                              {expanded ? '▼' : '▶'}
+                            </button>
+                          ) : (
+                            <span className="inline-block w-5" />
+                          )}
+                          <span>{isChild ? `${globalRowIndex + 1}.${childIndex}` : globalRowIndex + 1}</span>
+                        </span>
+                      </td>
+                      <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                        {row.code ? (
                           <button
                             type="button"
-                            onClick={(e) => toggleGroupExpand(e, m)}
-                            className="w-6 h-6 inline-flex items-center justify-center rounded hover:bg-white/10 text-zinc-400"
-                            title={expanded ? 'Свернуть части' : 'Показать части'}
-                            aria-expanded={expanded}
+                            onClick={() => setShowQrMaterial(row)}
+                            className="p-0.5 rounded hover:bg-white/10"
+                            title={materialQrHoverTitle(row)}
                           >
-                            {expanded ? '▼' : '▶'}
+                            <QRCodeSVG value={row.code} size={22} level="M" className="rounded bg-white p-0.5" />
                           </button>
-                        ) : null}
-                      </td>
-                      <td className="text-center text-zinc-500 text-2xs tabular-nums">
-                        {isChild ? `${globalRowIndex + 1}.${childIndex}` : globalRowIndex + 1}
+                        ) : (
+                          <span className="text-zinc-600">—</span>
+                        )}
                       </td>
                       <td
                         className={`text-white max-w-[14rem] ${isChild ? 'pl-4' : ''}`}
@@ -1507,25 +1597,7 @@ export default function Warehouse({ user }) {
                           </>
                         )}
                       </td>
-                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.object_name || ''}>
-                        {row.object_name || '—'}
-                      </td>
-                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.warehouse_name || ''}>
-                        {row.warehouse_name || '—'}
-                      </td>
-                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.rack_name || ''}>
-                        {row.rack_name || '—'}
-                      </td>
-                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.system_name || ''}>
-                        {row.system_name || '—'}
-                      </td>
-                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.organization_name || ''}>
-                        {row.organization_name || '—'}
-                      </td>
-                      <td className="text-zinc-500 truncate max-w-[5rem]" title={row.category_name || ''}>
-                        {row.category_name || '—'}
-                      </td>
-                      <td className="text-zinc-500">{row.unit}</td>
+                      <td className="text-zinc-500">{row.unit || m.unit || '—'}</td>
                       <td className="text-right">
                         <button
                           type="button"
@@ -1544,6 +1616,24 @@ export default function Warehouse({ user }) {
                           )}
                         </button>
                       </td>
+                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.object_name || ''}>
+                        {row.object_name || '—'}
+                      </td>
+                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.warehouse_name || ''}>
+                        {row.warehouse_name || '—'}
+                      </td>
+                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.rack_name || ''}>
+                        {row.rack_name || '—'}
+                      </td>
+                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.system_name || ''}>
+                        {row.system_name || '—'}
+                      </td>
+                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.organization_name || ''}>
+                        {row.organization_name || '—'}
+                      </td>
+                      <td className="text-zinc-500 truncate max-w-[5rem]" title={row.category_name || ''}>
+                        {row.category_name || '—'}
+                      </td>
                       <td className="text-right text-zinc-400 tabular-nums">{rowUnitPrice.toFixed(2)}</td>
                       <td className="text-right text-white tabular-nums font-medium">{rowCost.toFixed(2)}</td>
                       <td className="text-right text-zinc-400 tabular-nums">{rowUnitSmr.toFixed(2)}</td>
@@ -1560,19 +1650,6 @@ export default function Warehouse({ user }) {
                           >
                             Изм
                           </button>
-                          {row.code && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setShowQrMaterial(row);
-                              }}
-                              className="p-0.5 rounded hover:bg-white/10"
-                              title={materialQrHoverTitle(row)}
-                            >
-                              <QRCodeSVG value={row.code} size={22} level="M" className="rounded bg-white p-0.5" />
-                            </button>
-                          )}
                         </div>
                       </td>
                     </tr>
@@ -1584,9 +1661,7 @@ export default function Warehouse({ user }) {
                     {renderRow(m)}
                     {isGroup && expanded && partsLoading && childParts.length === 0 && (
                       <tr className="bg-zinc-900/50">
-                        <td />
-                        <td />
-                        <td colSpan={15} className="text-2xs text-zinc-500 py-2 pl-4">
+                        <td colSpan={17} className="text-2xs text-zinc-500 py-2 pl-4">
                           Загрузка частей…
                         </td>
                       </tr>
