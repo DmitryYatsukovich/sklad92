@@ -44,8 +44,6 @@ import { isQuickDeviceEnabled } from '../lib/offlineCache';
 
 function createEmptyFilters() {
   return {
-    codes: [],
-    units: [],
     object_ids: [],
     warehouse_ids: [],
     rack_ids: [],
@@ -181,6 +179,7 @@ export default function Warehouse({ user }) {
   const [users, setUsers] = useState([]);
   const [showQrMaterial, setShowQrMaterial] = useState(null);
   const [filters, setFilters] = useState(() => createEmptyFilters());
+  const [nameSearch, setNameSearch] = useState('');
   const [sortBy, setSortBy] = useState('name');
   const [sortDir, setSortDir] = useState('asc');
   const [importPreviewing, setImportPreviewing] = useState(false);
@@ -702,20 +701,23 @@ export default function Warehouse({ user }) {
     return catalog.racks.filter((r) => warehouseIds.has(Number(r.warehouse_id)));
   }, [catalog.racks, filters.warehouse_ids]);
 
-  const hasActiveFilters = Object.values(filters).some((values) => Array.isArray(values) && values.length > 0);
+  const hasActiveFilters = useMemo(
+    () => Object.values(filters).some((values) => Array.isArray(values) && values.length > 0) || Boolean(nameSearch.trim()),
+    [filters, nameSearch],
+  );
 
   const filteredList = useMemo(() => displayList.filter((m) => {
-    if (filters.codes.length && !filters.codes.includes(String(m.code || ''))) return false;
+    const query = nameSearch.trim().toLowerCase();
+    if (query && !String(m.name || '').toLowerCase().includes(query)) return false;
     if (filters.object_ids.length && !filters.object_ids.includes(String(m.object_id || ''))) return false;
     if (filters.warehouse_ids.length && !filters.warehouse_ids.includes(String(m.warehouse_id || ''))) return false;
     if (filters.rack_ids.length && !filters.rack_ids.includes(String(m.rack_id || ''))) return false;
     if (filters.category_ids.length && !filters.category_ids.includes(String(m.category_id || ''))) return false;
     if (filters.system_ids.length && !filters.system_ids.includes(String(m.system_id || ''))) return false;
     if (filters.organization_ids.length && !filters.organization_ids.includes(String(m.organization_id || ''))) return false;
-    if (filters.units.length && !filters.units.includes(String(m.unit || ''))) return false;
     if (filters.updated_dates.length && !filters.updated_dates.includes(updatedDayKey(m.updated_at))) return false;
     return true;
-  }), [displayList, filters]);
+  }), [displayList, filters, nameSearch]);
 
   const sortedList = useMemo(() => {
     const items = [...filteredList];
@@ -782,20 +784,6 @@ export default function Warehouse({ user }) {
       setSplitSaved(false);
     }
   };
-
-  const codeFilterOptions = useMemo(
-    () => Array.from(new Set(displayList.map((row) => String(row.code || '').trim()).filter(Boolean)))
-      .sort(naturalStringCompare)
-      .map((value) => ({ value, label: value })),
-    [displayList],
-  );
-
-  const unitFilterOptions = useMemo(
-    () => Array.from(new Set(displayList.map((row) => String(row.unit || '').trim()).filter(Boolean)))
-      .sort(naturalStringCompare)
-      .map((value) => ({ value, label: value })),
-    [displayList],
-  );
 
   const updatedFilterOptions = useMemo(
     () => Array.from(
@@ -884,7 +872,10 @@ export default function Warehouse({ user }) {
     return { quantity, price, smr, costTotal, smrTotal };
   }, [sortedList]);
 
-  const paginationResetKey = useMemo(() => JSON.stringify(filters), [filters]);
+  const paginationResetKey = useMemo(
+    () => JSON.stringify({ filters, nameSearch: nameSearch.trim().toLowerCase() }),
+    [filters, nameSearch],
+  );
   const pagination = useListPagination(sortedList, 'warehouse-page-size', paginationResetKey);
 
   const toggleSort = (col) => {
@@ -900,7 +891,10 @@ export default function Warehouse({ user }) {
     return sortDir === 'asc' ? <span>↑</span> : <span>↓</span>;
   };
 
-  const resetFilters = () => setFilters(createEmptyFilters());
+  const resetFilters = () => {
+    setFilters(createEmptyFilters());
+    setNameSearch('');
+  };
 
   const toggleFilterValue = (key, value) => {
     setFilters((prev) => ({
@@ -1428,18 +1422,6 @@ export default function Warehouse({ user }) {
       <div className="table-wrap">
         <div className="filter-toolbar">
           <MultiSelectFilter
-            label="QR код"
-            options={codeFilterOptions}
-            selectedValues={filters.codes}
-            onToggle={(value) => toggleFilterValue('codes', value)}
-          />
-          <MultiSelectFilter
-            label="Ед."
-            options={unitFilterOptions}
-            selectedValues={filters.units}
-            onToggle={(value) => toggleFilterValue('units', value)}
-          />
-          <MultiSelectFilter
             label="Объект"
             options={objectFilterOptions}
             selectedValues={filters.object_ids}
@@ -1480,6 +1462,15 @@ export default function Warehouse({ user }) {
             options={updatedFilterOptions}
             selectedValues={filters.updated_dates}
             onToggle={(value) => toggleFilterValue('updated_dates', value)}
+          />
+        </div>
+        <div className="px-2 pb-2 bg-surface-850 border-b border-white/10">
+          <input
+            type="text"
+            value={nameSearch}
+            onChange={(e) => setNameSearch(e.target.value)}
+            className="filter-input"
+            placeholder="Поиск по наименованию"
           />
         </div>
         <div className="overflow-x-auto max-h-[calc(100vh-7.5rem)] overflow-y-auto">
@@ -1573,6 +1564,11 @@ export default function Warehouse({ user }) {
                 <th>
                   <button type="button" onClick={() => toggleSort('updated_at')} className="sort-btn">
                     Изменён <SortIcon column="updated_at" />
+                  </button>
+                </th>
+                <th>
+                  <button type="button" onClick={() => toggleSort('description')} className="sort-btn">
+                    Описание <SortIcon column="description" />
                   </button>
                 </th>
                 <th className="w-24" />
@@ -1712,6 +1708,9 @@ export default function Warehouse({ user }) {
                       <td className="text-zinc-500 text-2xs whitespace-nowrap" title={formatUpdatedAt(row.updated_at)}>
                         {formatUpdatedAt(row.updated_at)}
                       </td>
+                      <td className="text-zinc-400 text-2xs max-w-[20rem] truncate" title={row.description || ''}>
+                        {row.description || '—'}
+                      </td>
                       <td onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1 justify-end">
                           <button
@@ -1732,7 +1731,7 @@ export default function Warehouse({ user }) {
                     {renderRow(m)}
                     {isGroup && expanded && partsLoading && childParts.length === 0 && (
                       <tr className="bg-zinc-900/50">
-                        <td colSpan={17} className="text-2xs text-zinc-500 py-2 pl-4">
+                        <td colSpan={18} className="text-2xs text-zinc-500 py-2 pl-4">
                           Загрузка частей…
                         </td>
                       </tr>
@@ -1818,6 +1817,15 @@ export default function Warehouse({ user }) {
                 {editing && isMaterialPart(editing) && (
                   <p className="text-2xs text-zinc-500 mt-1">Наименование общее для всех частей материала</p>
                 )}
+              </div>
+              <div>
+                <label className="label">Описание</label>
+                <textarea
+                  value={form.description || ''}
+                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                  className="input min-h-[4.5rem]"
+                  placeholder="Описание материала (необязательно)"
+                />
               </div>
               {editing && isMaterialPart(editing) && (
                 <div>

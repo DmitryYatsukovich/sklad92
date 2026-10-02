@@ -2,6 +2,7 @@ export const UNITS = ['шт', 'кг', 'л', 'м', 'м²', 'упак', 'рул'];
 
 export const emptyMaterialForm = () => ({
   name: '',
+  description: '',
   unit: 'шт',
   price: '',
   production_price: '',
@@ -17,6 +18,7 @@ export const emptyMaterialForm = () => ({
 export function materialToForm(m) {
   return {
     name: m.name || '',
+    description: m.description || '',
     unit: m.unit || 'шт',
     price: m.price != null ? String(m.price) : '',
     production_price: m.production_price != null ? String(m.production_price) : '',
@@ -143,6 +145,7 @@ export function splitQuantitiesEvenly(parts, totalQty) {
 export function formToPayload(form, { includeQuantity = false, includePartLabel = false } = {}) {
   const body = {
     name: form.name.trim(),
+    description: String(form.description || '').trim() || null,
     unit: form.unit.trim() || 'шт',
     price: parseFloat(form.price) || 0,
     production_price: parseFloat(form.production_price) || 0,

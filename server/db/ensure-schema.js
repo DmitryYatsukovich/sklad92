@@ -48,6 +48,7 @@ const statements = [
   `ALTER TABLE materials ADD COLUMN IF NOT EXISTS parent_material_id INTEGER REFERENCES materials(id) ON DELETE CASCADE`,
   `ALTER TABLE materials ADD COLUMN IF NOT EXISTS part_index INTEGER`,
   `ALTER TABLE materials ADD COLUMN IF NOT EXISTS part_label VARCHAR(120)`,
+  `ALTER TABLE materials ADD COLUMN IF NOT EXISTS description TEXT`,
   `CREATE INDEX IF NOT EXISTS idx_materials_parent ON materials(parent_material_id)`,
   `CREATE TABLE IF NOT EXISTS material_quantity_log (
     id SERIAL PRIMARY KEY,

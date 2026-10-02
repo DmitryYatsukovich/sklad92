@@ -153,19 +153,25 @@ async function fetchMaterialRow(client, id) {
 }
 
 async function insertMaterial(client, {
-  code, name, unit, price, production_price, quantity,
+  code, name, description, unit, price, production_price, quantity,
   object_id, warehouse_id, rack_id, category_id, system_id, organization_id,
   parent_material_id, part_index, part_label,
 }) {
   const ins = await client.query(
     `INSERT INTO materials (
-       code, name, unit, price, production_price, quantity,
+       code, name, description, unit, price, production_price, quantity,
        object_id, warehouse_id, rack_id, category_id, system_id, organization_id,
        parent_material_id, part_index, part_label
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      RETURNING id`,
     [
-      code, name.trim(), (unit || 'шт').trim(), price, production_price, quantity,
+      code,
+      name.trim(),
+      String(description || '').trim() || null,
+      (unit || 'шт').trim(),
+      price,
+      production_price,
+      quantity,
       object_id, warehouse_id, rack_id, category_id, system_id, organization_id,
       parent_material_id || null, part_index ?? null, part_label || null,
     ],
@@ -224,10 +230,11 @@ router.get('/:id/parts', requirePermission('can_warehouse'), async (req, res) =>
 
 router.post('/', requirePermission('can_warehouse'), async (req, res) => {
   const {
-    name, unit, price, production_price, quantity,
+    name, description, unit, price, production_price, quantity,
     object_id, warehouse_id, rack_id, category_id, system_id, organization_id,
     parts,
   } = req.body || {};
+  const descriptionValue = String(description || '').trim() || null;
   if (!name?.trim()) {
     return res.status(400).json({ error: 'Укажите наименование' });
   }
@@ -277,6 +284,7 @@ router.post('/', requirePermission('can_warehouse'), async (req, res) => {
       const parentId = await insertMaterial(client, {
         code: parentCode,
         name: name.trim(),
+        description: descriptionValue,
         unit: unitVal,
         price: priceVal,
         production_price: prodPrice,
@@ -296,6 +304,7 @@ router.post('/', requirePermission('can_warehouse'), async (req, res) => {
         const childId = await insertMaterial(client, {
           code: childCode,
           name: name.trim(),
+          description: descriptionValue,
           unit: unitVal,
           price: priceVal,
           production_price: prodPrice,
@@ -356,6 +365,7 @@ router.post('/', requirePermission('can_warehouse'), async (req, res) => {
     const id = await insertMaterial(client, {
       code,
       name: name.trim(),
+      description: descriptionValue,
       unit: (unit || 'шт').trim(),
       price: priceVal,
       production_price: prodPrice,
@@ -391,7 +401,7 @@ router.post('/:id/split', requirePermission('can_warehouse'), async (req, res) =
 
   const {
     parts,
-    name, unit, price, production_price, category_id, system_id, organization_id,
+    name, description, unit, price, production_price, category_id, system_id, organization_id,
   } = req.body || {};
   const splitParts = Array.isArray(parts) ? parts : [];
   if (splitParts.length < 1) {
@@ -402,7 +412,7 @@ router.post('/:id/split', requirePermission('can_warehouse'), async (req, res) =
   try {
     await client.query('BEGIN');
     const row = (await client.query(
-      `SELECT id, parent_material_id, quantity, name, unit, price, production_price, category_id, system_id, organization_id
+      `SELECT id, parent_material_id, quantity, name, description, unit, price, production_price, category_id, system_id, organization_id
        FROM materials WHERE id = $1 FOR UPDATE`,
       [id],
     )).rows[0];
@@ -435,6 +445,9 @@ router.post('/:id/split', requirePermission('can_warehouse'), async (req, res) =
       ? (parseFloat(production_price) || 0)
       : (parseFloat(row.production_price) || 0);
     const nameVal = (name !== undefined ? (name || '').trim() : row.name) || row.name;
+    const descriptionVal = description !== undefined
+      ? (String(description || '').trim() || null)
+      : (String(row.description || '').trim() || null);
     if (!nameVal) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Укажите наименование' });
@@ -495,11 +508,11 @@ router.post('/:id/split', requirePermission('can_warehouse'), async (req, res) =
 
     await client.query(
       `UPDATE materials SET
-        name = $1, unit = $2, price = $3, production_price = $4, category_id = $5, system_id = $6, organization_id = $7,
+        name = $1, description = $2, unit = $3, price = $4, production_price = $5, category_id = $6, system_id = $7, organization_id = $8,
         quantity = 0, object_id = NULL, warehouse_id = NULL, rack_id = NULL,
         updated_at = NOW()
-       WHERE id = $8`,
-      [nameVal, unitVal, priceVal, prodPrice, categoryId, systemId, organizationId, id],
+       WHERE id = $9`,
+      [nameVal, descriptionVal, unitVal, priceVal, prodPrice, categoryId, systemId, organizationId, id],
     );
 
     await logQuantityChange(client, {
@@ -518,6 +531,7 @@ router.post('/:id/split', requirePermission('can_warehouse'), async (req, res) =
       const childId = await insertMaterial(client, {
         code: childCode,
         name: nameVal,
+        description: descriptionVal,
         unit: unitVal,
         price: priceVal,
         production_price: prodPrice,
@@ -577,7 +591,7 @@ router.post('/:id/parts', requirePermission('can_warehouse'), async (req, res) =
     }
 
     const parent = (await client.query(
-      'SELECT id, name, unit, price, production_price, category_id, system_id, organization_id, parent_material_id FROM materials WHERE id = $1',
+      'SELECT id, name, description, unit, price, production_price, category_id, system_id, organization_id, parent_material_id FROM materials WHERE id = $1',
       [parentId],
     )).rows[0];
     if (!parent) {
@@ -589,7 +603,7 @@ router.post('/:id/parts', requirePermission('can_warehouse'), async (req, res) =
     let base = parent;
     if (parent.parent_material_id) {
       base = (await client.query(
-        'SELECT id, name, unit, price, production_price, category_id, system_id, organization_id FROM materials WHERE id = $1',
+        'SELECT id, name, description, unit, price, production_price, category_id, system_id, organization_id FROM materials WHERE id = $1',
         [groupParentId],
       )).rows[0];
     } else {
@@ -618,6 +632,7 @@ router.post('/:id/parts', requirePermission('can_warehouse'), async (req, res) =
     const childId = await insertMaterial(client, {
       code: childCode,
       name: base.name,
+      description: base.description,
       unit: base.unit,
       price: parseFloat(base.price) || 0,
       production_price: parseFloat(base.production_price) || 0,
@@ -658,7 +673,7 @@ router.put('/:id', requirePermission('can_warehouse'), async (req, res) => {
   if (!id) return res.status(400).json({ error: 'Неверный id' });
 
   const {
-    name, unit, price, production_price, quantity, part_label,
+    name, description, unit, price, production_price, quantity, part_label,
     object_id, warehouse_id, rack_id, category_id, system_id, organization_id,
   } = req.body || {};
 
@@ -735,6 +750,12 @@ router.put('/:id', requirePermission('can_warehouse'), async (req, res) => {
       fields.push(`name = $${i++}`);
       vals.push(n);
     }
+    let newDescription;
+    if (description !== undefined) {
+      newDescription = String(description || '').trim() || null;
+      fields.push(`description = $${i++}`);
+      vals.push(newDescription);
+    }
     if (unit !== undefined) {
       fields.push(`unit = $${i++}`);
       vals.push((unit || 'шт').trim());
@@ -806,11 +827,24 @@ router.put('/:id', requirePermission('can_warehouse'), async (req, res) => {
       }
     }
 
-    if (newName && (hasChildren || exists.parent_material_id)) {
+    if ((newName !== undefined || newDescription !== undefined) && (hasChildren || exists.parent_material_id)) {
       const parentId = exists.parent_material_id || id;
+      const sharedFields = [];
+      const sharedVals = [];
+      let si = 1;
+      if (newName !== undefined) {
+        sharedFields.push(`name = $${si++}`);
+        sharedVals.push(newName);
+      }
+      if (newDescription !== undefined) {
+        sharedFields.push(`description = $${si++}`);
+        sharedVals.push(newDescription);
+      }
+      sharedVals.push(parentId);
       await client.query(
-        'UPDATE materials SET name = $1, updated_at = NOW() WHERE id = $2 OR parent_material_id = $2',
-        [newName, parentId],
+        `UPDATE materials SET ${sharedFields.join(', ')}, updated_at = NOW()
+         WHERE id = $${si} OR parent_material_id = $${si}`,
+        sharedVals,
       );
     }
 
