@@ -617,6 +617,41 @@ export default function Warehouse({ user }) {
     loadCatalog();
   };
 
+  const openSplitFromMenu = () => {
+    if (!activeMaterial) return;
+    if (isMaterialGroupRow(activeMaterial)) {
+      setError('Групповой материал уже разделён на части');
+      return;
+    }
+    if (isMaterialPart(activeMaterial)) {
+      setError('Часть материала разделять нельзя');
+      return;
+    }
+    const nextForm = materialToForm(activeMaterial);
+    const total = parseFloat(nextForm.quantity);
+    if (!(total > 0)) {
+      setError('Для разделения нужно количество больше 0');
+      return;
+    }
+
+    const first = defaultSplitParts(1, nextForm)[0];
+    setForm(nextForm);
+    setEditing(activeMaterial);
+    setShowAdd(false);
+    setSplitEnabled(true);
+    setSplitSaved(false);
+    setSplitParts([{
+      ...first,
+      quantity: String(total),
+      object_id: nextForm.object_id || first.object_id,
+      warehouse_id: nextForm.warehouse_id || first.warehouse_id,
+      rack_id: nextForm.rack_id || first.rack_id,
+    }]);
+    closeMaterialAction();
+    setError('');
+    loadCatalog();
+  };
+
   const handleMoveMaterial = async (e) => {
     e.preventDefault();
     if (!activeMaterial || isMaterialGroupRow(activeMaterial)) return;
@@ -2142,6 +2177,11 @@ export default function Warehouse({ user }) {
               {!isMaterialGroupRow(activeMaterial) && (
                 <button type="button" onClick={openMoveStep} className="btn-secondary w-full py-2.5">
                   Переместить
+                </button>
+              )}
+              {!isMaterialGroupRow(activeMaterial) && !isMaterialPart(activeMaterial) && (
+                <button type="button" onClick={openSplitFromMenu} className="btn-secondary w-full py-2.5">
+                  Разделить
                 </button>
               )}
               <button type="button" onClick={closeMaterialAction} className="btn-ghost w-full py-2">
