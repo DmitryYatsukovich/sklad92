@@ -1149,7 +1149,11 @@ export default function Warehouse({ user }) {
           >
             PDF
           </button>
-          <button type="button" onClick={openAdd} className="btn-secondary">
+          <button
+            type="button"
+            onClick={openAdd}
+            className="btn-secondary basis-full w-full sm:basis-auto sm:w-auto order-first sm:order-none"
+          >
             + Материал
           </button>
           {isAdmin && (
