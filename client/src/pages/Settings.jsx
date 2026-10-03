@@ -46,6 +46,7 @@ const EMPTY_CATALOG = {
   tool_types: [],
 };
 const FLOOR_ROOMS_BUCKET_NAME = 'Помещения этажа';
+const FLOOR_ROOMS_DISPLAY_TITLE = 'Помещения на этаже';
 
 function isRowObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -93,6 +94,11 @@ function naturalCompare(a, b) {
 
 function sortByNaturalName(items) {
   return [...items].sort((a, b) => naturalCompare(a?.name, b?.name));
+}
+
+function toggleSelection(list, id) {
+  const key = String(id);
+  return list.includes(key) ? list.filter((x) => x !== key) : [...list, key];
 }
 
 const CATEGORY_ICON_OPTIONS = [
@@ -490,6 +496,7 @@ export default function Settings({ user }) {
   const [tab, setTab] = useState(resolveInitialTab);
   const [warehouseSubTab, setWarehouseSubTab] = useState('warehouses');
   const [workSubTab, setWorkSubTab] = useState('objects');
+  const [collapsedWorkFloors, setCollapsedWorkFloors] = useState([]);
   const [catalog, setCatalog] = useState(EMPTY_CATALOG);
   const [error, setError] = useState('');
   const [name, setName] = useState('');
@@ -782,6 +789,10 @@ export default function Settings({ user }) {
     }
   };
 
+  const toggleWorkFloorCollapse = (floorId) => {
+    setCollapsedWorkFloors((prev) => toggleSelection(prev, floorId));
+  };
+
   const extraLabel = (() => {
     if (effectiveWarehouseTab === 'warehouses') return 'Объект';
     if (effectiveWarehouseTab === 'storage') return 'Склад';
@@ -893,6 +904,11 @@ export default function Settings({ user }) {
   const modalRoomApartmentOptions = modalFloorId
     ? sortedWorkApartments.filter((a) => a.floor_id === parseInt(modalFloorId, 10) && a.name !== FLOOR_ROOMS_BUCKET_NAME)
     : [];
+  const collapsedWorkFloorSet = new Set(
+    collapsedWorkFloors
+      .map((v) => Number.parseInt(v, 10))
+      .filter((v) => Number.isInteger(v) && v > 0),
+  );
 
   useEffect(() => {
     if (!workModalOpen || workItemKind !== 'room') return;
@@ -952,12 +968,20 @@ export default function Settings({ user }) {
     setError('');
   };
 
-  const startAddFloorForEntrance = (entranceId, floorsCount = 0) => {
+  const startAddFloorForEntrance = (entranceId, floorsCount = 0, forceFloorsTab = false) => {
+    const needOpenFloorsTab = forceFloorsTab || effectiveWorkTab !== 'floors';
+    if (needOpenFloorsTab) setWorkSubTab('floors');
     setEditing(null);
     setName('');
     setSortOrder(String((floorsCount || 0) + 1));
     setParentId(String(entranceId || ''));
     setError('');
+    if (needOpenFloorsTab && typeof window !== 'undefined') {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => focusForm());
+      });
+      return;
+    }
     focusForm();
   };
 
@@ -1241,7 +1265,21 @@ export default function Settings({ user }) {
                 key={entrance.id}
                 className="rounded-xl border border-emerald-500/25 bg-emerald-950/20 p-4 space-y-3"
               >
-                <p className="text-white font-medium">{entranceOptionLabel(entrance)}</p>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-white font-medium">{entranceOptionLabel(entrance)}</p>
+                    <p className="text-zinc-400 text-xs">
+                      {floors.length ? `Этажей: ${floors.length}` : 'Этажи пока не добавлены'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => startAddFloorForEntrance(entrance.id, floors.length, true)}
+                    className="btn-secondary text-xs"
+                  >
+                    Добавить этаж
+                  </button>
+                </div>
                 {floors.length ? (
                   <div className="space-y-3">
                     {floors.map((floor) => {
@@ -1249,14 +1287,41 @@ export default function Settings({ user }) {
                       const floorRoomsBucket = floorApartmentsRaw.find((a) => a.name === FLOOR_ROOMS_BUCKET_NAME);
                       const floorRooms = floorRoomsBucket ? (roomsByApartmentId[floorRoomsBucket.id] || []) : [];
                       const floorApartments = floorApartmentsRaw.filter((a) => a.name !== FLOOR_ROOMS_BUCKET_NAME);
+                      const isCollapsed = collapsedWorkFloorSet.has(floor.id);
                       return (
                         <div
                           key={floor.id}
-                          className="rounded-lg border border-white/10 bg-black/10 p-3 space-y-2"
+                          className="rounded-lg border border-white/10 bg-black/20 p-2.5 space-y-1.5"
                         >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="text-zinc-100 text-sm font-medium">Этаж: {floor.name}</p>
-                            <div className="flex flex-wrap items-center gap-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => toggleWorkFloorCollapse(floor.id)}
+                              className="text-zinc-100 text-xs font-semibold hover:text-white text-left"
+                              title={isCollapsed ? 'Развернуть этаж' : 'Свернуть этаж'}
+                            >
+                              Этаж {floor.name}
+                            </button>
+                            <div className="flex items-center gap-2">
+                              <span className="text-2xs text-zinc-500">
+                                {floorApartments.length} / {floorRooms.length}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleMoveFloor(floor, 'up')}
+                                className="px-2 py-0.5 rounded border border-white/20 text-zinc-200 hover:bg-white/10 text-xs"
+                                title="Поднять этаж"
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleMoveFloor(floor, 'down')}
+                                className="px-2 py-0.5 rounded border border-white/20 text-zinc-200 hover:bg-white/10 text-xs"
+                                title="Опустить этаж"
+                              >
+                                ↓
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => startAddApartmentForFloor(floor.id)}
@@ -1273,58 +1338,31 @@ export default function Settings({ user }) {
                               </button>
                             </div>
                           </div>
-                          {(floorApartments.length || floorRooms.length) ? (
-                            <div className="space-y-2">
-                              {floorApartments.map((apartment) => {
-                                const apartmentRooms = roomsByApartmentId[apartment.id] || [];
-                                return (
-                                <div
-                                  key={apartment.id}
-                                  className="rounded-lg border border-white/10 bg-surface-850 px-3 py-2 space-y-2"
-                                >
-                                  <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <span className="text-white text-sm">Кв. {apartment.name}</span>
-                                    <div className="flex items-center gap-2">
-                                      <button
-                                        type="button"
-                                        onClick={() => startAddRoomForApartment(apartment.id, floor.id)}
-                                        className="text-emerald-400 hover:text-emerald-300 text-xs font-medium"
-                                      >
-                                        + Пом.
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => startEditApartmentOrRoom(apartment, 'apartment')}
-                                        className="text-sky-400 hover:text-sky-300 text-xs font-medium"
-                                      >
-                                        Изм.
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDelete({ ...apartment, _kind: 'apartment' })}
-                                        className="text-rose-400 hover:text-rose-300 text-xs font-medium"
-                                      >
-                                        Удал.
-                                      </button>
-                                    </div>
-                                  </div>
-                                  {apartmentRooms.length ? (
-                                    <div className="space-y-1 pl-2 border-l border-white/10">
-                                      {apartmentRooms.map((room) => (
-                                        <div key={room.id} className="flex flex-wrap items-center justify-between gap-2">
-                                          <span className="text-zinc-300 text-xs">Пом. {room.name}</span>
+                          {!isCollapsed && (
+                            (floorApartments.length || floorRooms.length) ? (
+                              <div className="space-y-2">
+                                {floorRooms.length ? (
+                                  <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5">
+                                    <p className="text-zinc-200 text-2xs font-medium">{FLOOR_ROOMS_DISPLAY_TITLE}</p>
+                                    <div className="mt-1 space-y-1.5">
+                                      {floorRooms.map((room) => (
+                                        <div
+                                          key={room.id}
+                                          className="rounded border border-white/10 bg-black/20 px-2 py-1.5 flex flex-wrap items-center justify-between gap-2"
+                                        >
+                                          <p className="text-zinc-200 text-2xs font-medium">Пом. {room.name}</p>
                                           <div className="flex items-center gap-2">
                                             <button
                                               type="button"
-                                              onClick={() => startEditApartmentOrRoom({ ...room, floor_id: floor.id }, 'room')}
-                                              className="text-sky-400 hover:text-sky-300 text-xs font-medium"
+                                              onClick={() => startEditApartmentOrRoom({ ...room, floor_id: floor.id, apartment_id: floorRoomsBucket?.id }, 'room')}
+                                              className="text-sky-400 hover:text-sky-300 text-2xs font-medium"
                                             >
                                               Изм.
                                             </button>
                                             <button
                                               type="button"
                                               onClick={() => handleDelete({ ...room, _kind: 'room' })}
-                                              className="text-rose-400 hover:text-rose-300 text-xs font-medium"
+                                              className="text-rose-400 hover:text-rose-300 text-2xs font-medium"
                                             >
                                               Удал.
                                             </button>
@@ -1332,41 +1370,79 @@ export default function Settings({ user }) {
                                         </div>
                                       ))}
                                     </div>
-                                  ) : (
-                                    <p className="text-zinc-500 text-xs">Помещения пока не добавлены</p>
-                                  )}
-                                </div>
-                                );
-                              })}
-                              {floorRooms.length ? (
-                                <div className="rounded-lg border border-white/10 bg-surface-850 px-3 py-2 space-y-1">
-                                  <p className="text-zinc-400 text-xs">Помещения этажа</p>
-                                  {floorRooms.map((room) => (
-                                    <div key={room.id} className="flex flex-wrap items-center justify-between gap-2">
-                                      <span className="text-zinc-300 text-xs">Пом. {room.name}</span>
-                                      <div className="flex items-center gap-2">
-                                        <button
-                                          type="button"
-                                          onClick={() => startEditApartmentOrRoom({ ...room, floor_id: floor.id, apartment_id: floorRoomsBucket?.id }, 'room')}
-                                          className="text-sky-400 hover:text-sky-300 text-xs font-medium"
-                                        >
-                                          Изм.
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleDelete({ ...room, _kind: 'room' })}
-                                          className="text-rose-400 hover:text-rose-300 text-xs font-medium"
-                                        >
-                                          Удал.
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : null}
-                            </div>
-                          ) : (
-                            <p className="text-zinc-500 text-sm">На этом этаже квартиры и помещения пока не добавлены.</p>
+                                  </div>
+                                ) : null}
+
+                                {floorApartments.length ? (
+                                  <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 space-y-1.5">
+                                    <p className="text-zinc-200 text-2xs font-medium">Квартиры на этаже</p>
+                                    {floorApartments.map((apartment) => {
+                                      const apartmentRooms = roomsByApartmentId[apartment.id] || [];
+                                      return (
+                                        <div key={apartment.id} className="rounded border border-white/10 bg-black/20 px-2 py-1.5">
+                                          <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <p className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</p>
+                                            <div className="flex items-center gap-2">
+                                              <button
+                                                type="button"
+                                                onClick={() => startAddRoomForApartment(apartment.id, floor.id)}
+                                                className="text-emerald-400 hover:text-emerald-300 text-2xs font-medium"
+                                              >
+                                                + Пом.
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => startEditApartmentOrRoom(apartment, 'apartment')}
+                                                className="text-sky-400 hover:text-sky-300 text-2xs font-medium"
+                                              >
+                                                Изм.
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleDelete({ ...apartment, _kind: 'apartment' })}
+                                                className="text-rose-400 hover:text-rose-300 text-2xs font-medium"
+                                              >
+                                                Удал.
+                                              </button>
+                                            </div>
+                                          </div>
+                                          {apartmentRooms.length ? (
+                                            <div className="mt-1 space-y-1">
+                                              {apartmentRooms.map((room) => (
+                                                <div
+                                                  key={room.id}
+                                                  className="px-1.5 py-1 rounded bg-zinc-800/80 text-zinc-300 text-[10px] leading-none flex items-center justify-between gap-2"
+                                                >
+                                                  <span>Пом. {room.name}</span>
+                                                  <div className="flex items-center gap-2">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => startEditApartmentOrRoom({ ...room, floor_id: floor.id }, 'room')}
+                                                      className="text-sky-400 hover:text-sky-300 text-[10px] font-medium"
+                                                    >
+                                                      Изм.
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => handleDelete({ ...room, _kind: 'room' })}
+                                                      className="text-rose-400 hover:text-rose-300 text-[10px] font-medium"
+                                                    >
+                                                      Удал.
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <p className="text-zinc-500 text-2xs">Квартиры и помещения еще не добавлены</p>
+                            )
                           )}
                         </div>
                       );
