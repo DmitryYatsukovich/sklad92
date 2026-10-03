@@ -45,6 +45,7 @@ const EMPTY_CATALOG = {
   work_rooms: [],
   tool_types: [],
 };
+const FLOOR_ROOMS_BUCKET_NAME = 'Помещения этажа';
 
 function isRowObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -156,6 +157,9 @@ export default function Settings({ user }) {
   const [parentId, setParentId] = useState('');
   const [sortOrder, setSortOrder] = useState('');
   const [workItemKind, setWorkItemKind] = useState('apartment');
+  const [workModalOpen, setWorkModalOpen] = useState(false);
+  const [modalFloorId, setModalFloorId] = useState('');
+  const [modalApartmentId, setModalApartmentId] = useState('');
   const [editing, setEditing] = useState(null);
   const formCardRef = useRef(null);
   const nameInputRef = useRef(null);
@@ -337,19 +341,29 @@ export default function Settings({ user }) {
         else await settingsApi.workFloors.create(payload);
       } else if (effectiveWorkTab === 'apartments') {
         if (workItemKind === 'room') {
-          const aid = parseInt(parentId, 10);
-          if (!aid) return setError('Выберите квартиру');
-          if (editing) await settingsApi.workRooms.update(editing.id, { name: n, apartment_id: aid });
-          else await settingsApi.workRooms.create({ name: n, apartment_id: aid });
+          const floorId = parseInt(modalFloorId, 10);
+          if (!floorId) return setError('Выберите этаж');
+          let apartmentId = parseInt(modalApartmentId, 10);
+          if (!apartmentId) {
+            let bucket = catalog.work_apartments.find((a) => a.floor_id === floorId && a.name === FLOOR_ROOMS_BUCKET_NAME);
+            if (!bucket) {
+              bucket = await settingsApi.workApartments.create({ name: FLOOR_ROOMS_BUCKET_NAME, floor_id: floorId });
+            }
+            apartmentId = bucket?.id;
+          }
+          if (!apartmentId) return setError('Не удалось определить квартиру для помещения');
+          if (editing) await settingsApi.workRooms.update(editing.id, { name: n, apartment_id: apartmentId });
+          else await settingsApi.workRooms.create({ name: n, apartment_id: apartmentId });
         } else {
-          const fid = parseInt(parentId, 10);
+          const fid = parseInt(modalFloorId, 10);
           if (!fid) return setError('Выберите этаж');
           if (editing) await settingsApi.workApartments.update(editing.id, { name: n, floor_id: fid });
           else await settingsApi.workApartments.create({ name: n, floor_id: fid });
         }
       }
-      resetForm();
-      load();
+      if (effectiveWorkTab === 'apartments') closeWorkModal();
+      else resetForm();
+      await load();
     } catch (err) {
       setError(err.message);
     }
@@ -491,17 +505,11 @@ export default function Settings({ user }) {
     floors: sortedWorkFloors.filter((f) => f.entrance_id === entrance.id),
   }));
   const floorById = Object.fromEntries(sortedWorkFloors.map((f) => [f.id, f]));
+  const apartmentFloorMap = Object.fromEntries(sortedWorkApartments.map((a) => [a.id, a.floor_id]));
   const apartmentsByFloorId = sortedWorkApartments.reduce((acc, apartment) => {
     const floorId = apartment.floor_id;
     if (!acc[floorId]) acc[floorId] = [];
     acc[floorId].push(apartment);
-    return acc;
-  }, {});
-  const apartmentsByEntranceId = sortedWorkApartments.reduce((acc, apartment) => {
-    const entranceId = floorById[apartment.floor_id]?.entrance_id;
-    if (!entranceId) return acc;
-    if (!acc[entranceId]) acc[entranceId] = [];
-    acc[entranceId].push(apartment);
     return acc;
   }, {});
   const roomsByApartmentId = sortedWorkRooms.reduce((acc, room) => {
@@ -510,6 +518,19 @@ export default function Settings({ user }) {
     acc[apartmentId].push(room);
     return acc;
   }, {});
+  const modalRoomApartmentOptions = modalFloorId
+    ? sortedWorkApartments.filter((a) => a.floor_id === parseInt(modalFloorId, 10) && a.name !== FLOOR_ROOMS_BUCKET_NAME)
+    : [];
+
+  useEffect(() => {
+    if (!workModalOpen || workItemKind !== 'room') return;
+    const selectedApartmentId = parseInt(modalApartmentId, 10);
+    const selectedFloorId = parseInt(modalFloorId, 10);
+    if (!selectedApartmentId || !selectedFloorId) return;
+    if (apartmentFloorMap[selectedApartmentId] !== selectedFloorId) {
+      setModalApartmentId('');
+    }
+  }, [workModalOpen, workItemKind, modalApartmentId, modalFloorId, apartmentFloorMap]);
 
   const focusForm = () => {
     if (typeof window === 'undefined') return;
@@ -517,6 +538,16 @@ export default function Settings({ user }) {
       formCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       nameInputRef.current?.focus();
     });
+  };
+
+  const closeWorkModal = () => {
+    setWorkModalOpen(false);
+    setWorkItemKind('apartment');
+    setEditing(null);
+    setName('');
+    setModalFloorId('');
+    setModalApartmentId('');
+    setError('');
   };
 
   const startAddFloorForEntrance = (entranceId, floorsCount = 0) => {
@@ -529,23 +560,55 @@ export default function Settings({ user }) {
   };
 
   const startAddApartmentForFloor = (floorId) => {
+    setWorkModalOpen(true);
     setWorkItemKind('apartment');
     setEditing(null);
     setName('');
     setSortOrder('');
-    setParentId(String(floorId || ''));
+    setModalFloorId(String(floorId || ''));
+    setModalApartmentId('');
     setError('');
-    focusForm();
   };
 
-  const startAddRoomForApartment = (apartmentId) => {
+  const startAddRoomForFloor = (floorId) => {
+    setWorkModalOpen(true);
     setWorkItemKind('room');
     setEditing(null);
     setName('');
     setSortOrder('');
-    setParentId(String(apartmentId || ''));
+    setModalFloorId(String(floorId || ''));
+    setModalApartmentId('');
     setError('');
-    focusForm();
+  };
+
+  const startAddRoomForApartment = (apartmentId, floorIdFromRow = null) => {
+    const floorId = floorIdFromRow || apartmentFloorMap[apartmentId] || '';
+    setWorkModalOpen(true);
+    setWorkItemKind('room');
+    setEditing(null);
+    setName('');
+    setSortOrder('');
+    setModalFloorId(String(floorId || ''));
+    setModalApartmentId(String(apartmentId || ''));
+    setError('');
+  };
+
+  const startEditApartmentOrRoom = (row, kind) => {
+    setWorkModalOpen(true);
+    setEditing({ ...row, _kind: kind });
+    setWorkItemKind(kind);
+    setName(row.name || '');
+    setSortOrder('');
+    if (kind === 'room') {
+      const apartmentId = row.apartment_id || '';
+      const floorId = row.floor_id || apartmentFloorMap[apartmentId] || '';
+      setModalFloorId(String(floorId || ''));
+      setModalApartmentId(String(apartmentId || ''));
+    } else {
+      setModalFloorId(String(row.floor_id || ''));
+      setModalApartmentId('');
+    }
+    setError('');
   };
 
   const settingsTabs = (
@@ -780,7 +843,10 @@ export default function Settings({ user }) {
                 {floors.length ? (
                   <div className="space-y-3">
                     {floors.map((floor) => {
-                      const floorApartments = apartmentsByFloorId[floor.id] || [];
+                      const floorApartmentsRaw = apartmentsByFloorId[floor.id] || [];
+                      const floorRoomsBucket = floorApartmentsRaw.find((a) => a.name === FLOOR_ROOMS_BUCKET_NAME);
+                      const floorRooms = floorRoomsBucket ? (roomsByApartmentId[floorRoomsBucket.id] || []) : [];
+                      const floorApartments = floorApartmentsRaw.filter((a) => a.name !== FLOOR_ROOMS_BUCKET_NAME);
                       return (
                         <div
                           key={floor.id}
@@ -798,21 +864,14 @@ export default function Settings({ user }) {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  const firstApartmentId = floorApartments[0]?.id;
-                                  if (!firstApartmentId) {
-                                    setError('Сначала добавьте квартиру на этот этаж');
-                                    return;
-                                  }
-                                  startAddRoomForApartment(firstApartmentId);
-                                }}
+                                onClick={() => startAddRoomForFloor(floor.id)}
                                 className="btn-secondary text-xs"
                               >
                                 Добавить помещение
                               </button>
                             </div>
                           </div>
-                          {floorApartments.length ? (
+                          {(floorApartments.length || floorRooms.length) ? (
                             <div className="space-y-2">
                               {floorApartments.map((apartment) => {
                                 const apartmentRooms = roomsByApartmentId[apartment.id] || [];
@@ -826,14 +885,14 @@ export default function Settings({ user }) {
                                     <div className="flex items-center gap-2">
                                       <button
                                         type="button"
-                                        onClick={() => startAddRoomForApartment(apartment.id)}
+                                        onClick={() => startAddRoomForApartment(apartment.id, floor.id)}
                                         className="text-emerald-400 hover:text-emerald-300 text-xs font-medium"
                                       >
                                         + Пом.
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={() => startEdit({ ...apartment, _kind: 'apartment' })}
+                                        onClick={() => startEditApartmentOrRoom(apartment, 'apartment')}
                                         className="text-sky-400 hover:text-sky-300 text-xs font-medium"
                                       >
                                         Изм.
@@ -855,7 +914,7 @@ export default function Settings({ user }) {
                                           <div className="flex items-center gap-2">
                                             <button
                                               type="button"
-                                              onClick={() => startEdit({ ...room, _kind: 'room' })}
+                                              onClick={() => startEditApartmentOrRoom({ ...room, floor_id: floor.id }, 'room')}
                                               className="text-sky-400 hover:text-sky-300 text-xs font-medium"
                                             >
                                               Изм.
@@ -877,6 +936,32 @@ export default function Settings({ user }) {
                                 </div>
                                 );
                               })}
+                              {floorRooms.length ? (
+                                <div className="rounded-lg border border-white/10 bg-surface-850 px-3 py-2 space-y-1">
+                                  <p className="text-zinc-400 text-xs">Помещения этажа</p>
+                                  {floorRooms.map((room) => (
+                                    <div key={room.id} className="flex flex-wrap items-center justify-between gap-2">
+                                      <span className="text-zinc-300 text-xs">Пом. {room.name}</span>
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => startEditApartmentOrRoom({ ...room, floor_id: floor.id, apartment_id: floorRoomsBucket?.id }, 'room')}
+                                          className="text-sky-400 hover:text-sky-300 text-xs font-medium"
+                                        >
+                                          Изм.
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDelete({ ...room, _kind: 'room' })}
+                                          className="text-rose-400 hover:text-rose-300 text-xs font-medium"
+                                        >
+                                          Удал.
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
                             </div>
                           ) : (
                             <p className="text-zinc-500 text-sm">На этом этаже квартиры и помещения пока не добавлены.</p>
@@ -903,9 +988,10 @@ export default function Settings({ user }) {
         />
       )}
 
-      <div ref={formCardRef} className="rounded-xl border border-white/10 bg-surface-850 p-5 max-w-lg">
-        <h3 className="text-white font-medium mb-4">{formTitle}</h3>
-        <form onSubmit={handleSubmit} className="space-y-4">
+      {effectiveWorkTab !== 'apartments' && (
+        <div ref={formCardRef} className="rounded-xl border border-white/10 bg-surface-850 p-5 max-w-lg">
+          <h3 className="text-white font-medium mb-4">{formTitle}</h3>
+          <form onSubmit={handleSubmit} className="space-y-4">
           {effectiveWarehouseTab === 'warehouses' && (
             <div>
               <label className="label">Объект</label>
@@ -966,28 +1052,57 @@ export default function Settings({ user }) {
               </div>
             </div>
           )}
-          {effectiveWorkTab === 'apartments' && (
-            <div>
-              <label className="label">{workItemKind === 'room' ? 'Квартира' : 'Этаж'}</label>
-              {workItemKind === 'room' ? (
-                <select value={parentId} onChange={(e) => setParentId(e.target.value)} className="input" required>
-                  <option value="">— Выберите —</option>
-                  {sortedWorkEntrances.map((entrance) => {
-                    const entranceApartments = apartmentsByEntranceId[entrance.id] || [];
-                    if (!entranceApartments.length) return null;
-                    return (
-                      <optgroup key={entrance.id} label={entranceOptionLabel(entrance)}>
-                        {entranceApartments.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {apartmentOptionLabel({ ...a, _withPrefix: true })}
-                          </option>
-                        ))}
-                      </optgroup>
-                    );
-                  })}
-                </select>
-              ) : (
-                <select value={parentId} onChange={(e) => setParentId(e.target.value)} className="input" required>
+          <div>
+            <label className="label">Название</label>
+            <input
+              ref={nameInputRef}
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="input"
+              required
+            />
+          </div>
+          <div className="flex gap-2">
+            <button type="submit" className="btn-primary text-sm">
+              {editing ? 'Сохранить' : 'Добавить'}
+            </button>
+            {editing && (
+              <button type="button" onClick={resetForm} className="btn-secondary text-sm">
+                Отмена
+              </button>
+            )}
+          </div>
+          </form>
+        </div>
+      )}
+
+      {effectiveWorkTab === 'apartments' && workModalOpen && (
+        <div
+          className="modal-backdrop z-50"
+          onClick={closeWorkModal}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="card p-5 max-w-lg w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-white font-medium text-lg mb-4">
+              {editing ? `Редактирование: ${workItemKind === 'room' ? 'помещение' : 'квартира'}` : `Добавить ${workItemKind === 'room' ? 'помещение' : 'квартиру'}`}
+            </h3>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="label">Этаж</label>
+                <select
+                  value={modalFloorId}
+                  onChange={(e) => {
+                    setModalFloorId(e.target.value);
+                    if (workItemKind === 'room') setModalApartmentId('');
+                  }}
+                  className="input"
+                  required
+                >
                   <option value="">— Выберите —</option>
                   {sortedWorkEntrances.map((entrance) => {
                     const entranceFloors = sortedWorkFloors.filter((f) => f.entrance_id === entrance.id);
@@ -1001,55 +1116,55 @@ export default function Settings({ user }) {
                     );
                   })}
                 </select>
-              )}
-            </div>
-          )}
-          <div>
-            <label className="label">
-              Название
-              {effectiveWorkTab === 'apartments' && (
-                <span className="ml-2 text-2xs text-zinc-400">
-                  Префикс: {workItemKind === 'room' ? 'Пом.' : 'Кв.'}
-                </span>
-              )}
-            </label>
-            {effectiveWorkTab === 'apartments' ? (
-              <div className="flex">
-                <span className="inline-flex items-center px-3 rounded-l-lg border border-r-0 border-zinc-600 bg-zinc-800 text-zinc-300 text-sm">
-                  {workItemKind === 'room' ? 'Пом.' : 'Кв.'}
-                </span>
-                <input
-                  ref={nameInputRef}
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="input rounded-l-none"
-                  required
-                />
               </div>
-            ) : (
-              <input
-                ref={nameInputRef}
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="input"
-                required
-              />
-            )}
+
+              {workItemKind === 'room' && (
+                <div>
+                  <label className="label">Квартира (необязательно)</label>
+                  <select
+                    value={modalApartmentId}
+                    onChange={(e) => setModalApartmentId(e.target.value)}
+                    className="input"
+                  >
+                    <option value="">— Добавить на этаж (без квартиры) —</option>
+                    {modalRoomApartmentOptions.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {apartmentOptionLabel({ ...a, _withPrefix: true })}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="label">Название</label>
+                <div className="flex">
+                  <span className="inline-flex items-center px-3 rounded-l-lg border border-r-0 border-zinc-600 bg-zinc-800 text-zinc-300 text-sm">
+                    {workItemKind === 'room' ? 'Пом.' : 'Кв.'}
+                  </span>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="input rounded-l-none"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={closeWorkModal} className="btn-ghost text-sm">
+                  Отмена
+                </button>
+                <button type="submit" className="btn-primary text-sm">
+                  {editing ? 'Сохранить' : 'Добавить'}
+                </button>
+              </div>
+            </form>
           </div>
-          <div className="flex gap-2">
-            <button type="submit" className="btn-primary text-sm">
-              {editing ? 'Сохранить' : 'Добавить'}
-            </button>
-            {editing && (
-              <button type="button" onClick={resetForm} className="btn-secondary text-sm">
-                Отмена
-              </button>
-            )}
-          </div>
-        </form>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

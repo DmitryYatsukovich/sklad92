@@ -227,20 +227,17 @@ export default function ObjectsOverview() {
         className={`rounded-lg border border-white/10 bg-black/20 ${compact ? 'p-2.5' : 'p-2'} space-y-1.5`}
       >
         <div className="flex items-center justify-between gap-2">
-          <p className="text-zinc-100 text-xs font-semibold">Этаж {floor.name}</p>
-          <div className="flex items-center gap-2">
-            <span className="text-2xs text-zinc-500">
-              {floorApartments.length} / {floorRooms}
-            </span>
-            <button
-              type="button"
-              onClick={() => toggleFloorCollapse(floor.id)}
-              className="px-1.5 py-0.5 rounded border border-white/15 text-zinc-300 text-2xs hover:bg-white/10"
-              title={isCollapsed ? 'Развернуть этаж' : 'Свернуть этаж'}
-            >
-              {isCollapsed ? 'Развернуть' : 'Свернуть'}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => toggleFloorCollapse(floor.id)}
+            className="text-zinc-100 text-xs font-semibold hover:text-white text-left"
+            title={isCollapsed ? 'Развернуть этаж' : 'Свернуть этаж'}
+          >
+            Этаж {floor.name}
+          </button>
+          <span className="text-2xs text-zinc-500">
+            {floorApartments.length} / {floorRooms}
+          </span>
         </div>
         {!isCollapsed && (
           floorApartments.length ? (
@@ -249,12 +246,12 @@ export default function ObjectsOverview() {
                 const apartmentRooms = roomsByApartment.get(apartment.id) || [];
                 return (
                   <div key={apartment.id} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5">
-                    <p className="text-zinc-200 text-2xs font-medium">{apartment.name}</p>
+                    <p className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</p>
                     {apartmentRooms.length ? (
                       <div className="mt-1 space-y-1">
                         {apartmentRooms.map((room) => (
                           <div key={room.id} className="px-1.5 py-1 rounded bg-zinc-800/80 text-zinc-300 text-[10px] leading-none">
-                            {room.name}
+                            Пом. {room.name}
                           </div>
                         ))}
                       </div>
