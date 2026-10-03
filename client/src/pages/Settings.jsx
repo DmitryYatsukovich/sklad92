@@ -29,8 +29,7 @@ const WORK_SUB_TABS = [
   { id: 'objects', label: 'Объекты' },
   { id: 'entrances', label: 'Подъезды' },
   { id: 'floors', label: 'Этажи' },
-  { id: 'apartments', label: 'Квартиры' },
-  { id: 'rooms', label: 'Помещения' },
+  { id: 'apartments', label: 'Квартиры, помещения' },
 ];
 
 const EMPTY_CATALOG = {
@@ -749,7 +748,7 @@ export default function Settings({ user }) {
                               onClick={() => startAddApartmentForFloor(floor.id)}
                               className="btn-secondary text-xs"
                             >
-                              Добавить квартиру
+                              Добавить квартиру, помещение
                             </button>
                           </div>
                           {floorApartments.length ? (
