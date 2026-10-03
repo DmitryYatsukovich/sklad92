@@ -222,6 +222,9 @@ export default function ObjectsOverview() {
 
   const renderFloorCard = (floor, floorApartments, floorRooms, compact = false) => {
     const isCollapsed = collapsedFloorSet.has(floor.id);
+    const floorRoomsBucket = floorApartments.find((apartment) => apartment.name === FLOOR_ROOMS_BUCKET_NAME);
+    const regularApartments = floorApartments.filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME);
+    const floorOnlyRooms = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
     return (
       <div
         key={floor.id}
@@ -237,32 +240,47 @@ export default function ObjectsOverview() {
             Этаж {floor.name}
           </button>
           <span className="text-2xs text-zinc-500">
-            {floorApartments.length} / {floorRooms}
+            {regularApartments.length} / {floorRooms}
           </span>
         </div>
         {!isCollapsed && (
-          floorApartments.length ? (
-            <div className="space-y-1.5">
-              {floorApartments.map((apartment) => {
-                const apartmentRooms = roomsByApartment.get(apartment.id) || [];
-                const isFloorRoomsBucket = apartment.name === FLOOR_ROOMS_BUCKET_NAME;
-                return (
-                  <div key={apartment.id} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5">
-                    <p className="text-zinc-200 text-2xs font-medium">
-                      {isFloorRoomsBucket ? apartment.name : `Кв. ${apartment.name}`}
-                    </p>
-                    {apartmentRooms.length ? (
-                      <div className="mt-1 space-y-1">
-                        {apartmentRooms.map((room) => (
-                          <div key={room.id} className="px-1.5 py-1 rounded bg-zinc-800/80 text-zinc-300 text-[10px] leading-none">
-                            Пом. {room.name}
-                          </div>
-                        ))}
+          (regularApartments.length || floorOnlyRooms.length) ? (
+            <div className="space-y-2">
+              {floorOnlyRooms.length ? (
+                <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5">
+                  <p className="text-zinc-200 text-2xs font-medium">Помещения этажа</p>
+                  <div className="mt-1 space-y-1">
+                    {floorOnlyRooms.map((room) => (
+                      <div key={room.id} className="px-1.5 py-1 rounded bg-zinc-800/80 text-zinc-300 text-[10px] leading-none">
+                        Пом. {room.name}
                       </div>
-                    ) : null}
+                    ))}
                   </div>
-                );
-              })}
+                </div>
+              ) : null}
+
+              {regularApartments.length ? (
+                <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 space-y-1.5">
+                  <p className="text-zinc-200 text-2xs font-medium">Квартиры</p>
+                  {regularApartments.map((apartment) => {
+                    const apartmentRooms = roomsByApartment.get(apartment.id) || [];
+                    return (
+                      <div key={apartment.id} className="rounded border border-white/10 bg-black/20 px-2 py-1.5">
+                        <p className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</p>
+                        {apartmentRooms.length ? (
+                          <div className="mt-1 space-y-1">
+                            {apartmentRooms.map((room) => (
+                              <div key={room.id} className="px-1.5 py-1 rounded bg-zinc-800/80 text-zinc-300 text-[10px] leading-none">
+                                Пом. {room.name}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
             </div>
           ) : (
             <p className="text-zinc-500 text-2xs">Квартиры и помещения еще не добавлены</p>
