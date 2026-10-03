@@ -96,47 +96,110 @@ function sortByNaturalName(items) {
 }
 
 const CATEGORY_ICON_OPTIONS = [
-  { key: 'electrical', label: 'Электромонтаж', hint: 'Кабели, щиты, питание' },
-  { key: 'fire_alarm', label: 'Пожарная сигнализация', hint: 'Датчики, сирены, шлейфы' },
-  { key: 'access_control', label: 'СКУД', hint: 'Контроллеры, замки, карты' },
-  { key: 'video_surveillance', label: 'Видеонаблюдение', hint: 'Камеры и регистраторы' },
-  { key: 'dispatching', label: 'Диспетчеризация', hint: 'Мониторинг и управление' },
+  { key: 'electrical', label: 'Электромонтаж', hint: 'Базовая электрика', group: 'electrical' },
+  { key: 'cable', label: 'Кабельные линии', hint: 'Кабели и трассы', group: 'electrical' },
+  { key: 'panel', label: 'Щитовое оборудование', hint: 'Щиты и автоматика', group: 'electrical' },
+  { key: 'socket', label: 'Розетки и точки питания', hint: 'Розетки/питание', group: 'electrical' },
+  { key: 'switchgear', label: 'Коммутация', hint: 'Выключатели и автоматы', group: 'electrical' },
+  { key: 'lighting', label: 'Освещение', hint: 'Светильники и линии', group: 'electrical' },
+  { key: 'grounding', label: 'Заземление', hint: 'PE/N шины', group: 'electrical' },
+  { key: 'power_supply', label: 'Блоки питания', hint: 'БП, ИБП', group: 'electrical' },
+  { key: 'battery', label: 'Аккумуляторы', hint: 'Резервное питание', group: 'electrical' },
+
+  { key: 'fire_alarm', label: 'Пожарная сигнализация', hint: 'ОПС/АПС', group: 'fire' },
+  { key: 'smoke_detector', label: 'Дымовой извещатель', hint: 'Дымовые датчики', group: 'fire' },
+  { key: 'heat_detector', label: 'Тепловой извещатель', hint: 'Тепловые датчики', group: 'fire' },
+  { key: 'siren', label: 'Оповещение и сирены', hint: 'Звуковое оповещение', group: 'fire' },
+  { key: 'call_point', label: 'Ручной извещатель', hint: 'Кнопки пожарной тревоги', group: 'fire' },
+
+  { key: 'access_control', label: 'СКУД', hint: 'Контроль доступа', group: 'access' },
+  { key: 'lock', label: 'Замки', hint: 'Электромагнитные/электромеханические', group: 'access' },
+  { key: 'card_reader', label: 'Считыватели', hint: 'Карты и брелоки', group: 'access' },
+  { key: 'turnstile', label: 'Турникеты', hint: 'Точки прохода', group: 'access' },
+  { key: 'intercom', label: 'Домофония', hint: 'Домофоны и панели', group: 'access' },
+
+  { key: 'video_surveillance', label: 'Видеонаблюдение', hint: 'CCTV', group: 'video' },
+  { key: 'camera_dome', label: 'Купольные камеры', hint: 'Внутренние камеры', group: 'video' },
+  { key: 'recorder', label: 'Видеорегистраторы', hint: 'NVR/DVR', group: 'video' },
+  { key: 'monitor', label: 'Мониторы', hint: 'Пост наблюдения', group: 'video' },
+
+  { key: 'dispatching', label: 'Диспетчеризация', hint: 'BMS/SCADA', group: 'automation' },
+  { key: 'automation', label: 'Автоматизация', hint: 'Логика управления', group: 'automation' },
+  { key: 'controller', label: 'Контроллеры', hint: 'ПЛК и модули', group: 'automation' },
+  { key: 'networking', label: 'Сети связи', hint: 'Сетевое оборудование', group: 'automation' },
+  { key: 'server_rack', label: 'Серверные шкафы', hint: 'Рэки и узлы связи', group: 'automation' },
+
+  { key: 'toolbox', label: 'Инструмент', hint: 'Сервисные позиции', group: 'general' },
+  { key: 'mounting', label: 'Крепёж и монтаж', hint: 'Метизы и монтажные элементы', group: 'general' },
+  { key: 'sensor', label: 'Датчики', hint: 'Универсальные датчики', group: 'general' },
+  { key: 'relay', label: 'Реле и пускатели', hint: 'Промежуточная автоматика', group: 'general' },
+  { key: 'other', label: 'Прочее', hint: 'Универсальная категория', group: 'general' },
 ];
 
-const CATEGORY_ICON_META = {
-  electrical: {
-    label: 'Электромонтаж',
-    badgeClass: 'bg-sky-500/15 text-sky-300 ring-sky-400/35',
-  },
-  fire_alarm: {
-    label: 'Пожарная сигнализация',
-    badgeClass: 'bg-rose-500/15 text-rose-300 ring-rose-400/35',
-  },
-  access_control: {
-    label: 'СКУД',
-    badgeClass: 'bg-violet-500/15 text-violet-300 ring-violet-400/35',
-  },
-  video_surveillance: {
-    label: 'Видеонаблюдение',
-    badgeClass: 'bg-cyan-500/15 text-cyan-300 ring-cyan-400/35',
-  },
-  dispatching: {
-    label: 'Диспетчеризация',
-    badgeClass: 'bg-emerald-500/15 text-emerald-300 ring-emerald-400/35',
-  },
-  other: {
-    label: 'Прочая категория',
-    badgeClass: 'bg-zinc-500/20 text-zinc-200 ring-zinc-400/30',
-  },
+const CATEGORY_ICON_GROUP_LABELS = {
+  electrical: 'Электрика',
+  fire: 'Пожарка',
+  access: 'СКУД',
+  video: 'Видео',
+  automation: 'Автоматика',
+  general: 'Общее',
 };
+
+const CATEGORY_ICON_GROUP_STYLES = {
+  electrical: 'bg-sky-500/15 text-sky-300 ring-sky-400/35',
+  fire: 'bg-rose-500/15 text-rose-300 ring-rose-400/35',
+  access: 'bg-violet-500/15 text-violet-300 ring-violet-400/35',
+  video: 'bg-cyan-500/15 text-cyan-300 ring-cyan-400/35',
+  automation: 'bg-emerald-500/15 text-emerald-300 ring-emerald-400/35',
+  general: 'bg-zinc-500/20 text-zinc-200 ring-zinc-400/30',
+};
+
+const CATEGORY_ICON_META = CATEGORY_ICON_OPTIONS.reduce((acc, option) => {
+  acc[option.key] = {
+    label: option.label,
+    badgeClass: CATEGORY_ICON_GROUP_STYLES[option.group] || CATEGORY_ICON_GROUP_STYLES.general,
+  };
+  return acc;
+}, {});
 
 function inferCategoryIconKey(name) {
   const source = String(name || '').toLowerCase();
-  if (/пожар|дым|огнет|сирен|оповещ|извещ/.test(source)) return 'fire_alarm';
-  if (/скуд|доступ|турникет|замок|карта|контрол/.test(source)) return 'access_control';
-  if (/видео|камер|cctv|наблюд|регистрат/.test(source)) return 'video_surveillance';
-  if (/диспет|монитор|автоматизац|телеметр|управ/.test(source)) return 'dispatching';
-  if (/элект|кабел|провод|щит|розет|питан|автомат|узо/.test(source)) return 'electrical';
+  if (/дым|smoke/.test(source)) return 'smoke_detector';
+  if (/тепл|heat/.test(source)) return 'heat_detector';
+  if (/сирен|оповещ|alert/.test(source)) return 'siren';
+  if (/пожар|огнет|извещ|апс|опс/.test(source)) return 'fire_alarm';
+
+  if (/турникет/.test(source)) return 'turnstile';
+  if (/считыв|rfid|карта|брелок/.test(source)) return 'card_reader';
+  if (/замок/.test(source)) return 'lock';
+  if (/домофон|панел.*вызова/.test(source)) return 'intercom';
+  if (/скуд|доступ|пропуск/.test(source)) return 'access_control';
+
+  if (/регистрат|nvr|dvr/.test(source)) return 'recorder';
+  if (/купол|dome/.test(source)) return 'camera_dome';
+  if (/видео|камер|cctv|наблюд/.test(source)) return 'video_surveillance';
+  if (/монитор|экран/.test(source)) return 'monitor';
+
+  if (/сервер|шкаф/.test(source)) return 'server_rack';
+  if (/сет|коммут|router|switch/.test(source)) return 'networking';
+  if (/контроллер|плк|plc/.test(source)) return 'controller';
+  if (/диспет|bms|scada/.test(source)) return 'dispatching';
+  if (/автоматизац|управ/.test(source)) return 'automation';
+
+  if (/кабел|провод/.test(source)) return 'cable';
+  if (/щит/.test(source)) return 'panel';
+  if (/розет|питан/.test(source)) return 'socket';
+  if (/выкл|автомат|узо|коммутац/.test(source)) return 'switchgear';
+  if (/свет|ламп|освещ/.test(source)) return 'lighting';
+  if (/зазем/.test(source)) return 'grounding';
+  if (/ибп|блок питан/.test(source)) return 'power_supply';
+  if (/аккум|батар/.test(source)) return 'battery';
+
+  if (/датчик|сенсор/.test(source)) return 'sensor';
+  if (/реле|пускател/.test(source)) return 'relay';
+  if (/креп|болт|гайк|хомут|скоб/.test(source)) return 'mounting';
+  if (/инструмент|ящик/.test(source)) return 'toolbox';
+  if (/элект/.test(source)) return 'electrical';
   return 'other';
 }
 
@@ -152,48 +215,212 @@ function resolveCategoryMiniature({ name, icon_key }) {
 }
 
 function CategoryGlyph({ iconKey, className = 'h-4 w-4' }) {
-  if (iconKey === 'electrical') {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
-        <path d="M13 2L5 13h6l-1 9 9-13h-6l1-7z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  if (iconKey === 'fire_alarm') {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
-        <path d="M12 3c2 2 3 4 3 6 0 1.5-.5 2.7-1.6 3.8C12.2 14 12 15 12 16c0-1.2-.5-2.2-1.7-3.2C9.2 11.7 9 10.5 9 9c0-2 1-4 3-6z" stroke="currentColor" strokeWidth="1.7" />
-        <path d="M7 16c0 2.8 2.2 5 5 5s5-2.2 5-5c0-1.1-.3-2.2-1-3.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (iconKey === 'access_control') {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
-        <rect x="4" y="5" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.7" />
-        <path d="M8 9h4M8 12h5M8 15h3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-        <path d="M17 12h3m-1.5-1.5L20 12l-1.5 1.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  if (iconKey === 'video_surveillance') {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
-        <path d="M3 10h12l3 3v3H6l-3-3v-3z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-        <path d="M15 10l4-2v2.5M8 16v2M12 16v2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  if (iconKey === 'dispatching') {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
-        <rect x="3" y="5" width="8" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
-        <rect x="13" y="5" width="8" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
-        <rect x="3" y="13" width="18" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
-        <path d="M7 8h1M17 8h1M7 16h10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      </svg>
-    );
-  }
+  if (iconKey === 'electrical') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path d="M13 2L5 13h6l-1 9 9-13h-6l1-7z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  );
+  if (iconKey === 'cable') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path d="M4 8h4m8 8h4M8 8c5 0 3 8 8 8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <circle cx="4" cy="8" r="1.5" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="20" cy="16" r="1.5" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+  if (iconKey === 'panel') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="5" y="3.5" width="14" height="17" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8 8h8M8 12h8M8 16h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'socket') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="10" cy="11" r="0.9" fill="currentColor" />
+      <circle cx="14" cy="11" r="0.9" fill="currentColor" />
+      <path d="M12 14.5v1.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'switchgear') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="4" y="8" width="16" height="8" rx="4" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="9" cy="12" r="2.5" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+  if (iconKey === 'lighting') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path d="M12 3a6 6 0 0 0-3 11.2V17h6v-2.8A6 6 0 0 0 12 3z" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M10 20h4M9.5 18.5h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'grounding') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path d="M12 4v10M7 14h10M8.5 17h7M10 20h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'power_supply') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="4" y="6" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M20 10v4M11 8l-2 4h3l-1 4 4-6h-3l1-2z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+  if (iconKey === 'battery') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="3" y="8" width="16" height="8" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M21 10v4M6 10h6v4H6z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    </svg>
+  );
+  if (iconKey === 'fire_alarm') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path d="M12 3c2 2 3 4 3 6 0 1.5-.5 2.7-1.6 3.8C12.2 14 12 15 12 16c0-1.2-.5-2.2-1.7-3.2C9.2 11.7 9 10.5 9 9c0-2 1-4 3-6z" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M7 16c0 2.8 2.2 5 5 5s5-2.2 5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'smoke_detector') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <circle cx="12" cy="11" r="5" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M6 18c1-.8 2-.8 3 0m2 0c1-.8 2-.8 3 0m2 0c1-.8 2-.8 3 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'heat_detector') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="3.5" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.4 6.4l1.4 1.4M16.2 16.2l1.4 1.4M17.6 6.4l-1.4 1.4M7.8 16.2l-1.4 1.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'siren') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path d="M8 14a4 4 0 0 1 8 0v3H8v-3z" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M6 20h12M12 5v2M5 9l2 1M19 9l-2 1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'call_point') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="5" y="5" width="14" height="14" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="12" cy="12" r="2.5" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M10.5 12h3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'access_control') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="4" y="5" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8 9h4M8 12h5M8 15h3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M17 12h3m-1.5-1.5L20 12l-1.5 1.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+  if (iconKey === 'lock') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="6" y="11" width="12" height="9" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M9 11V8a3 3 0 0 1 6 0v3" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="12" cy="15" r="1" fill="currentColor" />
+    </svg>
+  );
+  if (iconKey === 'card_reader') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="4" y="6" width="11" height="12" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8 10h3M8 13h5M17 10c1 .3 2 .9 3 2m-3 3c1-.3 2-.9 3-2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'turnstile') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path d="M6 19V9h12v10M12 9V5M9 12h6M12 12l-3 4M12 12l3 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+  if (iconKey === 'intercom') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="7" y="4" width="10" height="16" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M10 8h4M10 11h4M10 14h2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <circle cx="14.5" cy="16.5" r="0.9" fill="currentColor" />
+    </svg>
+  );
+  if (iconKey === 'video_surveillance') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path d="M3 10h12l3 3v3H6l-3-3v-3z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M15 10l4-2v2.5M8 16v2M12 16v2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+  if (iconKey === 'camera_dome') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path d="M5 11a7 7 0 0 1 14 0H5z" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M6 14h12M9 11a3 3 0 1 0 6 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'recorder') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="4" y="6" width="16" height="12" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8 10h8M8 14h6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <circle cx="17" cy="14" r="1" fill="currentColor" />
+    </svg>
+  );
+  if (iconKey === 'monitor') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="4" y="5" width="16" height="11" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M9 19h6M12 16v3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'dispatching') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="3" y="5" width="8" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+      <rect x="13" y="5" width="8" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+      <rect x="3" y="13" width="18" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M7 8h1M17 8h1M7 16h10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'automation') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <circle cx="9" cy="9" r="2.5" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="15" cy="15" r="2.5" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M10.8 10.8l2.4 2.4M9 18h2M15 6h2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'controller') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="7" y="7" width="10" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M9 4v2M12 4v2M15 4v2M9 18v2M12 18v2M15 18v2M4 9h2M4 12h2M4 15h2M18 9h2M18 12h2M18 15h2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'networking') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <circle cx="6" cy="7" r="2" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="18" cy="7" r="2" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="12" cy="17" r="2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M7.7 8.2L10.3 15M16.3 8.2L13.7 15M8 7h8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'server_rack') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="6" y="4" width="12" height="16" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8.5 8h7M8.5 12h7M8.5 16h7" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <circle cx="16.5" cy="8" r="0.8" fill="currentColor" />
+      <circle cx="16.5" cy="12" r="0.8" fill="currentColor" />
+      <circle cx="16.5" cy="16" r="0.8" fill="currentColor" />
+    </svg>
+  );
+  if (iconKey === 'toolbox') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="4" y="9" width="16" height="10" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M9 9V7h6v2M4 13h16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+  if (iconKey === 'mounting') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path d="M8 16l8-8M7 10l7 7M10 7l7 7" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <circle cx="7" cy="17" r="2" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="17" cy="7" r="2" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+  if (iconKey === 'sensor') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="1.7" fill="currentColor" />
+      <path d="M7.5 12a4.5 4.5 0 0 1 9 0M5 12a7 7 0 0 1 14 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+  if (iconKey === 'relay') return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="4" y="7" width="8" height="10" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8 10v4M8 12h8l4 3M16 12l4-3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
   return (
     <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
       <path d="M4 8l8-4 8 4-8 4-8-4z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
@@ -203,7 +430,7 @@ function CategoryGlyph({ iconKey, className = 'h-4 w-4' }) {
 }
 
 function SimpleList({ items, onEdit, onDelete, extraCol, renderActions, renderTitleLeading }) {
-  if (!items.length) return <p className="text-zinc-500 text-sm py-4">Список пуст. Добавьте запись ниже.</p>;
+  if (!items.length) return <p className="text-zinc-500 text-sm py-4">Список пуст. Добавьте запись.</p>;
   return (
     <div className="table-wrap">
       <table className="w-full text-left text-sm">
@@ -267,6 +494,9 @@ export default function Settings({ user }) {
   const [error, setError] = useState('');
   const [name, setName] = useState('');
   const [categoryIconKey, setCategoryIconKey] = useState('');
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [categoryIconsExpanded, setCategoryIconsExpanded] = useState(false);
+  const [categoryIconSearch, setCategoryIconSearch] = useState('');
   const [parentId, setParentId] = useState('');
   const [sortOrder, setSortOrder] = useState('');
   const [workItemKind, setWorkItemKind] = useState('apartment');
@@ -309,6 +539,9 @@ export default function Settings({ user }) {
   const resetForm = () => {
     setName('');
     setCategoryIconKey('');
+    setCategoryIconSearch('');
+    setCategoryIconsExpanded(false);
+    setCategoryModalOpen(false);
     setParentId('');
     setSortOrder('');
     setWorkItemKind('apartment');
@@ -479,7 +712,8 @@ export default function Settings({ user }) {
           else await settingsApi.workApartments.create({ name: n, floor_id: fid });
         }
       }
-      if (effectiveWorkTab === 'apartments') closeWorkModal();
+      if (tab === 'categories') closeCategoryModal();
+      else if (effectiveWorkTab === 'apartments') closeWorkModal();
       else resetForm();
       await load();
     } catch (err) {
@@ -488,6 +722,10 @@ export default function Settings({ user }) {
   };
 
   const startEdit = (row) => {
+    if (tab === 'categories') {
+      openEditCategoryModal(row);
+      return;
+    }
     setEditing(row);
     setName(row.name || '');
     setSortOrder('');
@@ -507,10 +745,6 @@ export default function Settings({ user }) {
         setWorkItemKind('apartment');
         setParentId(String(row.floor_id || ''));
       }
-    }
-    else if (tab === 'categories') {
-      setParentId('');
-      setCategoryIconKey(row.icon_key || '');
     }
     else setParentId('');
   };
@@ -577,6 +811,19 @@ export default function Settings({ user }) {
   })();
   const categoryAutoMiniature = resolveCategoryMiniature({ name, icon_key: null });
   const categorySelectedMiniature = resolveCategoryMiniature({ name, icon_key: categoryIconKey || null });
+  const categoryIconSearchNormalized = categoryIconSearch.trim().toLowerCase();
+  const categoryIconOptionsFiltered = CATEGORY_ICON_OPTIONS.filter((option) => {
+    if (!categoryIconSearchNormalized) return true;
+    const haystack = `${option.label} ${option.hint} ${CATEGORY_ICON_GROUP_LABELS[option.group] || ''}`.toLowerCase();
+    return haystack.includes(categoryIconSearchNormalized);
+  });
+  const categoryIconOptionsGrouped = Object.entries(CATEGORY_ICON_GROUP_LABELS)
+    .map(([groupKey, groupLabel]) => ({
+      groupKey,
+      groupLabel,
+      options: categoryIconOptionsFiltered.filter((option) => option.group === groupKey),
+    }))
+    .filter((group) => group.options.length > 0);
 
   const entranceOptionLabel = (e) => {
     const obj = e.object_name || catalog.objects.find((o) => o.id === e.object_id)?.name;
@@ -663,6 +910,36 @@ export default function Settings({ user }) {
       formCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       nameInputRef.current?.focus();
     });
+  };
+
+  const openCreateCategoryModal = () => {
+    setEditing(null);
+    setName('');
+    setCategoryIconKey('');
+    setCategoryIconSearch('');
+    setCategoryIconsExpanded(true);
+    setCategoryModalOpen(true);
+    setError('');
+  };
+
+  const openEditCategoryModal = (row) => {
+    setEditing(row);
+    setName(row.name || '');
+    setCategoryIconKey(row.icon_key || '');
+    setCategoryIconSearch('');
+    setCategoryIconsExpanded(true);
+    setCategoryModalOpen(true);
+    setError('');
+  };
+
+  const closeCategoryModal = () => {
+    setCategoryModalOpen(false);
+    setCategoryIconsExpanded(false);
+    setCategoryIconSearch('');
+    setEditing(null);
+    setName('');
+    setCategoryIconKey('');
+    setError('');
   };
 
   const closeWorkModal = () => {
@@ -1105,26 +1382,39 @@ export default function Settings({ user }) {
           <p className="text-zinc-500 text-sm py-4">Сначала добавьте подъезды и этажи.</p>
         )
       ) : (
-        <SimpleList
-          items={itemsForTab()}
-          onEdit={startEdit}
-          onDelete={handleDelete}
-          extraCol={extraLabel}
-          renderTitleLeading={tab === 'categories'
-            ? (row) => (
-              <span
-                className={`inline-flex h-7 w-7 items-center justify-center rounded-lg ring-1 ${row._miniature?.badgeClass || 'bg-zinc-700 text-zinc-200 ring-zinc-500/40'}`}
-                title={row._miniature?.label || 'Категория'}
-                aria-label={row._miniature?.label || 'Категория'}
+        <div className="space-y-3">
+          {tab === 'categories' && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={openCreateCategoryModal}
+                className="btn-primary text-sm"
               >
-                <CategoryGlyph iconKey={row._miniature?.key} />
-              </span>
-            )
-            : null}
-        />
+                Добавить категорию
+              </button>
+            </div>
+          )}
+          <SimpleList
+            items={itemsForTab()}
+            onEdit={startEdit}
+            onDelete={handleDelete}
+            extraCol={extraLabel}
+            renderTitleLeading={tab === 'categories'
+              ? (row) => (
+                <span
+                  className={`inline-flex h-7 w-7 items-center justify-center rounded-lg ring-1 ${row._miniature?.badgeClass || 'bg-zinc-700 text-zinc-200 ring-zinc-500/40'}`}
+                  title={row._miniature?.label || 'Категория'}
+                  aria-label={row._miniature?.label || 'Категория'}
+                >
+                  <CategoryGlyph iconKey={row._miniature?.key} />
+                </span>
+              )
+              : null}
+          />
+        </div>
       )}
 
-      {effectiveWorkTab !== 'apartments' && (
+      {effectiveWorkTab !== 'apartments' && tab !== 'categories' && (
         <div ref={formCardRef} className="rounded-xl border border-white/10 bg-surface-850 p-5 max-w-lg">
           <h3 className="text-white font-medium mb-4">{formTitle}</h3>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -1199,63 +1489,6 @@ export default function Settings({ user }) {
               required
             />
           </div>
-          {tab === 'categories' && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <label className="label">Иконка категории</label>
-                <span className="text-xs text-zinc-400">
-                  Текущая: {categorySelectedMiniature.label}
-                </span>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <button
-                  type="button"
-                  onClick={() => setCategoryIconKey('')}
-                  className={`rounded-lg border px-3 py-2 text-left transition ${
-                    !categoryIconKey
-                      ? 'border-sky-400/70 bg-sky-500/10 ring-1 ring-sky-400/30'
-                      : 'border-white/10 bg-zinc-900/50 hover:bg-zinc-800/70'
-                  }`}
-                >
-                  <div className="flex items-start gap-2">
-                    <span className={`inline-flex h-7 w-7 items-center justify-center rounded-lg ring-1 ${categoryAutoMiniature.badgeClass}`}>
-                      <CategoryGlyph iconKey={categoryAutoMiniature.key} />
-                    </span>
-                    <span>
-                      <span className="block text-sm text-white">Автоопределение</span>
-                      <span className="block text-xs text-zinc-400">По названию категории</span>
-                    </span>
-                  </div>
-                </button>
-                {CATEGORY_ICON_OPTIONS.map((option) => {
-                  const meta = CATEGORY_ICON_META[option.key] || CATEGORY_ICON_META.other;
-                  const selected = categoryIconKey === option.key;
-                  return (
-                    <button
-                      key={option.key}
-                      type="button"
-                      onClick={() => setCategoryIconKey(option.key)}
-                      className={`rounded-lg border px-3 py-2 text-left transition ${
-                        selected
-                          ? 'border-sky-400/70 bg-sky-500/10 ring-1 ring-sky-400/30'
-                          : 'border-white/10 bg-zinc-900/50 hover:bg-zinc-800/70'
-                      }`}
-                    >
-                      <div className="flex items-start gap-2">
-                        <span className={`inline-flex h-7 w-7 items-center justify-center rounded-lg ring-1 ${meta.badgeClass}`}>
-                          <CategoryGlyph iconKey={option.key} />
-                        </span>
-                        <span>
-                          <span className="block text-sm text-white">{option.label}</span>
-                          <span className="block text-xs text-zinc-400">{option.hint}</span>
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
           <div className="flex gap-2">
             <button type="submit" className="btn-primary text-sm">
               {editing ? 'Сохранить' : 'Добавить'}
@@ -1267,6 +1500,135 @@ export default function Settings({ user }) {
             )}
           </div>
           </form>
+        </div>
+      )}
+
+      {tab === 'categories' && categoryModalOpen && (
+        <div
+          className="modal-backdrop z-50"
+          onClick={closeCategoryModal}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="card p-5 max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-white font-medium text-lg mb-4">
+              {editing ? 'Редактирование категории' : 'Добавить категорию'}
+            </h3>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="label">Название</label>
+                <input
+                  autoFocus
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="input"
+                  required
+                />
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className={`inline-flex h-8 w-8 items-center justify-center rounded-lg ring-1 ${categorySelectedMiniature.badgeClass}`}>
+                      <CategoryGlyph iconKey={categorySelectedMiniature.key} />
+                    </span>
+                    <span className="text-zinc-200">Выбрано: {categorySelectedMiniature.label}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCategoryIconsExpanded((prev) => !prev)}
+                    className="btn-secondary text-sm"
+                  >
+                    {categoryIconsExpanded ? 'Свернуть значки' : 'Раскрыть значки'}
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setCategoryIconKey('')}
+                  className={`w-full rounded-lg border px-3 py-2 text-left transition ${
+                    !categoryIconKey
+                      ? 'border-sky-400/70 bg-sky-500/10 ring-1 ring-sky-400/30'
+                      : 'border-white/10 bg-zinc-900/50 hover:bg-zinc-800/70'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <span className={`inline-flex h-7 w-7 items-center justify-center rounded-lg ring-1 ${categoryAutoMiniature.badgeClass}`}>
+                      <CategoryGlyph iconKey={categoryAutoMiniature.key} />
+                    </span>
+                    <span>
+                      <span className="block text-sm text-white">Автоопределение</span>
+                      <span className="block text-xs text-zinc-400">Значок определяется по названию категории</span>
+                    </span>
+                  </div>
+                </button>
+
+                {categoryIconsExpanded && (
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-3">
+                    <input
+                      type="text"
+                      value={categoryIconSearch}
+                      onChange={(e) => setCategoryIconSearch(e.target.value)}
+                      className="input"
+                      placeholder="Поиск значка: пожарная, камеры, щит, СКУД…"
+                    />
+                    {categoryIconOptionsGrouped.length ? (
+                      <div className="space-y-4">
+                        {categoryIconOptionsGrouped.map((group) => (
+                          <div key={group.groupKey} className="space-y-2">
+                            <p className="text-xs uppercase tracking-wide text-zinc-400">{group.groupLabel}</p>
+                            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                              {group.options.map((option) => {
+                                const meta = CATEGORY_ICON_META[option.key] || CATEGORY_ICON_META.other;
+                                const selected = categoryIconKey === option.key;
+                                return (
+                                  <button
+                                    key={option.key}
+                                    type="button"
+                                    onClick={() => setCategoryIconKey(option.key)}
+                                    className={`rounded-lg border px-3 py-2 text-left transition ${
+                                      selected
+                                        ? 'border-sky-400/70 bg-sky-500/10 ring-1 ring-sky-400/30'
+                                        : 'border-white/10 bg-zinc-900/50 hover:bg-zinc-800/70'
+                                    }`}
+                                  >
+                                    <div className="flex items-start gap-2">
+                                      <span className={`inline-flex h-7 w-7 items-center justify-center rounded-lg ring-1 ${meta.badgeClass}`}>
+                                        <CategoryGlyph iconKey={option.key} />
+                                      </span>
+                                      <span>
+                                        <span className="block text-sm text-white">{option.label}</span>
+                                        <span className="block text-xs text-zinc-400">{option.hint}</span>
+                                      </span>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-zinc-500 text-sm py-1">По запросу значки не найдены.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={closeCategoryModal} className="btn-ghost text-sm">
+                  Отмена
+                </button>
+                <button type="submit" className="btn-primary text-sm">
+                  {editing ? 'Сохранить' : 'Добавить'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
