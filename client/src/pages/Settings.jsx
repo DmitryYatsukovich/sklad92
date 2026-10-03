@@ -95,7 +95,18 @@ function sortByNaturalName(items) {
   return [...items].sort((a, b) => naturalCompare(a?.name, b?.name));
 }
 
-function SimpleList({ items, onEdit, onDelete, extraCol, renderActions }) {
+function categoryMiniatureByName(name) {
+  const source = String(name || '').toLowerCase();
+  if (/пожар|дым/.test(source)) return { icon: '🚨', bg: 'bg-rose-500/20 text-rose-300', label: 'Пожарная категория' };
+  if (/датчик|сенсор/.test(source)) return { icon: '📡', bg: 'bg-amber-500/20 text-amber-300', label: 'Датчики' };
+  if (/свет|ламп|освещ/.test(source)) return { icon: '💡', bg: 'bg-yellow-500/20 text-yellow-300', label: 'Освещение' };
+  if (/кабел|провод|элект/.test(source)) return { icon: '🔌', bg: 'bg-sky-500/20 text-sky-300', label: 'Электрика' };
+  if (/труб|вода|сантех|кран/.test(source)) return { icon: '🚰', bg: 'bg-cyan-500/20 text-cyan-300', label: 'Водоснабжение' };
+  if (/креп|болт|гайк|метиз/.test(source)) return { icon: '🔩', bg: 'bg-zinc-500/30 text-zinc-200', label: 'Крепёж' };
+  return { icon: '📦', bg: 'bg-emerald-500/20 text-emerald-300', label: 'Категория материалов' };
+}
+
+function SimpleList({ items, onEdit, onDelete, extraCol, renderActions, renderTitleLeading }) {
   if (!items.length) return <p className="text-zinc-500 text-sm py-4">Список пуст. Добавьте запись ниже.</p>;
   return (
     <div className="table-wrap">
@@ -110,7 +121,12 @@ function SimpleList({ items, onEdit, onDelete, extraCol, renderActions }) {
         <tbody>
           {items.map((row) => (
             <tr key={row.id} className="border-b border-white/5">
-              <td className="p-3 text-white">{row._displayName || row.name}</td>
+              <td className="p-3 text-white">
+                <div className="flex items-center gap-2">
+                  {renderTitleLeading?.(row)}
+                  <span>{row._displayName || row.name}</span>
+                </div>
+              </td>
               {extraCol && <td className="p-3 text-zinc-300">{row._extra || '—'}</td>}
               <td className="p-3">
                 <div className="flex items-center justify-end gap-2">
@@ -264,7 +280,10 @@ export default function Settings({ user }) {
     }
     if (tab === 'systems') return catalog.systems.map((s) => ({ ...s }));
     if (tab === 'tools') return catalog.tool_types.map((t) => ({ ...t }));
-    if (tab === 'categories') return catalog.categories.map((c) => ({ ...c }));
+    if (tab === 'categories') return catalog.categories.map((c) => ({
+      ...c,
+      _miniature: categoryMiniatureByName(c.name),
+    }));
 
     if (effectiveWorkTab === 'objects') {
       return sortedObjects.map((o) => ({ ...o }));
@@ -985,6 +1004,17 @@ export default function Settings({ user }) {
           onEdit={startEdit}
           onDelete={handleDelete}
           extraCol={extraLabel}
+          renderTitleLeading={tab === 'categories'
+            ? (row) => (
+              <span
+                className={`inline-flex h-6 w-6 items-center justify-center rounded-md text-xs ${row._miniature?.bg || 'bg-zinc-700 text-zinc-200'}`}
+                title={row._miniature?.label || 'Категория'}
+                aria-label={row._miniature?.label || 'Категория'}
+              >
+                {row._miniature?.icon || '📦'}
+              </span>
+            )
+            : null}
         />
       )}
 
