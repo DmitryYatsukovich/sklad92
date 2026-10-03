@@ -111,6 +111,8 @@ export default function ObjectsOverview() {
   const [error, setError] = useState('');
   const [selectedObjects, setSelectedObjects] = useState([]);
   const [selectedEntrances, setSelectedEntrances] = useState([]);
+  const [collapsedFloors, setCollapsedFloors] = useState([]);
+  const [expandedEntrance, setExpandedEntrance] = useState(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -151,6 +153,7 @@ export default function ObjectsOverview() {
 
   const objectIdSet = useMemo(() => asIntSet(selectedObjects), [selectedObjects]);
   const entranceIdSet = useMemo(() => asIntSet(selectedEntrances), [selectedEntrances]);
+  const collapsedFloorSet = useMemo(() => asIntSet(collapsedFloors), [collapsedFloors]);
 
   const entrancesByObject = useMemo(() => {
     const map = new Map();
@@ -211,6 +214,62 @@ export default function ObjectsOverview() {
       return objectEntrances.some((entry) => entranceIdSet.has(entry.id));
     });
   }, [objects, objectIdSet, entranceIdSet, entrancesByObject]);
+
+  const toggleFloorCollapse = (floorId) => {
+    setCollapsedFloors((prev) => toggleSelection(prev, floorId));
+  };
+
+  const renderFloorCard = (floor, floorApartments, floorRooms, compact = false) => {
+    const isCollapsed = collapsedFloorSet.has(floor.id);
+    return (
+      <div
+        key={floor.id}
+        className={`rounded-lg border border-white/10 bg-black/20 ${compact ? 'p-2.5' : 'p-2'} space-y-1.5`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-zinc-100 text-xs font-semibold">Этаж {floor.name}</p>
+          <div className="flex items-center gap-2">
+            <span className="text-2xs text-zinc-500">
+              {floorApartments.length} / {floorRooms}
+            </span>
+            <button
+              type="button"
+              onClick={() => toggleFloorCollapse(floor.id)}
+              className="px-1.5 py-0.5 rounded border border-white/15 text-zinc-300 text-2xs hover:bg-white/10"
+              title={isCollapsed ? 'Развернуть этаж' : 'Свернуть этаж'}
+            >
+              {isCollapsed ? 'Развернуть' : 'Свернуть'}
+            </button>
+          </div>
+        </div>
+        {!isCollapsed && (
+          floorApartments.length ? (
+            <div className="space-y-1.5">
+              {floorApartments.map((apartment) => {
+                const apartmentRooms = roomsByApartment.get(apartment.id) || [];
+                return (
+                  <div key={apartment.id} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5">
+                    <p className="text-zinc-200 text-2xs font-medium">{apartment.name}</p>
+                    {apartmentRooms.length ? (
+                      <div className="mt-1 space-y-1">
+                        {apartmentRooms.map((room) => (
+                          <div key={room.id} className="px-1.5 py-1 rounded bg-zinc-800/80 text-zinc-300 text-[10px] leading-none">
+                            {room.name}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-zinc-500 text-2xs">Квартиры и помещения еще не добавлены</p>
+          )
+        )}
+      </div>
+    );
+  };
 
   const renderObjectCards = () => {
     if (!filteredObjects.length) {
@@ -286,7 +345,18 @@ export default function ObjectsOverview() {
                         className={`rounded-xl border border-emerald-500/25 bg-emerald-950/20 p-3 space-y-2 ${blockSizeClass('entrance', entranceScore)}`}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <h4 className="text-emerald-200 text-sm font-medium">Подъезд {entry.name}</h4>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedEntrance({
+                              id: entry.id,
+                              name: entry.name,
+                              objectName: objectRow.name,
+                            })}
+                            className="text-emerald-200 text-sm font-medium hover:text-emerald-100 underline decoration-dotted underline-offset-2"
+                            title="Открыть подъезд на весь экран"
+                          >
+                            Подъезд {entry.name}
+                          </button>
                           <span className="text-2xs text-zinc-400">Этажей: {entranceFloors.length}</span>
                         </div>
                         {entranceFloors.length ? (
@@ -297,54 +367,7 @@ export default function ObjectsOverview() {
                               floorApartments.forEach((apartment) => {
                                 floorRooms += (roomsByApartment.get(apartment.id) || []).length;
                               });
-                              const floorScore = floorApartments.length + (floorRooms * 0.4);
-                              return (
-                                <div
-                                  key={floor.id}
-                                  className={`rounded-lg border border-white/10 bg-black/20 p-2 space-y-1.5 ${blockSizeClass('floor', floorScore)}`}
-                                >
-                                  <div className="flex items-center justify-between gap-2">
-                                    <p className="text-zinc-100 text-xs font-semibold">Этаж {floor.name}</p>
-                                    <span className="text-2xs text-zinc-500">
-                                      кв.: {floorApartments.length} · пом.: {floorRooms}
-                                    </span>
-                                  </div>
-                                  {floorApartments.length ? (
-                                    <div className="flex flex-wrap gap-1.5">
-                                      {floorApartments.map((apartment) => {
-                                        const apartmentRooms = roomsByApartment.get(apartment.id) || [];
-                                        return (
-                                          <div key={apartment.id} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1">
-                                            <div className="flex items-center gap-2">
-                                              <span className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</span>
-                                              <span className="text-zinc-500 text-2xs">{apartmentRooms.length} пом.</span>
-                                            </div>
-                                            {!!apartmentRooms.length && (
-                                              <div className="mt-0.5 flex flex-wrap gap-1">
-                                                {apartmentRooms.slice(0, 3).map((room) => (
-                                                  <span
-                                                    key={room.id}
-                                                    className="px-1 py-0.5 rounded bg-zinc-800 text-zinc-300 text-[10px] leading-none"
-                                                  >
-                                                    {room.name}
-                                                  </span>
-                                                ))}
-                                                {apartmentRooms.length > 3 && (
-                                                  <span className="px-1 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[10px] leading-none">
-                                                    +{apartmentRooms.length - 3}
-                                                  </span>
-                                                )}
-                                              </div>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  ) : (
-                                    <p className="text-zinc-500 text-2xs">Квартиры ещё не добавлены</p>
-                                  )}
-                                </div>
-                              );
+                              return renderFloorCard(floor, floorApartments, floorRooms);
                             })}
                           </div>
                         ) : (
@@ -427,6 +450,41 @@ export default function ObjectsOverview() {
 
       {error && <p className="text-rose-400 text-sm">{error}</p>}
       {loading ? <p className="text-zinc-500 text-sm">Загрузка схемы объектов…</p> : renderObjectCards()}
+
+      {expandedEntrance && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm p-2 sm:p-4">
+          <div className="h-full w-full rounded-2xl border border-emerald-500/30 bg-zinc-950 p-4 overflow-auto">
+            <div className="sticky top-0 z-10 bg-zinc-950/95 backdrop-blur rounded-xl border border-white/10 p-3 mb-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-emerald-200 text-sm font-semibold">
+                  {expandedEntrance.objectName} · Подъезд {expandedEntrance.name}
+                </p>
+                <p className="text-zinc-400 text-2xs">Расширенный режим отображения этажей</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setExpandedEntrance(null)}
+                className="btn-secondary text-xs"
+              >
+                Закрыть
+              </button>
+            </div>
+            <div className="space-y-2">
+              {(floorsByEntrance.get(expandedEntrance.id) || []).map((floor) => {
+                const floorApartments = apartmentsByFloor.get(floor.id) || [];
+                let floorRooms = 0;
+                floorApartments.forEach((apartment) => {
+                  floorRooms += (roomsByApartment.get(apartment.id) || []).length;
+                });
+                return renderFloorCard(floor, floorApartments, floorRooms, true);
+              })}
+              {!((floorsByEntrance.get(expandedEntrance.id) || []).length) && (
+                <p className="text-zinc-500 text-sm">Для этого подъезда этажи ещё не добавлены</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
