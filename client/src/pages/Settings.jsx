@@ -4,6 +4,7 @@ import { settings as settingsApi } from '../api';
 import Users from './Users';
 import RolesTab from '../settings/RolesTab';
 import OrganizationsTab from './settings/OrganizationsTab';
+import ObjectSettingsTab from './settings/ObjectSettingsTab';
 import {
   canAccessSettingsTab,
   getFirstSettingsTab,
@@ -17,6 +18,7 @@ const MAIN_TABS = [
   { id: 'categories', label: 'Категории', perm: SETTINGS_TAB_PERMISSIONS.categories },
   { id: 'systems', label: 'Система', perm: SETTINGS_TAB_PERMISSIONS.systems },
   { id: 'work', label: 'Место проведения работ', perm: SETTINGS_TAB_PERMISSIONS.work },
+  { id: 'object_settings', label: 'Настройки объектов', perm: SETTINGS_TAB_PERMISSIONS.object_settings },
   { id: 'tools', label: 'Виды инструмента', perm: SETTINGS_TAB_PERMISSIONS.tools },
 ];
 
@@ -1173,7 +1175,9 @@ export default function Settings({ user }) {
 
       {error && <p className="text-rose-400 text-sm">{error}</p>}
 
-      {effectiveWorkTab === 'floors' ? (
+      {tab === 'object_settings' ? (
+        <ObjectSettingsTab />
+      ) : effectiveWorkTab === 'floors' ? (
         floorsByEntrance.length ? (
           <div className="space-y-4">
             {floorsByEntrance.map(({ entrance, floors }) => (
@@ -1490,7 +1494,7 @@ export default function Settings({ user }) {
         </div>
       )}
 
-      {effectiveWorkTab !== 'apartments' && tab !== 'categories' && (
+      {effectiveWorkTab !== 'apartments' && tab !== 'categories' && tab !== 'object_settings' && (
         <div ref={formCardRef} className="rounded-xl border border-white/10 bg-surface-850 p-5 max-w-lg">
           <h3 className="text-white font-medium mb-4">{formTitle}</h3>
           <form onSubmit={handleSubmit} className="space-y-4">

@@ -422,6 +422,34 @@ export const settings = {
     update: (id, body) => request(`/api/settings/tool-types/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
     delete: (id) => request(`/api/settings/tool-types/${id}`, { method: 'DELETE' }),
   },
+  objectSettings: {
+    layout: () => request('/api/settings/object-settings/layout'),
+    createLocationSystem: (body) =>
+      request('/api/settings/object-settings/location-systems', { method: 'POST', body: JSON.stringify(body) }),
+    updateLocationSystem: (id, body) =>
+      request(`/api/settings/object-settings/location-systems/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    deleteLocationSystem: (id) =>
+      request(`/api/settings/object-settings/location-systems/${id}`, { method: 'DELETE' }),
+    materialSuggestions: (systemId, q = '', categoryId = null) => {
+      const params = new URLSearchParams();
+      params.set('system_id', String(systemId));
+      if (q) params.set('q', q);
+      if (categoryId) params.set('category_id', String(categoryId));
+      return request(`/api/settings/object-settings/material-suggestions?${params.toString()}`);
+    },
+    addMaterial: (locationSystemId, body) =>
+      request(`/api/settings/object-settings/location-systems/${locationSystemId}/materials`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    updateMaterial: (id, body) =>
+      request(`/api/settings/object-settings/location-system-materials/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    deleteMaterial: (id) =>
+      request(`/api/settings/object-settings/location-system-materials/${id}`, { method: 'DELETE' }),
+  },
 };
 
 export const objectsView = {

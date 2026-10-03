@@ -22,6 +22,12 @@ function parseOptionalPositiveInt(v) {
   return n > 0 ? n : null;
 }
 
+function parsePositiveDecimal(v) {
+  const n = Number.parseFloat(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
 function parseCategoryIconKey(value) {
   const raw = (value ?? '').toString().trim();
   if (!raw) return null;
@@ -82,6 +88,65 @@ async function moveFloorWithinEntrance(db, { entranceId, floorId, fromOrder, toO
     );
   }
   await db.query('UPDATE work_floors SET sort_order = $1 WHERE id = $2', [toOrder, floorId]);
+}
+
+async function loadLocationByKind(db, kind, locationId) {
+  if (kind === 'apartment') {
+    const row = (await db.query(
+      `SELECT a.id, a.name, a.floor_id,
+              f.entrance_id, f.name AS floor_name, f.sort_order AS floor_sort_order,
+              e.object_id, e.name AS entrance_name
+       FROM work_apartments a
+       JOIN work_floors f ON f.id = a.floor_id
+       JOIN work_entrances e ON e.id = f.entrance_id
+       WHERE a.id = $1`,
+      [locationId],
+    )).rows[0];
+    if (!row) return null;
+    return {
+      kind: 'apartment',
+      id: row.id,
+      name: row.name,
+      apartment_id: row.id,
+      room_id: null,
+      floor_id: row.floor_id,
+      floor_name: row.floor_name,
+      floor_sort_order: row.floor_sort_order,
+      entrance_id: row.entrance_id,
+      entrance_name: row.entrance_name,
+      object_id: row.object_id,
+    };
+  }
+  if (kind === 'room') {
+    const row = (await db.query(
+      `SELECT r.id, r.name, r.apartment_id,
+              a.name AS apartment_name, a.floor_id,
+              f.name AS floor_name, f.sort_order AS floor_sort_order, f.entrance_id,
+              e.object_id, e.name AS entrance_name
+       FROM work_rooms r
+       JOIN work_apartments a ON a.id = r.apartment_id
+       JOIN work_floors f ON f.id = a.floor_id
+       JOIN work_entrances e ON e.id = f.entrance_id
+       WHERE r.id = $1`,
+      [locationId],
+    )).rows[0];
+    if (!row) return null;
+    return {
+      kind: 'room',
+      id: row.id,
+      name: row.name,
+      apartment_id: row.apartment_id,
+      apartment_name: row.apartment_name,
+      room_id: row.id,
+      floor_id: row.floor_id,
+      floor_name: row.floor_name,
+      floor_sort_order: row.floor_sort_order,
+      entrance_id: row.entrance_id,
+      entrance_name: row.entrance_name,
+      object_id: row.object_id,
+    };
+  }
+  return null;
 }
 
 /** Все справочники для форм склада */
@@ -481,6 +546,8 @@ router.delete('/systems/:id', requirePermission('can_settings_categories'), asyn
   if (!id) return res.status(400).json({ error: 'Неверный id' });
   const used = await pool.query('SELECT 1 FROM materials WHERE system_id = $1 LIMIT 1', [id]);
   if (used.rowCount) return res.status(400).json({ error: 'Система используется в материалах' });
+  const usedInLocations = await pool.query('SELECT 1 FROM work_location_systems WHERE system_id = $1 LIMIT 1', [id]);
+  if (usedInLocations.rowCount) return res.status(400).json({ error: 'Система используется в настройках объектов' });
   const r = await pool.query('DELETE FROM material_systems WHERE id = $1 RETURNING id', [id]);
   if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
   res.json({ ok: true });
@@ -898,6 +965,7 @@ router.delete('/work-apartments/:id', requirePermission('can_settings_work'), as
   if (!id) return res.status(400).json({ error: 'Неверный id' });
   const used = await pool.query('SELECT 1 FROM work_rooms WHERE apartment_id = $1 LIMIT 1', [id]);
   if (used.rowCount) return res.status(400).json({ error: 'В квартире есть помещения — сначала удалите их' });
+  await pool.query(`DELETE FROM work_location_systems WHERE location_kind = 'apartment' AND location_id = $1`, [id]);
   const r = await pool.query('DELETE FROM work_apartments WHERE id = $1 RETURNING id', [id]);
   if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
   res.json({ ok: true });
@@ -968,7 +1036,292 @@ router.put('/work-rooms/:id', requirePermission('can_settings_work'), async (req
 router.delete('/work-rooms/:id', requirePermission('can_settings_work'), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Неверный id' });
+  await pool.query(`DELETE FROM work_location_systems WHERE location_kind = 'room' AND location_id = $1`, [id]);
   const r = await pool.query('DELETE FROM work_rooms WHERE id = $1 RETURNING id', [id]);
+  if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
+  res.json({ ok: true });
+});
+
+// ——— Настройки объектов (монтажные системы и материалы) ———
+router.get('/object-settings/layout', requirePermission('can_settings_work'), async (_req, res) => {
+  try {
+    const [
+      objects,
+      entrances,
+      floors,
+      apartments,
+      rooms,
+      systems,
+      categories,
+      locationSystems,
+      locationSystemMaterials,
+    ] = await Promise.all([
+      pool.query('SELECT id, name FROM warehouse_objects ORDER BY name'),
+      pool.query(
+        `SELECT e.id, e.name, e.object_id, o.name AS object_name
+         FROM work_entrances e
+         LEFT JOIN warehouse_objects o ON o.id = e.object_id
+         ORDER BY o.name NULLS LAST, e.name`,
+      ),
+      pool.query(
+        `SELECT f.id, f.name, f.entrance_id, f.sort_order,
+                e.name AS entrance_name, e.object_id, o.name AS object_name
+         FROM work_floors f
+         JOIN work_entrances e ON e.id = f.entrance_id
+         LEFT JOIN warehouse_objects o ON o.id = e.object_id
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(f.sort_order, 2147483647), f.name`,
+      ),
+      pool.query(
+        `SELECT a.id, a.name, a.floor_id,
+                f.name AS floor_name, f.sort_order AS floor_sort_order, f.entrance_id,
+                e.name AS entrance_name, e.object_id, o.name AS object_name
+         FROM work_apartments a
+         JOIN work_floors f ON f.id = a.floor_id
+         JOIN work_entrances e ON e.id = f.entrance_id
+         LEFT JOIN warehouse_objects o ON o.id = e.object_id
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(f.sort_order, 2147483647), f.name, a.name`,
+      ),
+      pool.query(
+        `SELECT r.id, r.name, r.apartment_id, a.name AS apartment_name,
+                a.floor_id, f.name AS floor_name, f.sort_order AS floor_sort_order, f.entrance_id,
+                e.name AS entrance_name, e.object_id, o.name AS object_name
+         FROM work_rooms r
+         JOIN work_apartments a ON a.id = r.apartment_id
+         JOIN work_floors f ON f.id = a.floor_id
+         JOIN work_entrances e ON e.id = f.entrance_id
+         LEFT JOIN warehouse_objects o ON o.id = e.object_id
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(f.sort_order, 2147483647), f.name, a.name, r.name`,
+      ),
+      pool.query('SELECT id, name FROM material_systems ORDER BY name'),
+      pool.query('SELECT id, name, icon_key FROM material_categories ORDER BY name'),
+      pool.query(
+        `SELECT ls.id, ls.location_kind, ls.location_id, ls.system_id, ls.category_id, ls.created_at, ls.updated_at,
+                s.name AS system_name,
+                c.name AS category_name, c.icon_key AS category_icon_key
+         FROM work_location_systems ls
+         JOIN material_systems s ON s.id = ls.system_id
+         LEFT JOIN material_categories c ON c.id = ls.category_id
+         ORDER BY ls.location_kind, ls.location_id, s.name`,
+      ),
+      pool.query(
+        `SELECT lm.id, lm.location_system_id, lm.material_id, lm.quantity, lm.created_at, lm.updated_at,
+                m.name AS material_name, m.unit AS material_unit, m.system_id, m.category_id
+         FROM work_location_system_materials lm
+         JOIN materials m ON m.id = lm.material_id
+         ORDER BY lm.location_system_id, m.name`,
+      ),
+    ]);
+    res.json({
+      objects: objects.rows,
+      entrances: entrances.rows,
+      floors: floors.rows,
+      apartments: apartments.rows,
+      rooms: rooms.rows,
+      systems: systems.rows,
+      categories: categories.rows,
+      location_systems: locationSystems.rows,
+      location_system_materials: locationSystemMaterials.rows,
+    });
+  } catch (e) {
+    console.error('GET /settings/object-settings/layout:', e.message);
+    res.status(500).json({ error: 'Ошибка загрузки настроек объектов' });
+  }
+});
+
+router.post('/object-settings/location-systems', requirePermission('can_settings_work'), async (req, res) => {
+  const locationKind = String(req.body?.location_kind || '').trim();
+  const locationId = parseId(req.body?.location_id);
+  const systemId = parseId(req.body?.system_id);
+  if (!locationId || !systemId || !['apartment', 'room'].includes(locationKind)) {
+    return res.status(400).json({ error: 'Неверные данные' });
+  }
+  const categoryId = req.body?.category_id == null || req.body?.category_id === ''
+    ? null
+    : parseId(req.body?.category_id);
+  if (req.body?.category_id != null && req.body?.category_id !== '' && !categoryId) {
+    return res.status(400).json({ error: 'Неверная категория' });
+  }
+  const location = await loadLocationByKind(pool, locationKind, locationId);
+  if (!location) return res.status(404).json({ error: 'Локация не найдена' });
+  const system = (await pool.query('SELECT id, name FROM material_systems WHERE id = $1', [systemId])).rows[0];
+  if (!system) return res.status(400).json({ error: 'Система не найдена' });
+  if (categoryId) {
+    const category = (await pool.query('SELECT id FROM material_categories WHERE id = $1', [categoryId])).rows[0];
+    if (!category) return res.status(400).json({ error: 'Категория не найдена' });
+  }
+  try {
+    const created = (await pool.query(
+      `INSERT INTO work_location_systems (location_kind, location_id, system_id, category_id)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, location_kind, location_id, system_id, category_id, created_at, updated_at`,
+      [locationKind, locationId, systemId, categoryId],
+    )).rows[0];
+    const withMeta = (await pool.query(
+      `SELECT ls.id, ls.location_kind, ls.location_id, ls.system_id, ls.category_id, ls.created_at, ls.updated_at,
+              s.name AS system_name,
+              c.name AS category_name, c.icon_key AS category_icon_key
+       FROM work_location_systems ls
+       JOIN material_systems s ON s.id = ls.system_id
+       LEFT JOIN material_categories c ON c.id = ls.category_id
+       WHERE ls.id = $1`,
+      [created.id],
+    )).rows[0];
+    res.status(201).json(withMeta);
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'Эта система уже добавлена в локацию' });
+    throw e;
+  }
+});
+
+router.put('/object-settings/location-systems/:id', requirePermission('can_settings_work'), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Неверный id' });
+  const categoryId = req.body?.category_id == null || req.body?.category_id === ''
+    ? null
+    : parseId(req.body?.category_id);
+  if (req.body?.category_id != null && req.body?.category_id !== '' && !categoryId) {
+    return res.status(400).json({ error: 'Неверная категория' });
+  }
+  if (categoryId) {
+    const category = (await pool.query('SELECT id FROM material_categories WHERE id = $1', [categoryId])).rows[0];
+    if (!category) return res.status(400).json({ error: 'Категория не найдена' });
+  }
+  const updated = (await pool.query(
+    `UPDATE work_location_systems
+     SET category_id = $1, updated_at = NOW()
+     WHERE id = $2
+     RETURNING id`,
+    [categoryId, id],
+  )).rows[0];
+  if (!updated) return res.status(404).json({ error: 'Не найдено' });
+  const row = (await pool.query(
+    `SELECT ls.id, ls.location_kind, ls.location_id, ls.system_id, ls.category_id, ls.created_at, ls.updated_at,
+            s.name AS system_name,
+            c.name AS category_name, c.icon_key AS category_icon_key
+     FROM work_location_systems ls
+     JOIN material_systems s ON s.id = ls.system_id
+     LEFT JOIN material_categories c ON c.id = ls.category_id
+     WHERE ls.id = $1`,
+    [id],
+  )).rows[0];
+  res.json(row);
+});
+
+router.delete('/object-settings/location-systems/:id', requirePermission('can_settings_work'), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Неверный id' });
+  const r = await pool.query('DELETE FROM work_location_systems WHERE id = $1 RETURNING id', [id]);
+  if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
+  res.json({ ok: true });
+});
+
+router.get('/object-settings/material-suggestions', requirePermission('can_settings_work'), async (req, res) => {
+  const systemId = parseId(req.query.system_id);
+  const q = String(req.query.q || '').trim();
+  const categoryId = req.query.category_id == null || req.query.category_id === ''
+    ? null
+    : parseId(req.query.category_id);
+  if (!systemId) return res.status(400).json({ error: 'Нужно указать систему' });
+  if (req.query.category_id != null && req.query.category_id !== '' && !categoryId) {
+    return res.status(400).json({ error: 'Неверная категория' });
+  }
+  const like = `%${q}%`;
+  const params = [systemId];
+  let where = 'WHERE m.system_id = $1';
+  if (categoryId) {
+    params.push(categoryId);
+    where += ` AND m.category_id = $${params.length}`;
+  }
+  if (q) {
+    params.push(like);
+    where += ` AND m.name ILIKE $${params.length}`;
+  }
+  const rows = (await pool.query(
+    `SELECT m.id, m.name, m.unit, m.quantity, m.system_id, m.category_id,
+            c.name AS category_name, c.icon_key AS category_icon_key
+     FROM materials m
+     LEFT JOIN material_categories c ON c.id = m.category_id
+     ${where}
+     ORDER BY m.name
+     LIMIT 30`,
+    params,
+  )).rows;
+  res.json(rows);
+});
+
+router.post('/object-settings/location-systems/:id/materials', requirePermission('can_settings_work'), async (req, res) => {
+  const locationSystemId = parseId(req.params.id);
+  const materialId = parseId(req.body?.material_id);
+  const quantity = parsePositiveDecimal(req.body?.quantity);
+  if (!locationSystemId || !materialId || !quantity) {
+    return res.status(400).json({ error: 'Неверные данные' });
+  }
+  const locationSystem = (await pool.query(
+    `SELECT id, system_id
+     FROM work_location_systems
+     WHERE id = $1`,
+    [locationSystemId],
+  )).rows[0];
+  if (!locationSystem) return res.status(404).json({ error: 'Блок системы не найден' });
+  const material = (await pool.query(
+    `SELECT id, name, unit, system_id, category_id
+     FROM materials
+     WHERE id = $1`,
+    [materialId],
+  )).rows[0];
+  if (!material) return res.status(400).json({ error: 'Материал не найден' });
+  if (material.system_id !== locationSystem.system_id) {
+    return res.status(400).json({ error: 'Материал относится к другой системе' });
+  }
+  try {
+    const created = (await pool.query(
+      `INSERT INTO work_location_system_materials (location_system_id, material_id, quantity)
+       VALUES ($1, $2, $3)
+       RETURNING id`,
+      [locationSystemId, materialId, quantity],
+    )).rows[0];
+    const row = (await pool.query(
+      `SELECT lm.id, lm.location_system_id, lm.material_id, lm.quantity, lm.created_at, lm.updated_at,
+              m.name AS material_name, m.unit AS material_unit, m.system_id, m.category_id
+       FROM work_location_system_materials lm
+       JOIN materials m ON m.id = lm.material_id
+       WHERE lm.id = $1`,
+      [created.id],
+    )).rows[0];
+    res.status(201).json(row);
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'Материал уже добавлен в этот блок' });
+    throw e;
+  }
+});
+
+router.put('/object-settings/location-system-materials/:id', requirePermission('can_settings_work'), async (req, res) => {
+  const id = parseId(req.params.id);
+  const quantity = parsePositiveDecimal(req.body?.quantity);
+  if (!id || !quantity) return res.status(400).json({ error: 'Неверные данные' });
+  const row = (await pool.query(
+    `UPDATE work_location_system_materials
+     SET quantity = $1, updated_at = NOW()
+     WHERE id = $2
+     RETURNING id`,
+    [quantity, id],
+  )).rows[0];
+  if (!row) return res.status(404).json({ error: 'Не найдено' });
+  const withMeta = (await pool.query(
+    `SELECT lm.id, lm.location_system_id, lm.material_id, lm.quantity, lm.created_at, lm.updated_at,
+            m.name AS material_name, m.unit AS material_unit, m.system_id, m.category_id
+     FROM work_location_system_materials lm
+     JOIN materials m ON m.id = lm.material_id
+     WHERE lm.id = $1`,
+    [id],
+  )).rows[0];
+  res.json(withMeta);
+});
+
+router.delete('/object-settings/location-system-materials/:id', requirePermission('can_settings_work'), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Неверный id' });
+  const r = await pool.query('DELETE FROM work_location_system_materials WHERE id = $1 RETURNING id', [id]);
   if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
   res.json({ ok: true });
 });
