@@ -9,6 +9,7 @@ const EMPTY_DATA = {
   rooms: [],
 };
 const FLOOR_ROOMS_BUCKET_NAME = 'Помещения этажа';
+const FLOOR_ROOMS_DISPLAY_TITLE = 'Помещения на этаже';
 
 function naturalCompare(a, b) {
   return String(a || '').localeCompare(String(b || ''), 'ru', { numeric: true, sensitivity: 'base' });
@@ -248,11 +249,14 @@ export default function ObjectsOverview() {
             <div className="space-y-2">
               {floorOnlyRooms.length ? (
                 <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5">
-                  <p className="text-zinc-200 text-2xs font-medium">Помещения этажа</p>
-                  <div className="mt-1 space-y-1">
+                  <p className="text-zinc-200 text-2xs font-medium">{FLOOR_ROOMS_DISPLAY_TITLE}</p>
+                  <div className="mt-1 space-y-1.5">
                     {floorOnlyRooms.map((room) => (
-                      <div key={room.id} className="px-1.5 py-1 rounded bg-zinc-800/80 text-zinc-300 text-[10px] leading-none">
-                        Пом. {room.name}
+                      <div
+                        key={room.id}
+                        className="rounded border border-white/10 bg-black/20 px-2 py-1.5"
+                      >
+                        <p className="text-zinc-200 text-2xs font-medium">Пом. {room.name}</p>
                       </div>
                     ))}
                   </div>
@@ -261,7 +265,7 @@ export default function ObjectsOverview() {
 
               {regularApartments.length ? (
                 <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 space-y-1.5">
-                  <p className="text-zinc-200 text-2xs font-medium">Квартиры</p>
+                  <p className="text-zinc-200 text-2xs font-medium">Квартиры на этаже</p>
                   {regularApartments.map((apartment) => {
                     const apartmentRooms = roomsByApartment.get(apartment.id) || [];
                     return (
