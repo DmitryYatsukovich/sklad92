@@ -271,7 +271,6 @@ export default function Settings({ user }) {
     if (effectiveWorkTab === 'floors') {
       return sortedFloors.map((f) => ({
         ...f,
-        _displayName: `${f.sort_order || '—'}. ${f.name}`,
         _extra: [f.object_name, f.entrance_name].filter(Boolean).join(' → ')
           || catalog.work_entrances.find((e) => e.id === f.entrance_id)?.name,
       }));
@@ -434,7 +433,7 @@ export default function Settings({ user }) {
   };
 
   const floorOptionLabel = (f) => {
-    const floorName = f.sort_order ? `${f.sort_order}. ${f.name}` : f.name;
+    const floorName = f.name;
     const ent = f.entrance_name || catalog.work_entrances.find((e) => e.id === f.entrance_id)?.name;
     const obj = f.object_name;
     if (obj && ent) return `${obj} → ${ent} → ${floorName}`;
@@ -466,6 +465,32 @@ export default function Settings({ user }) {
     || naturalCompare(a.floor_name, b.floor_name)
     || naturalCompare(a.name, b.name)
   ));
+  const floorsByEntrance = sortedWorkEntrances.map((entrance) => ({
+    entrance,
+    floors: sortedWorkFloors.filter((f) => f.entrance_id === entrance.id),
+  }));
+  const apartmentsByFloorId = sortedWorkApartments.reduce((acc, apartment) => {
+    const floorId = apartment.floor_id;
+    if (!acc[floorId]) acc[floorId] = [];
+    acc[floorId].push(apartment);
+    return acc;
+  }, {});
+
+  const startAddFloorForEntrance = (entranceId) => {
+    setEditing(null);
+    setName('');
+    setSortOrder('');
+    setParentId(String(entranceId || ''));
+    setError('');
+  };
+
+  const startAddApartmentForFloor = (floorId) => {
+    setEditing(null);
+    setName('');
+    setSortOrder('');
+    setParentId(String(floorId || ''));
+    setError('');
+  };
 
   const settingsTabs = (
     <div className="flex flex-wrap gap-2">
@@ -603,32 +628,167 @@ export default function Settings({ user }) {
 
       {error && <p className="text-rose-400 text-sm">{error}</p>}
 
-      <SimpleList
-        items={itemsForTab()}
-        onEdit={startEdit}
-        onDelete={handleDelete}
-        extraCol={extraLabel}
-        renderActions={effectiveWorkTab === 'floors' ? (row) => (
-          <>
-            <button
-              type="button"
-              onClick={() => handleMoveFloor(row, 'up')}
-              className="px-2 py-1 rounded border border-white/20 text-zinc-200 hover:bg-white/10"
-              title="Поднять этаж"
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              onClick={() => handleMoveFloor(row, 'down')}
-              className="px-2 py-1 rounded border border-white/20 text-zinc-200 hover:bg-white/10"
-              title="Опустить этаж"
-            >
-              ↓
-            </button>
-          </>
-        ) : null}
-      />
+      {effectiveWorkTab === 'floors' ? (
+        floorsByEntrance.length ? (
+          <div className="space-y-4">
+            {floorsByEntrance.map(({ entrance, floors }) => (
+              <div
+                key={entrance.id}
+                className="rounded-xl border border-emerald-500/25 bg-emerald-950/20 p-4 space-y-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-white font-medium">{entranceOptionLabel(entrance)}</p>
+                    <p className="text-zinc-400 text-xs">
+                      {floors.length ? `Этажей: ${floors.length}` : 'Этажи пока не добавлены'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => startAddFloorForEntrance(entrance.id)}
+                    className="btn-secondary text-xs"
+                  >
+                    Добавить этаж
+                  </button>
+                </div>
+                {floors.length ? (
+                  <div className="table-wrap">
+                    <table className="w-full text-left text-sm">
+                      <thead>
+                        <tr className="border-b border-white/10 text-zinc-300">
+                          <th className="p-3 font-medium">Этаж</th>
+                          <th className="p-3 w-40" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {floors.map((row) => (
+                          <tr key={row.id} className="border-b border-white/5">
+                            <td className="p-3 text-white">{row.name}</td>
+                            <td className="p-3">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveFloor(row, 'up')}
+                                  className="px-2 py-1 rounded border border-white/20 text-zinc-200 hover:bg-white/10"
+                                  title="Поднять этаж"
+                                >
+                                  ↑
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveFloor(row, 'down')}
+                                  className="px-2 py-1 rounded border border-white/20 text-zinc-200 hover:bg-white/10"
+                                  title="Опустить этаж"
+                                >
+                                  ↓
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => startEdit(row)}
+                                  className="text-sky-400 hover:text-sky-300 text-sm font-medium"
+                                >
+                                  Изм.
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDelete(row)}
+                                  className="text-rose-400 hover:text-rose-300 text-sm font-medium"
+                                >
+                                  Удал.
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-zinc-500 text-sm py-2">Для этого подъезда этажи пока не добавлены.</p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-zinc-500 text-sm py-4">Сначала добавьте подъезды во вкладке «Подъезды».</p>
+        )
+      ) : effectiveWorkTab === 'apartments' ? (
+        floorsByEntrance.length ? (
+          <div className="space-y-4">
+            {floorsByEntrance.map(({ entrance, floors }) => (
+              <div
+                key={entrance.id}
+                className="rounded-xl border border-emerald-500/25 bg-emerald-950/20 p-4 space-y-3"
+              >
+                <p className="text-white font-medium">{entranceOptionLabel(entrance)}</p>
+                {floors.length ? (
+                  <div className="space-y-3">
+                    {floors.map((floor) => {
+                      const floorApartments = apartmentsByFloorId[floor.id] || [];
+                      return (
+                        <div
+                          key={floor.id}
+                          className="rounded-lg border border-white/10 bg-black/10 p-3 space-y-2"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-zinc-100 text-sm font-medium">Этаж: {floor.name}</p>
+                            <button
+                              type="button"
+                              onClick={() => startAddApartmentForFloor(floor.id)}
+                              className="btn-secondary text-xs"
+                            >
+                              Добавить квартиру
+                            </button>
+                          </div>
+                          {floorApartments.length ? (
+                            <div className="flex flex-wrap gap-2">
+                              {floorApartments.map((row) => (
+                                <div
+                                  key={row.id}
+                                  className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-surface-850 px-3 py-1.5"
+                                >
+                                  <span className="text-white text-sm">{row.name}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => startEdit(row)}
+                                    className="text-sky-400 hover:text-sky-300 text-xs font-medium"
+                                  >
+                                    Изм.
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDelete(row)}
+                                    className="text-rose-400 hover:text-rose-300 text-xs font-medium"
+                                  >
+                                    Удал.
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-zinc-500 text-sm">На этом этаже квартиры пока не добавлены.</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-zinc-500 text-sm">В этом подъезде пока нет этажей.</p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-zinc-500 text-sm py-4">Сначала добавьте подъезды и этажи.</p>
+        )
+      ) : (
+        <SimpleList
+          items={itemsForTab()}
+          onEdit={startEdit}
+          onDelete={handleDelete}
+          extraCol={extraLabel}
+        />
+      )}
 
       <div className="rounded-xl border border-white/10 bg-surface-850 p-5 max-w-lg">
         <h3 className="text-white font-medium mb-4">{formTitle}</h3>
@@ -698,9 +858,17 @@ export default function Settings({ user }) {
               <label className="label">Этаж</label>
               <select value={parentId} onChange={(e) => setParentId(e.target.value)} className="input" required>
                 <option value="">— Выберите —</option>
-                {sortedWorkFloors.map((f) => (
-                  <option key={f.id} value={f.id}>{floorOptionLabel(f)}</option>
-                ))}
+                {sortedWorkEntrances.map((entrance) => {
+                  const entranceFloors = sortedWorkFloors.filter((f) => f.entrance_id === entrance.id);
+                  if (!entranceFloors.length) return null;
+                  return (
+                    <optgroup key={entrance.id} label={entranceOptionLabel(entrance)}>
+                      {entranceFloors.map((f) => (
+                        <option key={f.id} value={f.id}>{f.name}</option>
+                      ))}
+                    </optgroup>
+                  );
+                })}
               </select>
             </div>
           )}
