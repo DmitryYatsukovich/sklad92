@@ -28,6 +28,7 @@ const statements = [
     name VARCHAR(200) NOT NULL UNIQUE,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
+  `ALTER TABLE material_categories ADD COLUMN IF NOT EXISTS icon_key VARCHAR(64)`,
   `CREATE TABLE IF NOT EXISTS material_systems (
     id SERIAL PRIMARY KEY,
     name VARCHAR(200) NOT NULL UNIQUE,

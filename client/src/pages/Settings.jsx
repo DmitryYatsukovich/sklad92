@@ -95,15 +95,111 @@ function sortByNaturalName(items) {
   return [...items].sort((a, b) => naturalCompare(a?.name, b?.name));
 }
 
-function categoryMiniatureByName(name) {
+const CATEGORY_ICON_OPTIONS = [
+  { key: 'electrical', label: 'Электромонтаж', hint: 'Кабели, щиты, питание' },
+  { key: 'fire_alarm', label: 'Пожарная сигнализация', hint: 'Датчики, сирены, шлейфы' },
+  { key: 'access_control', label: 'СКУД', hint: 'Контроллеры, замки, карты' },
+  { key: 'video_surveillance', label: 'Видеонаблюдение', hint: 'Камеры и регистраторы' },
+  { key: 'dispatching', label: 'Диспетчеризация', hint: 'Мониторинг и управление' },
+];
+
+const CATEGORY_ICON_META = {
+  electrical: {
+    label: 'Электромонтаж',
+    badgeClass: 'bg-sky-500/15 text-sky-300 ring-sky-400/35',
+  },
+  fire_alarm: {
+    label: 'Пожарная сигнализация',
+    badgeClass: 'bg-rose-500/15 text-rose-300 ring-rose-400/35',
+  },
+  access_control: {
+    label: 'СКУД',
+    badgeClass: 'bg-violet-500/15 text-violet-300 ring-violet-400/35',
+  },
+  video_surveillance: {
+    label: 'Видеонаблюдение',
+    badgeClass: 'bg-cyan-500/15 text-cyan-300 ring-cyan-400/35',
+  },
+  dispatching: {
+    label: 'Диспетчеризация',
+    badgeClass: 'bg-emerald-500/15 text-emerald-300 ring-emerald-400/35',
+  },
+  other: {
+    label: 'Прочая категория',
+    badgeClass: 'bg-zinc-500/20 text-zinc-200 ring-zinc-400/30',
+  },
+};
+
+function inferCategoryIconKey(name) {
   const source = String(name || '').toLowerCase();
-  if (/пожар|дым/.test(source)) return { icon: '🚨', bg: 'bg-rose-500/20 text-rose-300', label: 'Пожарная категория' };
-  if (/датчик|сенсор/.test(source)) return { icon: '📡', bg: 'bg-amber-500/20 text-amber-300', label: 'Датчики' };
-  if (/свет|ламп|освещ/.test(source)) return { icon: '💡', bg: 'bg-yellow-500/20 text-yellow-300', label: 'Освещение' };
-  if (/кабел|провод|элект/.test(source)) return { icon: '🔌', bg: 'bg-sky-500/20 text-sky-300', label: 'Электрика' };
-  if (/труб|вода|сантех|кран/.test(source)) return { icon: '🚰', bg: 'bg-cyan-500/20 text-cyan-300', label: 'Водоснабжение' };
-  if (/креп|болт|гайк|метиз/.test(source)) return { icon: '🔩', bg: 'bg-zinc-500/30 text-zinc-200', label: 'Крепёж' };
-  return { icon: '📦', bg: 'bg-emerald-500/20 text-emerald-300', label: 'Категория материалов' };
+  if (/пожар|дым|огнет|сирен|оповещ|извещ/.test(source)) return 'fire_alarm';
+  if (/скуд|доступ|турникет|замок|карта|контрол/.test(source)) return 'access_control';
+  if (/видео|камер|cctv|наблюд|регистрат/.test(source)) return 'video_surveillance';
+  if (/диспет|монитор|автоматизац|телеметр|управ/.test(source)) return 'dispatching';
+  if (/элект|кабел|провод|щит|розет|питан|автомат|узо/.test(source)) return 'electrical';
+  return 'other';
+}
+
+function resolveCategoryMiniature({ name, icon_key }) {
+  const preferred = String(icon_key || '').trim();
+  const key = CATEGORY_ICON_META[preferred] ? preferred : inferCategoryIconKey(name);
+  const meta = CATEGORY_ICON_META[key] || CATEGORY_ICON_META.other;
+  return {
+    key,
+    label: meta.label,
+    badgeClass: meta.badgeClass,
+  };
+}
+
+function CategoryGlyph({ iconKey, className = 'h-4 w-4' }) {
+  if (iconKey === 'electrical') {
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+        <path d="M13 2L5 13h6l-1 9 9-13h-6l1-7z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (iconKey === 'fire_alarm') {
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+        <path d="M12 3c2 2 3 4 3 6 0 1.5-.5 2.7-1.6 3.8C12.2 14 12 15 12 16c0-1.2-.5-2.2-1.7-3.2C9.2 11.7 9 10.5 9 9c0-2 1-4 3-6z" stroke="currentColor" strokeWidth="1.7" />
+        <path d="M7 16c0 2.8 2.2 5 5 5s5-2.2 5-5c0-1.1-.3-2.2-1-3.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (iconKey === 'access_control') {
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+        <rect x="4" y="5" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.7" />
+        <path d="M8 9h4M8 12h5M8 15h3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+        <path d="M17 12h3m-1.5-1.5L20 12l-1.5 1.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (iconKey === 'video_surveillance') {
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+        <path d="M3 10h12l3 3v3H6l-3-3v-3z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+        <path d="M15 10l4-2v2.5M8 16v2M12 16v2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (iconKey === 'dispatching') {
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+        <rect x="3" y="5" width="8" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+        <rect x="13" y="5" width="8" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+        <rect x="3" y="13" width="18" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+        <path d="M7 8h1M17 8h1M7 16h10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path d="M4 8l8-4 8 4-8 4-8-4z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M4 8v8l8 4 8-4V8" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 function SimpleList({ items, onEdit, onDelete, extraCol, renderActions, renderTitleLeading }) {
@@ -170,6 +266,7 @@ export default function Settings({ user }) {
   const [catalog, setCatalog] = useState(EMPTY_CATALOG);
   const [error, setError] = useState('');
   const [name, setName] = useState('');
+  const [categoryIconKey, setCategoryIconKey] = useState('');
   const [parentId, setParentId] = useState('');
   const [sortOrder, setSortOrder] = useState('');
   const [workItemKind, setWorkItemKind] = useState('apartment');
@@ -211,6 +308,7 @@ export default function Settings({ user }) {
 
   const resetForm = () => {
     setName('');
+    setCategoryIconKey('');
     setParentId('');
     setSortOrder('');
     setWorkItemKind('apartment');
@@ -282,7 +380,7 @@ export default function Settings({ user }) {
     if (tab === 'tools') return catalog.tool_types.map((t) => ({ ...t }));
     if (tab === 'categories') return catalog.categories.map((c) => ({
       ...c,
-      _miniature: categoryMiniatureByName(c.name),
+      _miniature: resolveCategoryMiniature(c),
     }));
 
     if (effectiveWorkTab === 'objects') {
@@ -339,8 +437,9 @@ export default function Settings({ user }) {
         if (editing) await settingsApi.racks.update(editing.id, { name: n, warehouse_id: wid });
         else await settingsApi.racks.create({ name: n, warehouse_id: wid });
       } else if (tab === 'categories') {
-        if (editing) await settingsApi.categories.update(editing.id, { name: n });
-        else await settingsApi.categories.create({ name: n });
+        const payload = { name: n, icon_key: categoryIconKey || null };
+        if (editing) await settingsApi.categories.update(editing.id, payload);
+        else await settingsApi.categories.create(payload);
       } else if (tab === 'systems') {
         if (editing) await settingsApi.systems.update(editing.id, { name: n });
         else await settingsApi.systems.create({ name: n });
@@ -392,6 +491,7 @@ export default function Settings({ user }) {
     setEditing(row);
     setName(row.name || '');
     setSortOrder('');
+    setCategoryIconKey('');
     if (effectiveWarehouseTab === 'warehouses') setParentId(String(row.object_id || ''));
     else if (effectiveWarehouseTab === 'storage') setParentId(String(row.warehouse_id || ''));
     else if (effectiveWorkTab === 'entrances') setParentId(String(row.object_id || ''));
@@ -407,6 +507,10 @@ export default function Settings({ user }) {
         setWorkItemKind('apartment');
         setParentId(String(row.floor_id || ''));
       }
+    }
+    else if (tab === 'categories') {
+      setParentId('');
+      setCategoryIconKey(row.icon_key || '');
     }
     else setParentId('');
   };
@@ -471,6 +575,8 @@ export default function Settings({ user }) {
     const what = labels[effectiveWorkTab] || 'запись';
     return editing ? `Редактирование: ${what}` : `Добавить ${what}`;
   })();
+  const categoryAutoMiniature = resolveCategoryMiniature({ name, icon_key: null });
+  const categorySelectedMiniature = resolveCategoryMiniature({ name, icon_key: categoryIconKey || null });
 
   const entranceOptionLabel = (e) => {
     const obj = e.object_name || catalog.objects.find((o) => o.id === e.object_id)?.name;
@@ -1007,11 +1113,11 @@ export default function Settings({ user }) {
           renderTitleLeading={tab === 'categories'
             ? (row) => (
               <span
-                className={`inline-flex h-6 w-6 items-center justify-center rounded-md text-xs ${row._miniature?.bg || 'bg-zinc-700 text-zinc-200'}`}
+                className={`inline-flex h-7 w-7 items-center justify-center rounded-lg ring-1 ${row._miniature?.badgeClass || 'bg-zinc-700 text-zinc-200 ring-zinc-500/40'}`}
                 title={row._miniature?.label || 'Категория'}
                 aria-label={row._miniature?.label || 'Категория'}
               >
-                {row._miniature?.icon || '📦'}
+                <CategoryGlyph iconKey={row._miniature?.key} />
               </span>
             )
             : null}
@@ -1093,6 +1199,63 @@ export default function Settings({ user }) {
               required
             />
           </div>
+          {tab === 'categories' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <label className="label">Иконка категории</label>
+                <span className="text-xs text-zinc-400">
+                  Текущая: {categorySelectedMiniature.label}
+                </span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setCategoryIconKey('')}
+                  className={`rounded-lg border px-3 py-2 text-left transition ${
+                    !categoryIconKey
+                      ? 'border-sky-400/70 bg-sky-500/10 ring-1 ring-sky-400/30'
+                      : 'border-white/10 bg-zinc-900/50 hover:bg-zinc-800/70'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <span className={`inline-flex h-7 w-7 items-center justify-center rounded-lg ring-1 ${categoryAutoMiniature.badgeClass}`}>
+                      <CategoryGlyph iconKey={categoryAutoMiniature.key} />
+                    </span>
+                    <span>
+                      <span className="block text-sm text-white">Автоопределение</span>
+                      <span className="block text-xs text-zinc-400">По названию категории</span>
+                    </span>
+                  </div>
+                </button>
+                {CATEGORY_ICON_OPTIONS.map((option) => {
+                  const meta = CATEGORY_ICON_META[option.key] || CATEGORY_ICON_META.other;
+                  const selected = categoryIconKey === option.key;
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => setCategoryIconKey(option.key)}
+                      className={`rounded-lg border px-3 py-2 text-left transition ${
+                        selected
+                          ? 'border-sky-400/70 bg-sky-500/10 ring-1 ring-sky-400/30'
+                          : 'border-white/10 bg-zinc-900/50 hover:bg-zinc-800/70'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <span className={`inline-flex h-7 w-7 items-center justify-center rounded-lg ring-1 ${meta.badgeClass}`}>
+                          <CategoryGlyph iconKey={option.key} />
+                        </span>
+                        <span>
+                          <span className="block text-sm text-white">{option.label}</span>
+                          <span className="block text-xs text-zinc-400">{option.hint}</span>
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div className="flex gap-2">
             <button type="submit" className="btn-primary text-sm">
               {editing ? 'Сохранить' : 'Добавить'}

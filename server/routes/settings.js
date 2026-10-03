@@ -22,6 +22,12 @@ function parseOptionalPositiveInt(v) {
   return n > 0 ? n : null;
 }
 
+function parseCategoryIconKey(value) {
+  const raw = (value ?? '').toString().trim();
+  if (!raw) return null;
+  return raw.slice(0, 64);
+}
+
 function clampSortOrder(value, min, max) {
   if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(max, value));
@@ -94,7 +100,7 @@ router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req,
         `SELECT r.id, r.name, r.warehouse_id, w.name AS warehouse_name, w.object_id
          FROM warehouse_racks r JOIN warehouses w ON w.id = r.warehouse_id ORDER BY w.name, r.name`
       ),
-      pool.query('SELECT id, name FROM material_categories ORDER BY name'),
+      pool.query('SELECT id, name, icon_key FROM material_categories ORDER BY name'),
       pool.query('SELECT id, name FROM material_systems ORDER BY name'),
       pool.query('SELECT id, name FROM organizations ORDER BY name'),
       pool.query(
@@ -378,17 +384,18 @@ router.delete('/racks/:id', requirePermission('can_settings_warehouses'), async 
 
 // ——— Категории ———
 router.get('/categories', requirePermission('can_settings_categories'), async (_req, res) => {
-  const r = await pool.query('SELECT id, name, created_at FROM material_categories ORDER BY name');
+  const r = await pool.query('SELECT id, name, icon_key, created_at FROM material_categories ORDER BY name');
   res.json(r.rows);
 });
 
 router.post('/categories', requirePermission('can_settings_categories'), async (req, res) => {
   const name = (req.body?.name || '').trim();
+  const iconKey = parseCategoryIconKey(req.body?.icon_key);
   if (!name) return res.status(400).json({ error: 'Укажите название категории' });
   try {
     const r = await pool.query(
-      'INSERT INTO material_categories (name) VALUES ($1) RETURNING id, name, created_at',
-      [name]
+      'INSERT INTO material_categories (name, icon_key) VALUES ($1, $2) RETURNING id, name, icon_key, created_at',
+      [name, iconKey]
     );
     res.status(201).json(r.rows[0]);
   } catch (e) {
@@ -399,14 +406,21 @@ router.post('/categories', requirePermission('can_settings_categories'), async (
 
 router.put('/categories/:id', requirePermission('can_settings_categories'), async (req, res) => {
   const id = parseId(req.params.id);
-  const name = (req.body?.name || '').trim();
-  if (!id || !name) return res.status(400).json({ error: 'Неверные данные' });
+  const name = req.body?.name != null ? (req.body.name || '').trim() : undefined;
+  const iconKey = req.body?.icon_key !== undefined
+    ? parseCategoryIconKey(req.body?.icon_key)
+    : undefined;
+  if (!id) return res.status(400).json({ error: 'Неверный id' });
+  const cur = (await pool.query('SELECT name, icon_key FROM material_categories WHERE id = $1', [id])).rows[0];
+  if (!cur) return res.status(404).json({ error: 'Не найдено' });
+  const nextName = name ?? cur.name;
+  const nextIconKey = iconKey === undefined ? cur.icon_key : iconKey;
+  if (!nextName) return res.status(400).json({ error: 'Укажите название категории' });
   try {
     const r = await pool.query(
-      'UPDATE material_categories SET name = $1 WHERE id = $2 RETURNING id, name, created_at',
-      [name, id]
+      'UPDATE material_categories SET name = $1, icon_key = $2 WHERE id = $3 RETURNING id, name, icon_key, created_at',
+      [nextName, nextIconKey, id]
     );
-    if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
     res.json(r.rows[0]);
   } catch (e) {
     if (e.code === '23505') return res.status(400).json({ error: 'Такое название уже есть' });
