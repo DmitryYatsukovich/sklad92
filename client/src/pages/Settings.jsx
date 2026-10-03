@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { settings as settingsApi } from '../api';
 import Users from './Users';
@@ -157,6 +157,8 @@ export default function Settings({ user }) {
   const [parentId, setParentId] = useState('');
   const [sortOrder, setSortOrder] = useState('');
   const [editing, setEditing] = useState(null);
+  const formCardRef = useRef(null);
+  const nameInputRef = useRef(null);
 
   const load = useCallback(() => {
     settingsApi.catalog()
@@ -476,12 +478,21 @@ export default function Settings({ user }) {
     return acc;
   }, {});
 
-  const startAddFloorForEntrance = (entranceId) => {
+  const focusForm = () => {
+    if (typeof window === 'undefined') return;
+    window.requestAnimationFrame(() => {
+      formCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      nameInputRef.current?.focus();
+    });
+  };
+
+  const startAddFloorForEntrance = (entranceId, floorsCount = 0) => {
     setEditing(null);
     setName('');
-    setSortOrder('');
+    setSortOrder(String((floorsCount || 0) + 1));
     setParentId(String(entranceId || ''));
     setError('');
+    focusForm();
   };
 
   const startAddApartmentForFloor = (floorId) => {
@@ -490,6 +501,7 @@ export default function Settings({ user }) {
     setSortOrder('');
     setParentId(String(floorId || ''));
     setError('');
+    focusForm();
   };
 
   const settingsTabs = (
@@ -645,7 +657,7 @@ export default function Settings({ user }) {
                   </div>
                   <button
                     type="button"
-                    onClick={() => startAddFloorForEntrance(entrance.id)}
+                    onClick={() => startAddFloorForEntrance(entrance.id, floors.length)}
                     className="btn-secondary text-xs"
                   >
                     Добавить этаж
@@ -790,7 +802,7 @@ export default function Settings({ user }) {
         />
       )}
 
-      <div className="rounded-xl border border-white/10 bg-surface-850 p-5 max-w-lg">
+      <div ref={formCardRef} className="rounded-xl border border-white/10 bg-surface-850 p-5 max-w-lg">
         <h3 className="text-white font-medium mb-4">{formTitle}</h3>
         <form onSubmit={handleSubmit} className="space-y-4">
           {effectiveWarehouseTab === 'warehouses' && (
@@ -886,6 +898,7 @@ export default function Settings({ user }) {
           <div>
             <label className="label">Название</label>
             <input
+              ref={nameInputRef}
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
