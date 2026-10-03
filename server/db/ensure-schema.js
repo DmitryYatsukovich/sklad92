@@ -134,6 +134,7 @@ const statements = [
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (entrance_id, name)
   )`,
+  `ALTER TABLE work_floors ADD COLUMN IF NOT EXISTS sort_order INTEGER`,
   `CREATE TABLE IF NOT EXISTS work_apartments (
     id SERIAL PRIMARY KEY,
     floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE CASCADE,
@@ -149,6 +150,19 @@ const statements = [
     UNIQUE (apartment_id, name)
   )`,
   `CREATE INDEX IF NOT EXISTS idx_work_floors_entrance ON work_floors(entrance_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_work_floors_sort_order ON work_floors(entrance_id, sort_order)`,
+  `WITH ranked AS (
+     SELECT id, ROW_NUMBER() OVER (
+       PARTITION BY entrance_id
+       ORDER BY sort_order NULLS LAST, created_at, id
+     ) AS rn
+     FROM work_floors
+   )
+   UPDATE work_floors wf
+   SET sort_order = ranked.rn
+   FROM ranked
+   WHERE wf.id = ranked.id
+     AND (wf.sort_order IS NULL OR wf.sort_order <> ranked.rn)`,
   `CREATE INDEX IF NOT EXISTS idx_work_apartments_floor ON work_apartments(floor_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_rooms_apartment ON work_rooms(apartment_id)`,
   `ALTER TABLE work_entrances ADD COLUMN IF NOT EXISTS object_id INTEGER REFERENCES warehouse_objects(id) ON DELETE CASCADE`,

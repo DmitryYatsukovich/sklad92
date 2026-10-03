@@ -87,7 +87,15 @@ function tabButtonClass(active, variant = 'main') {
     : 'px-4 py-2 rounded-xl text-sm font-medium bg-zinc-800 text-zinc-100 border border-zinc-600 hover:bg-zinc-700 hover:text-white';
 }
 
-function SimpleList({ items, onEdit, onDelete, extraCol }) {
+function naturalCompare(a, b) {
+  return String(a || '').localeCompare(String(b || ''), 'ru', { numeric: true, sensitivity: 'base' });
+}
+
+function sortByNaturalName(items) {
+  return [...items].sort((a, b) => naturalCompare(a?.name, b?.name));
+}
+
+function SimpleList({ items, onEdit, onDelete, extraCol, renderActions }) {
   if (!items.length) return <p className="text-zinc-500 text-sm py-4">Список пуст. Добавьте запись ниже.</p>;
   return (
     <div className="table-wrap">
@@ -102,15 +110,18 @@ function SimpleList({ items, onEdit, onDelete, extraCol }) {
         <tbody>
           {items.map((row) => (
             <tr key={row.id} className="border-b border-white/5">
-              <td className="p-3 text-white">{row.name}</td>
+              <td className="p-3 text-white">{row._displayName || row.name}</td>
               {extraCol && <td className="p-3 text-zinc-300">{row._extra || '—'}</td>}
-              <td className="p-3 text-right space-x-2">
+              <td className="p-3">
+                <div className="flex items-center justify-end gap-2">
+                  {renderActions?.(row)}
                 <button type="button" onClick={() => onEdit(row)} className="text-sky-400 hover:text-sky-300 text-sm font-medium">
                   Изм.
                 </button>
                 <button type="button" onClick={() => onDelete(row)} className="text-rose-400 hover:text-rose-300 text-sm font-medium">
                   Удал.
                 </button>
+                </div>
               </td>
             </tr>
           ))}
@@ -144,6 +155,7 @@ export default function Settings({ user }) {
   const [error, setError] = useState('');
   const [name, setName] = useState('');
   const [parentId, setParentId] = useState('');
+  const [sortOrder, setSortOrder] = useState('');
   const [editing, setEditing] = useState(null);
 
   const load = useCallback(() => {
@@ -178,6 +190,7 @@ export default function Settings({ user }) {
   const resetForm = () => {
     setName('');
     setParentId('');
+    setSortOrder('');
     setEditing(null);
     setError('');
   };
@@ -203,6 +216,33 @@ export default function Settings({ user }) {
   const effectiveWorkTab = tab === 'work' ? workSubTab : null;
 
   const itemsForTab = () => {
+    const sortedObjects = sortByNaturalName(catalog.objects);
+    const sortedEntrances = [...catalog.work_entrances].sort((a, b) => (
+      naturalCompare(a.object_name, b.object_name)
+      || naturalCompare(a.name, b.name)
+    ));
+    const sortedFloors = [...catalog.work_floors].sort((a, b) => (
+      naturalCompare(a.object_name, b.object_name)
+      || naturalCompare(a.entrance_name, b.entrance_name)
+      || ((a.sort_order ?? Number.MAX_SAFE_INTEGER) - (b.sort_order ?? Number.MAX_SAFE_INTEGER))
+      || naturalCompare(a.name, b.name)
+    ));
+    const sortedApartments = [...catalog.work_apartments].sort((a, b) => (
+      naturalCompare(a.object_name, b.object_name)
+      || naturalCompare(a.entrance_name, b.entrance_name)
+      || ((a.floor_sort_order ?? Number.MAX_SAFE_INTEGER) - (b.floor_sort_order ?? Number.MAX_SAFE_INTEGER))
+      || naturalCompare(a.floor_name, b.floor_name)
+      || naturalCompare(a.name, b.name)
+    ));
+    const sortedRooms = [...catalog.work_rooms].sort((a, b) => (
+      naturalCompare(a.object_name, b.object_name)
+      || naturalCompare(a.entrance_name, b.entrance_name)
+      || ((a.floor_sort_order ?? Number.MAX_SAFE_INTEGER) - (b.floor_sort_order ?? Number.MAX_SAFE_INTEGER))
+      || naturalCompare(a.floor_name, b.floor_name)
+      || naturalCompare(a.apartment_name, b.apartment_name)
+      || naturalCompare(a.name, b.name)
+    ));
+
     if (effectiveWarehouseTab === 'warehouses') {
       return catalog.warehouses.map((w) => ({
         ...w,
@@ -220,29 +260,30 @@ export default function Settings({ user }) {
     if (tab === 'categories') return catalog.categories.map((c) => ({ ...c }));
 
     if (effectiveWorkTab === 'objects') {
-      return catalog.objects.map((o) => ({ ...o }));
+      return sortedObjects.map((o) => ({ ...o }));
     }
     if (effectiveWorkTab === 'entrances') {
-      return catalog.work_entrances.map((x) => ({
+      return sortedEntrances.map((x) => ({
         ...x,
         _extra: x.object_name || catalog.objects.find((o) => o.id === x.object_id)?.name,
       }));
     }
     if (effectiveWorkTab === 'floors') {
-      return catalog.work_floors.map((f) => ({
+      return sortedFloors.map((f) => ({
         ...f,
+        _displayName: `${f.sort_order || '—'}. ${f.name}`,
         _extra: [f.object_name, f.entrance_name].filter(Boolean).join(' → ')
           || catalog.work_entrances.find((e) => e.id === f.entrance_id)?.name,
       }));
     }
     if (effectiveWorkTab === 'apartments') {
-      return catalog.work_apartments.map((a) => ({
+      return sortedApartments.map((a) => ({
         ...a,
         _extra: [a.object_name, a.entrance_name, a.floor_name].filter(Boolean).join(' → ')
           || catalog.work_floors.find((f) => f.id === a.floor_id)?.name,
       }));
     }
-    return catalog.work_rooms.map((r) => ({
+    return sortedRooms.map((r) => ({
       ...r,
       _extra: [r.object_name, r.entrance_name, r.floor_name, r.apartment_name].filter(Boolean).join(' → '),
     }));
@@ -252,6 +293,11 @@ export default function Settings({ user }) {
     e.preventDefault();
     const n = name.trim();
     if (!n) return setError('Укажите название');
+    const sortRaw = sortOrder.trim();
+    const sortValue = sortRaw ? Number.parseInt(sortRaw, 10) : null;
+    if (sortRaw && (!Number.isFinite(sortValue) || sortValue <= 0)) {
+      return setError('Порядок должен быть положительным числом');
+    }
     setError('');
     try {
       if (effectiveWorkTab === 'objects') {
@@ -284,8 +330,9 @@ export default function Settings({ user }) {
       } else if (effectiveWorkTab === 'floors') {
         const eid = parseInt(parentId, 10);
         if (!eid) return setError('Выберите подъезд');
-        if (editing) await settingsApi.workFloors.update(editing.id, { name: n, entrance_id: eid });
-        else await settingsApi.workFloors.create({ name: n, entrance_id: eid });
+        const payload = { name: n, entrance_id: eid, ...(sortValue ? { sort_order: sortValue } : {}) };
+        if (editing) await settingsApi.workFloors.update(editing.id, payload);
+        else await settingsApi.workFloors.create(payload);
       } else if (effectiveWorkTab === 'apartments') {
         const fid = parseInt(parentId, 10);
         if (!fid) return setError('Выберите этаж');
@@ -307,10 +354,14 @@ export default function Settings({ user }) {
   const startEdit = (row) => {
     setEditing(row);
     setName(row.name || '');
+    setSortOrder('');
     if (effectiveWarehouseTab === 'warehouses') setParentId(String(row.object_id || ''));
     else if (effectiveWarehouseTab === 'storage') setParentId(String(row.warehouse_id || ''));
     else if (effectiveWorkTab === 'entrances') setParentId(String(row.object_id || ''));
-    else if (effectiveWorkTab === 'floors') setParentId(String(row.entrance_id || ''));
+    else if (effectiveWorkTab === 'floors') {
+      setParentId(String(row.entrance_id || ''));
+      setSortOrder(row.sort_order != null ? String(row.sort_order) : '');
+    }
     else if (effectiveWorkTab === 'apartments') setParentId(String(row.floor_id || ''));
     else if (effectiveWorkTab === 'rooms') setParentId(String(row.apartment_id || ''));
     else setParentId('');
@@ -331,6 +382,16 @@ export default function Settings({ user }) {
       else if (effectiveWorkTab === 'apartments') await settingsApi.workApartments.delete(row.id);
       else if (effectiveWorkTab === 'rooms') await settingsApi.workRooms.delete(row.id);
       if (editing?.id === row.id) resetForm();
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleMoveFloor = async (row, direction) => {
+    setError('');
+    try {
+      await settingsApi.workFloors.move(row.id, direction);
       load();
     } catch (err) {
       setError(err.message);
@@ -373,10 +434,11 @@ export default function Settings({ user }) {
   };
 
   const floorOptionLabel = (f) => {
+    const floorName = f.sort_order ? `${f.sort_order}. ${f.name}` : f.name;
     const ent = f.entrance_name || catalog.work_entrances.find((e) => e.id === f.entrance_id)?.name;
     const obj = f.object_name;
-    if (obj && ent) return `${obj} → ${ent} → ${f.name}`;
-    return ent ? `${ent} → ${f.name}` : f.name;
+    if (obj && ent) return `${obj} → ${ent} → ${floorName}`;
+    return ent ? `${ent} → ${floorName}` : floorName;
   };
 
   const apartmentOptionLabel = (a) => {
@@ -386,6 +448,24 @@ export default function Settings({ user }) {
     if (floor) return `${floorOptionLabel(floor)} → ${a.name}`;
     return a.name;
   };
+
+  const sortedWorkObjects = sortByNaturalName(catalog.objects);
+  const sortedWorkEntrances = [...catalog.work_entrances].sort((a, b) => (
+    naturalCompare(a.object_name, b.object_name) || naturalCompare(a.name, b.name)
+  ));
+  const sortedWorkFloors = [...catalog.work_floors].sort((a, b) => (
+    naturalCompare(a.object_name, b.object_name)
+    || naturalCompare(a.entrance_name, b.entrance_name)
+    || ((a.sort_order ?? Number.MAX_SAFE_INTEGER) - (b.sort_order ?? Number.MAX_SAFE_INTEGER))
+    || naturalCompare(a.name, b.name)
+  ));
+  const sortedWorkApartments = [...catalog.work_apartments].sort((a, b) => (
+    naturalCompare(a.object_name, b.object_name)
+    || naturalCompare(a.entrance_name, b.entrance_name)
+    || ((a.floor_sort_order ?? Number.MAX_SAFE_INTEGER) - (b.floor_sort_order ?? Number.MAX_SAFE_INTEGER))
+    || naturalCompare(a.floor_name, b.floor_name)
+    || naturalCompare(a.name, b.name)
+  ));
 
   const settingsTabs = (
     <div className="flex flex-wrap gap-2">
@@ -528,6 +608,26 @@ export default function Settings({ user }) {
         onEdit={startEdit}
         onDelete={handleDelete}
         extraCol={extraLabel}
+        renderActions={effectiveWorkTab === 'floors' ? (row) => (
+          <>
+            <button
+              type="button"
+              onClick={() => handleMoveFloor(row, 'up')}
+              className="px-2 py-1 rounded border border-white/20 text-zinc-200 hover:bg-white/10"
+              title="Поднять этаж"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              onClick={() => handleMoveFloor(row, 'down')}
+              className="px-2 py-1 rounded border border-white/20 text-zinc-200 hover:bg-white/10"
+              title="Опустить этаж"
+            >
+              ↓
+            </button>
+          </>
+        ) : null}
       />
 
       <div className="rounded-xl border border-white/10 bg-surface-850 p-5 max-w-lg">
@@ -562,21 +662,35 @@ export default function Settings({ user }) {
               <label className="label">Объект</label>
               <select value={parentId} onChange={(e) => setParentId(e.target.value)} className="input" required>
                 <option value="">— Выберите —</option>
-                {catalog.objects.map((o) => (
+                {sortedWorkObjects.map((o) => (
                   <option key={o.id} value={o.id}>{o.name}</option>
                 ))}
               </select>
             </div>
           )}
           {effectiveWorkTab === 'floors' && (
-            <div>
-              <label className="label">Подъезд</label>
-              <select value={parentId} onChange={(e) => setParentId(e.target.value)} className="input" required>
-                <option value="">— Выберите —</option>
-                {catalog.work_entrances.map((e) => (
-                  <option key={e.id} value={e.id}>{entranceOptionLabel(e)}</option>
-                ))}
-              </select>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="label">Подъезд</label>
+                <select value={parentId} onChange={(e) => setParentId(e.target.value)} className="input" required>
+                  <option value="">— Выберите —</option>
+                  {sortedWorkEntrances.map((e) => (
+                    <option key={e.id} value={e.id}>{entranceOptionLabel(e)}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Порядок</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={sortOrder}
+                  onChange={(e) => setSortOrder(e.target.value)}
+                  className="input"
+                  placeholder="По умолчанию в конец"
+                />
+              </div>
             </div>
           )}
           {effectiveWorkTab === 'apartments' && (
@@ -584,7 +698,7 @@ export default function Settings({ user }) {
               <label className="label">Этаж</label>
               <select value={parentId} onChange={(e) => setParentId(e.target.value)} className="input" required>
                 <option value="">— Выберите —</option>
-                {catalog.work_floors.map((f) => (
+                {sortedWorkFloors.map((f) => (
                   <option key={f.id} value={f.id}>{floorOptionLabel(f)}</option>
                 ))}
               </select>
@@ -595,7 +709,7 @@ export default function Settings({ user }) {
               <label className="label">Квартира</label>
               <select value={parentId} onChange={(e) => setParentId(e.target.value)} className="input" required>
                 <option value="">— Выберите —</option>
-                {catalog.work_apartments.map((a) => (
+                {sortedWorkApartments.map((a) => (
                   <option key={a.id} value={a.id}>{apartmentOptionLabel(a)}</option>
                 ))}
               </select>

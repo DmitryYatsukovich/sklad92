@@ -395,6 +395,7 @@ export const settings = {
     list: (entranceId) => request(`/api/settings/work-floors${entranceId ? `?entrance_id=${entranceId}` : ''}`),
     create: (body) => request('/api/settings/work-floors', { method: 'POST', body: JSON.stringify(body) }),
     update: (id, body) => request(`/api/settings/work-floors/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    move: (id, direction) => request(`/api/settings/work-floors/${id}/move`, { method: 'POST', body: JSON.stringify({ direction }) }),
     delete: (id) => request(`/api/settings/work-floors/${id}`, { method: 'DELETE' }),
   },
   workApartments: {

@@ -16,6 +16,68 @@ function parseId(v) {
   return n > 0 ? n : null;
 }
 
+function parseOptionalPositiveInt(v) {
+  if (v == null || v === '') return undefined;
+  const n = parseInt(v, 10);
+  return n > 0 ? n : null;
+}
+
+function clampSortOrder(value, min, max) {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+async function resequenceEntranceFloors(db, entranceId) {
+  if (!entranceId) return;
+  await db.query(
+    `WITH ranked AS (
+       SELECT id, ROW_NUMBER() OVER (
+         PARTITION BY entrance_id
+         ORDER BY sort_order NULLS LAST, created_at, id
+       ) AS rn
+       FROM work_floors
+       WHERE entrance_id = $1
+     )
+     UPDATE work_floors wf
+     SET sort_order = ranked.rn
+     FROM ranked
+     WHERE wf.id = ranked.id
+       AND (wf.sort_order IS NULL OR wf.sort_order <> ranked.rn)`,
+    [entranceId],
+  );
+}
+
+async function getEntranceFloorsCount(db, entranceId) {
+  const countResult = await db.query('SELECT COUNT(*)::int AS total FROM work_floors WHERE entrance_id = $1', [entranceId]);
+  return countResult.rows[0]?.total || 0;
+}
+
+async function moveFloorWithinEntrance(db, { entranceId, floorId, fromOrder, toOrder }) {
+  if (fromOrder === toOrder) return;
+  if (toOrder < fromOrder) {
+    await db.query(
+      `UPDATE work_floors
+       SET sort_order = sort_order + 1
+       WHERE entrance_id = $1
+         AND id <> $2
+         AND sort_order >= $3
+         AND sort_order < $4`,
+      [entranceId, floorId, toOrder, fromOrder],
+    );
+  } else {
+    await db.query(
+      `UPDATE work_floors
+       SET sort_order = sort_order - 1
+       WHERE entrance_id = $1
+         AND id <> $2
+         AND sort_order <= $3
+         AND sort_order > $4`,
+      [entranceId, floorId, toOrder, fromOrder],
+    );
+  }
+  await db.query('UPDATE work_floors SET sort_order = $1 WHERE id = $2', [toOrder, floorId]);
+}
+
 /** Все справочники для форм склада */
 router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req, res) => {
   try {
@@ -42,31 +104,31 @@ router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req,
          ORDER BY o.name NULLS LAST, e.name`
       ),
       pool.query(
-        `SELECT f.id, f.name, f.entrance_id, e.name AS entrance_name, e.object_id, o.name AS object_name
+        `SELECT f.id, f.name, f.entrance_id, f.sort_order, e.name AS entrance_name, e.object_id, o.name AS object_name
          FROM work_floors f
          JOIN work_entrances e ON e.id = f.entrance_id
          LEFT JOIN warehouse_objects o ON o.id = e.object_id
-         ORDER BY o.name NULLS LAST, e.name, f.name`
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(f.sort_order, 2147483647), f.name`
       ),
       pool.query(
-        `SELECT a.id, a.name, a.floor_id, f.name AS floor_name, f.entrance_id,
+        `SELECT a.id, a.name, a.floor_id, f.name AS floor_name, f.sort_order AS floor_sort_order, f.entrance_id,
                 e.name AS entrance_name, e.object_id, o.name AS object_name
          FROM work_apartments a
          JOIN work_floors f ON f.id = a.floor_id
          JOIN work_entrances e ON e.id = f.entrance_id
          LEFT JOIN warehouse_objects o ON o.id = e.object_id
-         ORDER BY o.name NULLS LAST, e.name, f.name, a.name`
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(f.sort_order, 2147483647), f.name, a.name`
       ),
       pool.query(
         `SELECT r.id, r.name, r.apartment_id, a.name AS apartment_name,
-                a.floor_id, f.name AS floor_name, f.entrance_id, e.name AS entrance_name,
+                a.floor_id, f.name AS floor_name, f.sort_order AS floor_sort_order, f.entrance_id, e.name AS entrance_name,
                 e.object_id, o.name AS object_name
          FROM work_rooms r
          JOIN work_apartments a ON a.id = r.apartment_id
          JOIN work_floors f ON f.id = a.floor_id
          JOIN work_entrances e ON e.id = f.entrance_id
          LEFT JOIN warehouse_objects o ON o.id = e.object_id
-         ORDER BY o.name NULLS LAST, e.name, f.name, a.name, r.name`
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(f.sort_order, 2147483647), f.name, a.name, r.name`
       ),
       pool.query('SELECT id, name FROM tool_types ORDER BY name'),
     ]);
@@ -537,9 +599,12 @@ router.get('/work-floors', requirePermission('can_settings_work'), async (req, r
     params.push(entranceId);
   }
   const r = await pool.query(
-    `SELECT f.id, f.name, f.entrance_id, e.name AS entrance_name, f.created_at
-     FROM work_floors f JOIN work_entrances e ON e.id = f.entrance_id
-     ${where} ORDER BY e.name, f.name`,
+    `SELECT f.id, f.name, f.entrance_id, f.sort_order, e.name AS entrance_name, e.object_id, o.name AS object_name, f.created_at
+     FROM work_floors f
+     JOIN work_entrances e ON e.id = f.entrance_id
+     LEFT JOIN warehouse_objects o ON o.id = e.object_id
+     ${where}
+     ORDER BY o.name NULLS LAST, e.name, COALESCE(f.sort_order, 2147483647), f.name`,
     params,
   );
   res.json(r.rows);
@@ -548,18 +613,42 @@ router.get('/work-floors', requirePermission('can_settings_work'), async (req, r
 router.post('/work-floors', requirePermission('can_settings_work'), async (req, res) => {
   const entrance_id = parseId(req.body?.entrance_id);
   const name = (req.body?.name || '').trim();
+  const requestedSortOrder = parseOptionalPositiveInt(req.body?.sort_order);
+  if (requestedSortOrder === null) return res.status(400).json({ error: 'Порядок этажа должен быть положительным числом' });
   if (!entrance_id || !name) return res.status(400).json({ error: 'Укажите подъезд и название этажа' });
+  const client = await pool.connect();
   try {
-    const r = await pool.query(
-      `INSERT INTO work_floors (entrance_id, name) VALUES ($1, $2)
-       RETURNING id, entrance_id, name, created_at`,
-      [entrance_id, name],
+    await client.query('BEGIN');
+    await resequenceEntranceFloors(client, entrance_id);
+    const count = await getEntranceFloorsCount(client, entrance_id);
+    const targetSortOrder = clampSortOrder(
+      requestedSortOrder ?? (count + 1),
+      1,
+      count + 1,
     );
+    if (targetSortOrder <= count) {
+      await client.query(
+        `UPDATE work_floors
+         SET sort_order = sort_order + 1
+         WHERE entrance_id = $1
+           AND sort_order >= $2`,
+        [entrance_id, targetSortOrder],
+      );
+    }
+    const r = await client.query(
+      `INSERT INTO work_floors (entrance_id, name, sort_order) VALUES ($1, $2, $3)
+       RETURNING id, entrance_id, name, sort_order, created_at`,
+      [entrance_id, name, targetSortOrder],
+    );
+    await client.query('COMMIT');
     res.status(201).json(r.rows[0]);
   } catch (e) {
+    await client.query('ROLLBACK');
     if (e.code === '23505') return res.status(400).json({ error: 'Такой этаж уже есть в этом подъезде' });
     if (e.code === '23503') return res.status(400).json({ error: 'Подъезд не найден' });
     throw e;
+  } finally {
+    client.release();
   }
 });
 
@@ -567,21 +656,155 @@ router.put('/work-floors/:id', requirePermission('can_settings_work'), async (re
   const id = parseId(req.params.id);
   const entrance_id = req.body?.entrance_id != null ? parseId(req.body.entrance_id) : undefined;
   const name = req.body?.name != null ? (req.body.name || '').trim() : undefined;
+  const requestedSortOrder = parseOptionalPositiveInt(req.body?.sort_order);
+  if (requestedSortOrder === null) return res.status(400).json({ error: 'Порядок этажа должен быть положительным числом' });
   if (!id) return res.status(400).json({ error: 'Неверный id' });
-  const cur = (await pool.query('SELECT entrance_id, name FROM work_floors WHERE id = $1', [id])).rows[0];
-  if (!cur) return res.status(404).json({ error: 'Не найдено' });
-  const eid = entrance_id ?? cur.entrance_id;
-  const nm = name ?? cur.name;
-  if (!nm) return res.status(400).json({ error: 'Укажите название' });
+  const client = await pool.connect();
   try {
-    const r = await pool.query(
-      'UPDATE work_floors SET entrance_id = $1, name = $2 WHERE id = $3 RETURNING id, entrance_id, name, created_at',
-      [eid, nm, id],
+    await client.query('BEGIN');
+    const cur = (await client.query(
+      'SELECT id, entrance_id, name, sort_order FROM work_floors WHERE id = $1 FOR UPDATE',
+      [id],
+    )).rows[0];
+    if (!cur) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Не найдено' });
+    }
+    await resequenceEntranceFloors(client, cur.entrance_id);
+    const fresh = (await client.query(
+      'SELECT id, entrance_id, name, sort_order FROM work_floors WHERE id = $1 FOR UPDATE',
+      [id],
+    )).rows[0];
+    const eid = entrance_id ?? fresh.entrance_id;
+    const nm = name ?? fresh.name;
+    if (!eid || !nm) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Укажите подъезд и название' });
+    }
+
+    if (eid === fresh.entrance_id) {
+      const count = await getEntranceFloorsCount(client, eid);
+      const fromOrder = fresh.sort_order || 1;
+      const targetSortOrder = clampSortOrder(
+        requestedSortOrder ?? fromOrder,
+        1,
+        Math.max(1, count),
+      );
+      await moveFloorWithinEntrance(client, {
+        entranceId: eid,
+        floorId: id,
+        fromOrder,
+        toOrder: targetSortOrder,
+      });
+      await client.query(
+        'UPDATE work_floors SET entrance_id = $1, name = $2, sort_order = $3 WHERE id = $4',
+        [eid, nm, targetSortOrder, id],
+      );
+    } else {
+      await resequenceEntranceFloors(client, eid);
+      const sourceOrder = fresh.sort_order || 1;
+      await client.query(
+        `UPDATE work_floors
+         SET sort_order = sort_order - 1
+         WHERE entrance_id = $1
+           AND sort_order > $2`,
+        [fresh.entrance_id, sourceOrder],
+      );
+
+      const destinationCount = await getEntranceFloorsCount(client, eid);
+      const targetSortOrder = clampSortOrder(
+        requestedSortOrder ?? (destinationCount + 1),
+        1,
+        destinationCount + 1,
+      );
+      if (targetSortOrder <= destinationCount) {
+        await client.query(
+          `UPDATE work_floors
+           SET sort_order = sort_order + 1
+           WHERE entrance_id = $1
+             AND sort_order >= $2`,
+          [eid, targetSortOrder],
+        );
+      }
+      await client.query(
+        'UPDATE work_floors SET entrance_id = $1, name = $2, sort_order = $3 WHERE id = $4',
+        [eid, nm, targetSortOrder, id],
+      );
+      await resequenceEntranceFloors(client, fresh.entrance_id);
+    }
+
+    await resequenceEntranceFloors(client, eid);
+    const r = await client.query(
+      `SELECT f.id, f.name, f.entrance_id, f.sort_order, e.name AS entrance_name, e.object_id, o.name AS object_name, f.created_at
+       FROM work_floors f
+       JOIN work_entrances e ON e.id = f.entrance_id
+       LEFT JOIN warehouse_objects o ON o.id = e.object_id
+       WHERE f.id = $1`,
+      [id],
     );
+    await client.query('COMMIT');
     res.json(r.rows[0]);
   } catch (e) {
+    await client.query('ROLLBACK');
     if (e.code === '23505') return res.status(400).json({ error: 'Такой этаж уже есть в подъезде' });
     throw e;
+  } finally {
+    client.release();
+  }
+});
+
+router.post('/work-floors/:id/move', requirePermission('can_settings_work'), async (req, res) => {
+  const id = parseId(req.params.id);
+  const direction = String(req.body?.direction || '').toLowerCase();
+  if (!id) return res.status(400).json({ error: 'Неверный id' });
+  if (direction !== 'up' && direction !== 'down') {
+    return res.status(400).json({ error: 'Направление должно быть up или down' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const cur = (await client.query(
+      'SELECT id, entrance_id, sort_order FROM work_floors WHERE id = $1 FOR UPDATE',
+      [id],
+    )).rows[0];
+    if (!cur) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Не найдено' });
+    }
+
+    await resequenceEntranceFloors(client, cur.entrance_id);
+    const fresh = (await client.query(
+      'SELECT id, entrance_id, sort_order FROM work_floors WHERE id = $1 FOR UPDATE',
+      [id],
+    )).rows[0];
+    const count = await getEntranceFloorsCount(client, fresh.entrance_id);
+    const fromOrder = fresh.sort_order || 1;
+    const candidateOrder = direction === 'up' ? fromOrder - 1 : fromOrder + 1;
+    const targetOrder = clampSortOrder(candidateOrder, 1, Math.max(1, count));
+
+    await moveFloorWithinEntrance(client, {
+      entranceId: fresh.entrance_id,
+      floorId: id,
+      fromOrder,
+      toOrder: targetOrder,
+    });
+    await resequenceEntranceFloors(client, fresh.entrance_id);
+    const r = await client.query(
+      `SELECT f.id, f.name, f.entrance_id, f.sort_order, e.name AS entrance_name, e.object_id, o.name AS object_name, f.created_at
+       FROM work_floors f
+       JOIN work_entrances e ON e.id = f.entrance_id
+       LEFT JOIN warehouse_objects o ON o.id = e.object_id
+       WHERE f.id = $1`,
+      [id],
+    );
+    await client.query('COMMIT');
+    res.json(r.rows[0]);
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
   }
 });
 
@@ -590,8 +813,9 @@ router.delete('/work-floors/:id', requirePermission('can_settings_work'), async 
   if (!id) return res.status(400).json({ error: 'Неверный id' });
   const used = await pool.query('SELECT 1 FROM work_apartments WHERE floor_id = $1 LIMIT 1', [id]);
   if (used.rowCount) return res.status(400).json({ error: 'На этаже есть квартиры — сначала удалите их' });
-  const r = await pool.query('DELETE FROM work_floors WHERE id = $1 RETURNING id', [id]);
+  const r = await pool.query('DELETE FROM work_floors WHERE id = $1 RETURNING id, entrance_id', [id]);
   if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
+  await resequenceEntranceFloors(pool, r.rows[0].entrance_id);
   res.json({ ok: true });
 });
 
@@ -605,11 +829,11 @@ router.get('/work-apartments', requirePermission('can_settings_work'), async (re
     params.push(floorId);
   }
   const r = await pool.query(
-    `SELECT a.id, a.name, a.floor_id, f.name AS floor_name, f.entrance_id, e.name AS entrance_name, a.created_at
+    `SELECT a.id, a.name, a.floor_id, f.name AS floor_name, f.sort_order AS floor_sort_order, f.entrance_id, e.name AS entrance_name, a.created_at
      FROM work_apartments a
      JOIN work_floors f ON f.id = a.floor_id
      JOIN work_entrances e ON e.id = f.entrance_id
-     ${where} ORDER BY e.name, f.name, a.name`,
+     ${where} ORDER BY e.name, COALESCE(f.sort_order, 2147483647), f.name, a.name`,
     params,
   );
   res.json(r.rows);
@@ -676,12 +900,12 @@ router.get('/work-rooms', requirePermission('can_settings_work'), async (req, re
   }
   const r = await pool.query(
     `SELECT r.id, r.name, r.apartment_id, a.name AS apartment_name,
-            a.floor_id, f.name AS floor_name, f.entrance_id, e.name AS entrance_name, r.created_at
+            a.floor_id, f.name AS floor_name, f.sort_order AS floor_sort_order, f.entrance_id, e.name AS entrance_name, r.created_at
      FROM work_rooms r
      JOIN work_apartments a ON a.id = r.apartment_id
      JOIN work_floors f ON f.id = a.floor_id
      JOIN work_entrances e ON e.id = f.entrance_id
-     ${where} ORDER BY e.name, f.name, a.name, r.name`,
+     ${where} ORDER BY e.name, COALESCE(f.sort_order, 2147483647), f.name, a.name, r.name`,
     params,
   );
   res.json(r.rows);
