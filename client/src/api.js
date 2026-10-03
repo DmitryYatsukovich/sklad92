@@ -424,6 +424,10 @@ export const settings = {
   },
 };
 
+export const objectsView = {
+  hierarchy: () => request('/api/objects/hierarchy'),
+};
+
 export const operations = {
   issue: (body) => request('/api/operations/issue', { method: 'POST', body: JSON.stringify(body) }),
   return: (body) => request('/api/operations/return', { method: 'POST', body: JSON.stringify(body) }),

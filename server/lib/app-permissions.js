@@ -19,6 +19,12 @@ export const APP_PERMISSIONS = [
     group: 'Основные разделы',
   },
   {
+    key: 'can_objects',
+    label: 'Объекты',
+    description: 'Схема объектов: подъезды, этажи, квартиры и помещения',
+    group: 'Основные разделы',
+  },
+  {
     key: 'can_tools',
     label: 'Инструмент',
     description: 'Учёт инструмента, QR-сканирование, выдача и перемещения',

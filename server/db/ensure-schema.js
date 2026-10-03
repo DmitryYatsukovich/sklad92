@@ -367,6 +367,8 @@ const statements = [
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_actions_all BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_tasks BOOLEAN DEFAULT false`,
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_tasks BOOLEAN DEFAULT false`,
+  `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_objects BOOLEAN DEFAULT false`,
+  `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_objects BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_tools BOOLEAN DEFAULT false`,
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_tools BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_tools_delete BOOLEAN DEFAULT false`,

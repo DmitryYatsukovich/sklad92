@@ -31,6 +31,7 @@ import actions from './routes/actions.js';
 import tasks from './routes/tasks.js';
 import notifications from './routes/notifications.js';
 import tools from './routes/tools.js';
+import objects from './routes/objects.js';
 import { loadUser } from './middleware/auth.js';
 import { ensureAdminUser } from './db/ensure-admin.js';
 import { ensureSchema } from './db/ensure-schema.js';
@@ -177,6 +178,7 @@ app.use('/api/actions', actions);
 app.use('/api/tasks', tasks);
 app.use('/api/notifications', notifications);
 app.use('/api/tools', tools);
+app.use('/api/objects', objects);
 
 if (isProd) {
   if (hasIndex) {

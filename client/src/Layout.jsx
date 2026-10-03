@@ -15,6 +15,7 @@ const tabs = [
   { to: '/warehouse', label: 'Склад', perm: 'can_warehouse' },
   { to: '/issuance', label: 'Выдача', perm: 'can_issuance' },
   { to: '/production', label: 'Выраб.', perm: 'can_production' },
+  { to: '/objects', label: 'Объекты', perm: 'can_objects' },
   { to: '/tools', label: 'Инстр.', perm: 'can_tools' },
   { to: '/tasks', label: 'Задачи', perm: 'can_tasks' },
   { to: '/actions', label: 'Действия', perm: 'can_actions' },
