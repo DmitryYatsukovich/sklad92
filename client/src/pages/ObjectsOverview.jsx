@@ -8,6 +8,7 @@ const EMPTY_DATA = {
   apartments: [],
   rooms: [],
 };
+const FLOOR_ROOMS_BUCKET_NAME = 'Помещения этажа';
 
 function naturalCompare(a, b) {
   return String(a || '').localeCompare(String(b || ''), 'ru', { numeric: true, sensitivity: 'base' });
@@ -244,9 +245,12 @@ export default function ObjectsOverview() {
             <div className="space-y-1.5">
               {floorApartments.map((apartment) => {
                 const apartmentRooms = roomsByApartment.get(apartment.id) || [];
+                const isFloorRoomsBucket = apartment.name === FLOOR_ROOMS_BUCKET_NAME;
                 return (
                   <div key={apartment.id} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5">
-                    <p className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</p>
+                    <p className="text-zinc-200 text-2xs font-medium">
+                      {isFloorRoomsBucket ? apartment.name : `Кв. ${apartment.name}`}
+                    </p>
                     {apartmentRooms.length ? (
                       <div className="mt-1 space-y-1">
                         {apartmentRooms.map((room) => (
