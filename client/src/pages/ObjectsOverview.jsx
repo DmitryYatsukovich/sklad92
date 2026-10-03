@@ -44,14 +44,11 @@ function blockSizeClass(level, score) {
     return 'min-h-[18rem]';
   }
   if (level === 'entrance') {
-    if (score >= 12) return 'md:col-span-2 min-h-[14rem]';
+    if (score >= 12) return 'min-h-[14rem]';
     if (score >= 6) return 'min-h-[12rem]';
     return 'min-h-[10rem]';
   }
-  if (level === 'floor') {
-    if (score >= 8) return 'md:col-span-2';
-    return '';
-  }
+  if (level === 'floor') return '';
   return '';
 }
 
@@ -270,7 +267,7 @@ export default function ObjectsOverview() {
               </p>
 
               {objectEntrances.length ? (
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {objectEntrances.map((entry) => {
                     const entranceFloors = floorsByEntrance.get(entry.id) || [];
                     let entranceApartments = 0;
@@ -293,7 +290,7 @@ export default function ObjectsOverview() {
                           <span className="text-2xs text-zinc-400">Этажей: {entranceFloors.length}</span>
                         </div>
                         {entranceFloors.length ? (
-                          <div className="grid gap-2 md:grid-cols-2">
+                          <div className="space-y-2">
                             {entranceFloors.map((floor) => {
                               const floorApartments = apartmentsByFloor.get(floor.id) || [];
                               let floorRooms = 0;
@@ -304,32 +301,37 @@ export default function ObjectsOverview() {
                               return (
                                 <div
                                   key={floor.id}
-                                  className={`rounded-lg border border-white/10 bg-black/20 p-2.5 space-y-2 ${blockSizeClass('floor', floorScore)}`}
+                                  className={`rounded-lg border border-white/10 bg-black/20 p-2 space-y-1.5 ${blockSizeClass('floor', floorScore)}`}
                                 >
-                                  <p className="text-zinc-100 text-sm font-medium">Этаж {floor.name}</p>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <p className="text-zinc-100 text-xs font-semibold">Этаж {floor.name}</p>
+                                    <span className="text-2xs text-zinc-500">
+                                      кв.: {floorApartments.length} · пом.: {floorRooms}
+                                    </span>
+                                  </div>
                                   {floorApartments.length ? (
-                                    <div className="space-y-1.5">
+                                    <div className="flex flex-wrap gap-1.5">
                                       {floorApartments.map((apartment) => {
                                         const apartmentRooms = roomsByApartment.get(apartment.id) || [];
                                         return (
-                                          <div key={apartment.id} className="rounded-md border border-white/10 bg-white/[0.03] p-2">
-                                            <div className="flex items-center justify-between gap-2">
-                                              <span className="text-zinc-200 text-xs">Кв. {apartment.name}</span>
+                                          <div key={apartment.id} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1">
+                                            <div className="flex items-center gap-2">
+                                              <span className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</span>
                                               <span className="text-zinc-500 text-2xs">{apartmentRooms.length} пом.</span>
                                             </div>
                                             {!!apartmentRooms.length && (
-                                              <div className="mt-1 flex flex-wrap gap-1">
-                                                {apartmentRooms.slice(0, 5).map((room) => (
+                                              <div className="mt-0.5 flex flex-wrap gap-1">
+                                                {apartmentRooms.slice(0, 3).map((room) => (
                                                   <span
                                                     key={room.id}
-                                                    className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 text-2xs"
+                                                    className="px-1 py-0.5 rounded bg-zinc-800 text-zinc-300 text-[10px] leading-none"
                                                   >
                                                     {room.name}
                                                   </span>
                                                 ))}
-                                                {apartmentRooms.length > 5 && (
-                                                  <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-2xs">
-                                                    +{apartmentRooms.length - 5}
+                                                {apartmentRooms.length > 3 && (
+                                                  <span className="px-1 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[10px] leading-none">
+                                                    +{apartmentRooms.length - 3}
                                                   </span>
                                                 )}
                                               </div>
