@@ -4,7 +4,7 @@ import { settings as settingsApi } from '../api';
 import Users from './Users';
 import RolesTab from '../settings/RolesTab';
 import OrganizationsTab from './settings/OrganizationsTab';
-import ObjectSettingsTab from './settings/ObjectSettingsTab';
+import ObjectSettingsTab from './settings/ObjectSettingsTabRefactored';
 import {
   canAccessSettingsTab,
   getFirstSettingsTab,
