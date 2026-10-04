@@ -449,6 +449,30 @@ export const settings = {
       }),
     deleteMaterial: (id) =>
       request(`/api/settings/object-settings/location-system-materials/${id}`, { method: 'DELETE' }),
+    addEquipment: (locationSystemId, body) =>
+      request(`/api/settings/object-settings/location-systems/${locationSystemId}/equipment`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    updateEquipment: (id, body) =>
+      request(`/api/settings/object-settings/location-system-equipment/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    deleteEquipment: (id) =>
+      request(`/api/settings/object-settings/location-system-equipment/${id}`, { method: 'DELETE' }),
+    addWork: (locationSystemId, body) =>
+      request(`/api/settings/object-settings/location-systems/${locationSystemId}/works`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    updateWork: (id, body) =>
+      request(`/api/settings/object-settings/location-system-works/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    deleteWork: (id) =>
+      request(`/api/settings/object-settings/location-system-works/${id}`, { method: 'DELETE' }),
   },
 };
 

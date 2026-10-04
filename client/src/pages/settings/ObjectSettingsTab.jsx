@@ -23,6 +23,8 @@ function normalizePayload(payload) {
     categories: asObjects(safe.categories),
     locationSystems: asObjects(safe.location_systems),
     locationSystemMaterials: asObjects(safe.location_system_materials),
+    locationSystemEquipment: asObjects(safe.location_system_equipment),
+    locationSystemWorks: asObjects(safe.location_system_works),
   };
 }
 
@@ -88,7 +90,7 @@ function CategoryGlyph({ iconKey, className = 'h-4 w-4' }) {
   );
 }
 
-function SystemSquare({ slot, onOpen }) {
+function SystemSquare({ slot, onOpen, totals }) {
   const hasCategory = !!slot.category_id;
   const color = hasCategory
     ? groupColorByIconKey(slot.category_icon_key)
@@ -116,6 +118,9 @@ function SystemSquare({ slot, onOpen }) {
         <div className="text-[10px] text-zinc-200/90 leading-tight">
           {slot.category_name || 'Выбрать категорию'}
         </div>
+        <div className="text-[9px] text-zinc-300/80 leading-tight">
+          M:{totals?.materials || 0} E:{totals?.equipment || 0} W:{totals?.works || 0}
+        </div>
       </div>
     </button>
   );
@@ -137,6 +142,10 @@ export default function ObjectSettingsTab() {
   const [suggestionLoading, setSuggestionLoading] = useState(false);
   const [selectedMaterial, setSelectedMaterial] = useState(null);
   const [materialQuantity, setMaterialQuantity] = useState('1');
+  const [equipmentName, setEquipmentName] = useState('');
+  const [equipmentQuantity, setEquipmentQuantity] = useState('1');
+  const [workName, setWorkName] = useState('');
+  const [workQuantity, setWorkQuantity] = useState('1');
   const [slotBusy, setSlotBusy] = useState(false);
 
   const load = useCallback(() => {
@@ -249,6 +258,139 @@ export default function ObjectSettingsTab() {
     return map;
   }, [data.locationSystemMaterials]);
 
+  const equipmentBySlot = useMemo(() => {
+    const map = new Map();
+    data.locationSystemEquipment.forEach((row) => {
+      const list = map.get(row.location_system_id) || [];
+      list.push(row);
+      map.set(row.location_system_id, list);
+    });
+    map.forEach((list, key) => map.set(key, [...list].sort((a, b) => naturalCompare(a.name, b.name))));
+    return map;
+  }, [data.locationSystemEquipment]);
+
+  const worksBySlot = useMemo(() => {
+    const map = new Map();
+    data.locationSystemWorks.forEach((row) => {
+      const list = map.get(row.location_system_id) || [];
+      list.push(row);
+      map.set(row.location_system_id, list);
+    });
+    map.forEach((list, key) => map.set(key, [...list].sort((a, b) => naturalCompare(a.name, b.name))));
+    return map;
+  }, [data.locationSystemWorks]);
+
+  const slotById = useMemo(() => {
+    const map = new Map();
+    data.locationSystems.forEach((slot) => map.set(slot.id, slot));
+    return map;
+  }, [data.locationSystems]);
+
+  const apartmentById = useMemo(() => {
+    const map = new Map();
+    sortedApartments.forEach((row) => map.set(row.id, row));
+    return map;
+  }, [sortedApartments]);
+
+  const roomById = useMemo(() => {
+    const map = new Map();
+    sortedRooms.forEach((row) => map.set(row.id, row));
+    return map;
+  }, [sortedRooms]);
+
+  const objectSummaryById = useMemo(() => {
+    const summary = new Map();
+    const ensureObject = (objectId) => {
+      if (!objectId) return null;
+      if (!summary.has(objectId)) {
+        summary.set(objectId, {
+          materialsMap: new Map(),
+          equipmentMap: new Map(),
+          worksMap: new Map(),
+        });
+      }
+      return summary.get(objectId);
+    };
+    const getSlotObjectId = (slot) => {
+      if (!slot) return null;
+      if (slot.location_kind === 'apartment') {
+        return apartmentById.get(slot.location_id)?.object_id || null;
+      }
+      if (slot.location_kind === 'room') {
+        return roomById.get(slot.location_id)?.object_id || null;
+      }
+      return null;
+    };
+
+    data.locationSystemMaterials.forEach((row) => {
+      const slot = slotById.get(row.location_system_id);
+      const objectId = getSlotObjectId(slot);
+      const target = ensureObject(objectId);
+      if (!target) return;
+      const key = String(row.material_id);
+      const prev = target.materialsMap.get(key) || {
+        key,
+        name: row.material_name,
+        unit: row.material_unit,
+        quantity: 0,
+      };
+      prev.quantity += Number(row.quantity || 0);
+      target.materialsMap.set(key, prev);
+    });
+    data.locationSystemEquipment.forEach((row) => {
+      const slot = slotById.get(row.location_system_id);
+      const objectId = getSlotObjectId(slot);
+      const target = ensureObject(objectId);
+      if (!target) return;
+      const key = String(row.name || '').trim().toLowerCase();
+      const prev = target.equipmentMap.get(key) || {
+        key,
+        name: row.name,
+        quantity: 0,
+      };
+      prev.quantity += Number(row.quantity || 0);
+      target.equipmentMap.set(key, prev);
+    });
+    data.locationSystemWorks.forEach((row) => {
+      const slot = slotById.get(row.location_system_id);
+      const objectId = getSlotObjectId(slot);
+      const target = ensureObject(objectId);
+      if (!target) return;
+      const key = String(row.name || '').trim().toLowerCase();
+      const prev = target.worksMap.get(key) || {
+        key,
+        name: row.name,
+        quantity: 0,
+      };
+      prev.quantity += Number(row.quantity || 0);
+      target.worksMap.set(key, prev);
+    });
+
+    const prepared = new Map();
+    summary.forEach((raw, objectId) => {
+      const materials = [...raw.materialsMap.values()].sort((a, b) => naturalCompare(a.name, b.name));
+      const equipment = [...raw.equipmentMap.values()].sort((a, b) => naturalCompare(a.name, b.name));
+      const works = [...raw.worksMap.values()].sort((a, b) => naturalCompare(a.name, b.name));
+      prepared.set(objectId, {
+        materials,
+        equipment,
+        works,
+        materialsTotalQty: materials.reduce((acc, row) => acc + Number(row.quantity || 0), 0),
+        equipmentTotalQty: equipment.reduce((acc, row) => acc + Number(row.quantity || 0), 0),
+        worksTotalQty: works.reduce((acc, row) => acc + Number(row.quantity || 0), 0),
+      });
+    });
+    return prepared;
+  }, [
+    data.locationSystems,
+    data.locationSystemMaterials,
+    data.locationSystemEquipment,
+    data.locationSystemWorks,
+    slotById,
+    apartmentById,
+    roomById,
+  ]);
+
   const openAddSystemModal = (locationKind, locationId, title) => {
     setSelectedSystemId('');
     setAddSystemModal({ open: true, locationKind, locationId, title });
@@ -287,6 +429,10 @@ export default function ObjectSettingsTab() {
     setMaterialSuggestions([]);
     setSelectedMaterial(null);
     setMaterialQuantity('1');
+    setEquipmentName('');
+    setEquipmentQuantity('1');
+    setWorkName('');
+    setWorkQuantity('1');
   };
 
   const closeSlotModal = () => {
@@ -296,6 +442,10 @@ export default function ObjectSettingsTab() {
     setMaterialSuggestions([]);
     setSelectedMaterial(null);
     setMaterialQuantity('1');
+    setEquipmentName('');
+    setEquipmentQuantity('1');
+    setWorkName('');
+    setWorkQuantity('1');
   };
 
   useEffect(() => {
@@ -393,6 +543,82 @@ export default function ObjectSettingsTab() {
     }
   };
 
+  const handleAddEquipment = async (e) => {
+    e.preventDefault();
+    const name = String(equipmentName || '').trim();
+    const qty = Number.parseFloat(equipmentQuantity);
+    if (!activeSlot?.id || !name) return;
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setError('Количество оборудования должно быть больше нуля');
+      return;
+    }
+    setSlotBusy(true);
+    setError('');
+    try {
+      await settingsApi.objectSettings.addEquipment(activeSlot.id, { name, quantity: qty });
+      setEquipmentName('');
+      setEquipmentQuantity('1');
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSlotBusy(false);
+    }
+  };
+
+  const handleDeleteEquipment = async (row) => {
+    if (!row?.id) return;
+    if (!confirm(`Удалить оборудование «${row.name}»?`)) return;
+    setSlotBusy(true);
+    setError('');
+    try {
+      await settingsApi.objectSettings.deleteEquipment(row.id);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSlotBusy(false);
+    }
+  };
+
+  const handleAddWork = async (e) => {
+    e.preventDefault();
+    const name = String(workName || '').trim();
+    const qty = Number.parseFloat(workQuantity);
+    if (!activeSlot?.id || !name) return;
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setError('Количество работ должно быть больше нуля');
+      return;
+    }
+    setSlotBusy(true);
+    setError('');
+    try {
+      await settingsApi.objectSettings.addWork(activeSlot.id, { name, quantity: qty });
+      setWorkName('');
+      setWorkQuantity('1');
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSlotBusy(false);
+    }
+  };
+
+  const handleDeleteWork = async (row) => {
+    if (!row?.id) return;
+    if (!confirm(`Удалить работу «${row.name}»?`)) return;
+    setSlotBusy(true);
+    setError('');
+    try {
+      await settingsApi.objectSettings.deleteWork(row.id);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSlotBusy(false);
+    }
+  };
+
   const renderSystemSquares = (locationKind, locationId, title) => {
     const key = `${locationKind}:${locationId}`;
     const slots = slotsByLocation.get(key) || [];
@@ -400,7 +626,16 @@ export default function ObjectSettingsTab() {
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           {slots.map((slot) => (
-            <SystemSquare key={slot.id} slot={slot} onOpen={openSlotModal} />
+            <SystemSquare
+              key={slot.id}
+              slot={slot}
+              onOpen={openSlotModal}
+              totals={{
+                materials: (materialsBySlot.get(slot.id) || []).length,
+                equipment: (equipmentBySlot.get(slot.id) || []).length,
+                works: (worksBySlot.get(slot.id) || []).length,
+              }}
+            />
           ))}
           <button
             type="button"
@@ -433,9 +668,69 @@ export default function ObjectSettingsTab() {
       <div className="space-y-4">
         {sortedObjects.map((obj) => {
           const objectEntrances = entrancesByObject.get(obj.id) || [];
+          const objectSummary = objectSummaryById.get(obj.id) || {
+            materials: [],
+            equipment: [],
+            works: [],
+            materialsTotalQty: 0,
+            equipmentTotalQty: 0,
+            worksTotalQty: 0,
+          };
           return (
             <article key={obj.id} className="rounded-2xl border border-sky-500/25 bg-sky-950/20 p-4 space-y-3">
-              <h3 className="text-white font-semibold">{obj.name}</h3>
+              <div className="space-y-1">
+                <h3 className="text-white font-semibold">{obj.name}</h3>
+                <p className="text-zinc-400 text-xs">
+                  Материалы: {objectSummary.materials.length} поз. / {objectSummary.materialsTotalQty.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
+                  {' · '}
+                  Оборудование: {objectSummary.equipment.length} поз. / {objectSummary.equipmentTotalQty.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
+                  {' · '}
+                  Работы: {objectSummary.works.length} поз. / {objectSummary.worksTotalQty.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
+                </p>
+              </div>
+              {!!(objectSummary.materials.length || objectSummary.equipment.length || objectSummary.works.length) && (
+                <div className="grid gap-2 lg:grid-cols-3">
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                    <p className="text-zinc-300 text-xs mb-1">Материалы для завершения</p>
+                    <div className="space-y-1 max-h-40 overflow-auto pr-1">
+                      {objectSummary.materials.map((row) => (
+                        <div key={row.key} className="text-[11px] text-zinc-200 flex justify-between gap-2">
+                          <span>{row.name}</span>
+                          <span className="text-zinc-400 whitespace-nowrap">
+                            {row.quantity.toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {row.unit || ''}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                    <p className="text-zinc-300 text-xs mb-1">Оборудование для завершения</p>
+                    <div className="space-y-1 max-h-40 overflow-auto pr-1">
+                      {objectSummary.equipment.map((row) => (
+                        <div key={row.key} className="text-[11px] text-zinc-200 flex justify-between gap-2">
+                          <span>{row.name}</span>
+                          <span className="text-zinc-400 whitespace-nowrap">
+                            {row.quantity.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                    <p className="text-zinc-300 text-xs mb-1">Работы для завершения</p>
+                    <div className="space-y-1 max-h-40 overflow-auto pr-1">
+                      {objectSummary.works.map((row) => (
+                        <div key={row.key} className="text-[11px] text-zinc-200 flex justify-between gap-2">
+                          <span>{row.name}</span>
+                          <span className="text-zinc-400 whitespace-nowrap">
+                            {row.quantity.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
               {objectEntrances.length ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   {objectEntrances.map((entrance) => {
@@ -686,6 +981,106 @@ export default function ObjectSettingsTab() {
                   </div>
                 ) : (
                   <p className="text-zinc-500 text-sm">Материалы пока не добавлены.</p>
+                )}
+              </div>
+
+              <div className="space-y-3 rounded-xl border border-white/10 p-3">
+                <p className="text-zinc-200 text-sm font-medium">Оборудование в блоке</p>
+                <form onSubmit={handleAddEquipment} className="grid gap-3 md:grid-cols-[1fr_120px_auto]">
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="Название оборудования…"
+                    value={equipmentName}
+                    onChange={(e) => setEquipmentName(e.target.value)}
+                    required
+                  />
+                  <input
+                    type="number"
+                    min="0.0001"
+                    step="0.0001"
+                    value={equipmentQuantity}
+                    onChange={(e) => setEquipmentQuantity(e.target.value)}
+                    className="input"
+                    placeholder="Кол-во"
+                    required
+                  />
+                  <button type="submit" className="btn-primary text-sm" disabled={slotBusy}>
+                    Добавить
+                  </button>
+                </form>
+                {(equipmentBySlot.get(activeSlot.id) || []).length ? (
+                  <div className="space-y-1">
+                    {(equipmentBySlot.get(activeSlot.id) || []).map((row) => (
+                      <div key={row.id} className="rounded border border-white/10 px-2 py-1.5 flex items-center justify-between gap-2">
+                        <p className="text-sm text-zinc-200">{row.name}</p>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs text-zinc-400">
+                            {Number(row.quantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteEquipment(row)}
+                            className="text-rose-400 hover:text-rose-300 text-xs font-medium"
+                          >
+                            Удал.
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-zinc-500 text-sm">Оборудование пока не добавлено.</p>
+                )}
+              </div>
+
+              <div className="space-y-3 rounded-xl border border-white/10 p-3">
+                <p className="text-zinc-200 text-sm font-medium">Работы в блоке</p>
+                <form onSubmit={handleAddWork} className="grid gap-3 md:grid-cols-[1fr_120px_auto]">
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="Название работы…"
+                    value={workName}
+                    onChange={(e) => setWorkName(e.target.value)}
+                    required
+                  />
+                  <input
+                    type="number"
+                    min="0.0001"
+                    step="0.0001"
+                    value={workQuantity}
+                    onChange={(e) => setWorkQuantity(e.target.value)}
+                    className="input"
+                    placeholder="Кол-во"
+                    required
+                  />
+                  <button type="submit" className="btn-primary text-sm" disabled={slotBusy}>
+                    Добавить
+                  </button>
+                </form>
+                {(worksBySlot.get(activeSlot.id) || []).length ? (
+                  <div className="space-y-1">
+                    {(worksBySlot.get(activeSlot.id) || []).map((row) => (
+                      <div key={row.id} className="rounded border border-white/10 px-2 py-1.5 flex items-center justify-between gap-2">
+                        <p className="text-sm text-zinc-200">{row.name}</p>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs text-zinc-400">
+                            {Number(row.quantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteWork(row)}
+                            className="text-rose-400 hover:text-rose-300 text-xs font-medium"
+                          >
+                            Удал.
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-zinc-500 text-sm">Работы пока не добавлены.</p>
                 )}
               </div>
             </div>

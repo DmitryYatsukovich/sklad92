@@ -34,6 +34,12 @@ function parseCategoryIconKey(value) {
   return raw.slice(0, 64);
 }
 
+function parseRequiredName(value, max = 300) {
+  const name = String(value ?? '').trim();
+  if (!name) return null;
+  return name.slice(0, max);
+}
+
 function clampSortOrder(value, min, max) {
   if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(max, value));
@@ -1055,6 +1061,8 @@ router.get('/object-settings/layout', requirePermission('can_settings_work'), as
       categories,
       locationSystems,
       locationSystemMaterials,
+      locationSystemEquipment,
+      locationSystemWorks,
     ] = await Promise.all([
       pool.query('SELECT id, name FROM warehouse_objects ORDER BY name'),
       pool.query(
@@ -1110,6 +1118,16 @@ router.get('/object-settings/layout', requirePermission('can_settings_work'), as
          JOIN materials m ON m.id = lm.material_id
          ORDER BY lm.location_system_id, m.name`,
       ),
+      pool.query(
+        `SELECT id, location_system_id, name, quantity, created_at, updated_at
+         FROM work_location_system_equipment
+         ORDER BY location_system_id, name`,
+      ),
+      pool.query(
+        `SELECT id, location_system_id, name, quantity, created_at, updated_at
+         FROM work_location_system_works
+         ORDER BY location_system_id, name`,
+      ),
     ]);
     res.json({
       objects: objects.rows,
@@ -1121,6 +1139,8 @@ router.get('/object-settings/layout', requirePermission('can_settings_work'), as
       categories: categories.rows,
       location_systems: locationSystems.rows,
       location_system_materials: locationSystemMaterials.rows,
+      location_system_equipment: locationSystemEquipment.rows,
+      location_system_works: locationSystemWorks.rows,
     });
   } catch (e) {
     console.error('GET /settings/object-settings/layout:', e.message);
@@ -1322,6 +1342,100 @@ router.delete('/object-settings/location-system-materials/:id', requirePermissio
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Неверный id' });
   const r = await pool.query('DELETE FROM work_location_system_materials WHERE id = $1 RETURNING id', [id]);
+  if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
+  res.json({ ok: true });
+});
+
+router.post('/object-settings/location-systems/:id/equipment', requirePermission('can_settings_work'), async (req, res) => {
+  const locationSystemId = parseId(req.params.id);
+  const name = parseRequiredName(req.body?.name);
+  const quantity = parsePositiveDecimal(req.body?.quantity);
+  if (!locationSystemId || !name || !quantity) {
+    return res.status(400).json({ error: 'Неверные данные' });
+  }
+  const slot = (await pool.query('SELECT id FROM work_location_systems WHERE id = $1', [locationSystemId])).rows[0];
+  if (!slot) return res.status(404).json({ error: 'Блок системы не найден' });
+  const created = (await pool.query(
+    `INSERT INTO work_location_system_equipment (location_system_id, name, quantity)
+     VALUES ($1, $2, $3)
+     RETURNING id, location_system_id, name, quantity, created_at, updated_at`,
+    [locationSystemId, name, quantity],
+  )).rows[0];
+  res.status(201).json(created);
+});
+
+router.put('/object-settings/location-system-equipment/:id', requirePermission('can_settings_work'), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Неверный id' });
+  const current = (await pool.query(
+    'SELECT id, name, quantity FROM work_location_system_equipment WHERE id = $1',
+    [id],
+  )).rows[0];
+  if (!current) return res.status(404).json({ error: 'Не найдено' });
+  const nextName = req.body?.name !== undefined ? parseRequiredName(req.body?.name) : current.name;
+  const nextQuantity = req.body?.quantity !== undefined ? parsePositiveDecimal(req.body?.quantity) : Number(current.quantity);
+  if (!nextName || !nextQuantity) return res.status(400).json({ error: 'Неверные данные' });
+  const updated = (await pool.query(
+    `UPDATE work_location_system_equipment
+     SET name = $1, quantity = $2, updated_at = NOW()
+     WHERE id = $3
+     RETURNING id, location_system_id, name, quantity, created_at, updated_at`,
+    [nextName, nextQuantity, id],
+  )).rows[0];
+  res.json(updated);
+});
+
+router.delete('/object-settings/location-system-equipment/:id', requirePermission('can_settings_work'), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Неверный id' });
+  const r = await pool.query('DELETE FROM work_location_system_equipment WHERE id = $1 RETURNING id', [id]);
+  if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
+  res.json({ ok: true });
+});
+
+router.post('/object-settings/location-systems/:id/works', requirePermission('can_settings_work'), async (req, res) => {
+  const locationSystemId = parseId(req.params.id);
+  const name = parseRequiredName(req.body?.name);
+  const quantity = parsePositiveDecimal(req.body?.quantity);
+  if (!locationSystemId || !name || !quantity) {
+    return res.status(400).json({ error: 'Неверные данные' });
+  }
+  const slot = (await pool.query('SELECT id FROM work_location_systems WHERE id = $1', [locationSystemId])).rows[0];
+  if (!slot) return res.status(404).json({ error: 'Блок системы не найден' });
+  const created = (await pool.query(
+    `INSERT INTO work_location_system_works (location_system_id, name, quantity)
+     VALUES ($1, $2, $3)
+     RETURNING id, location_system_id, name, quantity, created_at, updated_at`,
+    [locationSystemId, name, quantity],
+  )).rows[0];
+  res.status(201).json(created);
+});
+
+router.put('/object-settings/location-system-works/:id', requirePermission('can_settings_work'), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Неверный id' });
+  const current = (await pool.query(
+    'SELECT id, name, quantity FROM work_location_system_works WHERE id = $1',
+    [id],
+  )).rows[0];
+  if (!current) return res.status(404).json({ error: 'Не найдено' });
+  const nextName = req.body?.name !== undefined ? parseRequiredName(req.body?.name) : current.name;
+  const nextQuantity = req.body?.quantity !== undefined ? parsePositiveDecimal(req.body?.quantity) : Number(current.quantity);
+  if (!nextName || !nextQuantity) return res.status(400).json({ error: 'Неверные данные' });
+  const updated = (await pool.query(
+    `UPDATE work_location_system_works
+     SET name = $1, quantity = $2, updated_at = NOW()
+     WHERE id = $3
+     RETURNING id, location_system_id, name, quantity, created_at, updated_at`,
+    [nextName, nextQuantity, id],
+  )).rows[0];
+  res.json(updated);
+});
+
+router.delete('/object-settings/location-system-works/:id', requirePermission('can_settings_work'), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Неверный id' });
+  const r = await pool.query('DELETE FROM work_location_system_works WHERE id = $1 RETURNING id', [id]);
   if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
   res.json({ ok: true });
 });

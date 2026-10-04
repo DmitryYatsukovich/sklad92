@@ -191,6 +191,26 @@ const statements = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_wlsm_location_system ON work_location_system_materials(location_system_id)`,
   `CREATE INDEX IF NOT EXISTS idx_wlsm_material ON work_location_system_materials(material_id)`,
+  `CREATE TABLE IF NOT EXISTS work_location_system_equipment (
+    id SERIAL PRIMARY KEY,
+    location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE CASCADE,
+    name VARCHAR(300) NOT NULL,
+    quantity DECIMAL(18,4) NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CHECK (quantity > 0)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_wlse_location_system ON work_location_system_equipment(location_system_id)`,
+  `CREATE TABLE IF NOT EXISTS work_location_system_works (
+    id SERIAL PRIMARY KEY,
+    location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE CASCADE,
+    name VARCHAR(300) NOT NULL,
+    quantity DECIMAL(18,4) NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CHECK (quantity > 0)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_wlsw_location_system ON work_location_system_works(location_system_id)`,
   `ALTER TABLE work_entrances ADD COLUMN IF NOT EXISTS object_id INTEGER REFERENCES warehouse_objects(id) ON DELETE CASCADE`,
   `ALTER TABLE work_entrances DROP CONSTRAINT IF EXISTS work_entrances_name_key`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_work_entrances_object_name ON work_entrances (object_id, name)`,
