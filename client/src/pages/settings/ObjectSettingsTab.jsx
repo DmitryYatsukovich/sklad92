@@ -67,15 +67,12 @@ export default function ObjectSettingsTab() {
   const [slotDraft, setSlotDraft] = useState({ locationKind: '', locationId: null, title: '' });
   const [slotSystemId, setSlotSystemId] = useState('');
   const [slotCategoryId, setSlotCategoryId] = useState('');
-  const [materialQuery, setMaterialQuery] = useState('');
-  const [materialSuggestions, setMaterialSuggestions] = useState([]);
-  const [suggestionLoading, setSuggestionLoading] = useState(false);
+  const [entryKind, setEntryKind] = useState('material');
+  const [entryQuery, setEntryQuery] = useState('');
+  const [entrySuggestions, setEntrySuggestions] = useState([]);
+  const [entrySuggestionLoading, setEntrySuggestionLoading] = useState(false);
   const [selectedMaterial, setSelectedMaterial] = useState(null);
-  const [materialQuantity, setMaterialQuantity] = useState('1');
-  const [equipmentName, setEquipmentName] = useState('');
-  const [equipmentQuantity, setEquipmentQuantity] = useState('1');
-  const [workName, setWorkName] = useState('');
-  const [workQuantity, setWorkQuantity] = useState('1');
+  const [entryQuantity, setEntryQuantity] = useState('1');
   const [slotBusy, setSlotBusy] = useState(false);
 
   const load = useCallback(() => {
@@ -327,14 +324,11 @@ export default function ObjectSettingsTab() {
     setSlotSystemId('');
     setSlotCategoryId('');
     setSlotModalOpen(true);
-    setMaterialQuery('');
-    setMaterialSuggestions([]);
+    setEntryKind('material');
+    setEntryQuery('');
+    setEntrySuggestions([]);
     setSelectedMaterial(null);
-    setMaterialQuantity('1');
-    setEquipmentName('');
-    setEquipmentQuantity('1');
-    setWorkName('');
-    setWorkQuantity('1');
+    setEntryQuantity('1');
   };
 
   const openSlotModal = (slot) => {
@@ -347,14 +341,11 @@ export default function ObjectSettingsTab() {
     setSlotSystemId(String(slot.system_id || ''));
     setSlotCategoryId(slot.category_id == null ? '' : String(slot.category_id));
     setSlotModalOpen(true);
-    setMaterialQuery('');
-    setMaterialSuggestions([]);
+    setEntryKind('material');
+    setEntryQuery('');
+    setEntrySuggestions([]);
     setSelectedMaterial(null);
-    setMaterialQuantity('1');
-    setEquipmentName('');
-    setEquipmentQuantity('1');
-    setWorkName('');
-    setWorkQuantity('1');
+    setEntryQuantity('1');
   };
 
   const closeSlotModal = () => {
@@ -363,14 +354,11 @@ export default function ObjectSettingsTab() {
     setSlotDraft({ locationKind: '', locationId: null, title: '' });
     setSlotSystemId('');
     setSlotCategoryId('');
-    setMaterialQuery('');
-    setMaterialSuggestions([]);
+    setEntryKind('material');
+    setEntryQuery('');
+    setEntrySuggestions([]);
     setSelectedMaterial(null);
-    setMaterialQuantity('1');
-    setEquipmentName('');
-    setEquipmentQuantity('1');
-    setWorkName('');
-    setWorkQuantity('1');
+    setEntryQuantity('1');
   };
 
   const handleSaveSlotMeta = async (e) => {
@@ -418,26 +406,34 @@ export default function ObjectSettingsTab() {
   };
 
   useEffect(() => {
-    if (!slotModalOpen || !activeSlot?.id || !activeSlot?.system_id) return undefined;
-    if (!materialQuery.trim()) {
-      setMaterialSuggestions([]);
+    if (!slotModalOpen || !activeSlot?.id || !activeSlot?.system_id || entryKind !== 'material') return undefined;
+    if (!entryQuery.trim()) {
+      setEntrySuggestions([]);
       return undefined;
     }
     const timer = setTimeout(() => {
-      setSuggestionLoading(true);
+      setEntrySuggestionLoading(true);
       settingsApi.objectSettings.materialSuggestions(
         activeSlot.system_id,
-        materialQuery.trim(),
+        entryQuery.trim(),
         activeSlot.category_id || null,
       )
         .then((rows) => {
-          setMaterialSuggestions(Array.isArray(rows) ? rows : []);
+          setEntrySuggestions(Array.isArray(rows) ? rows : []);
         })
-        .catch(() => setMaterialSuggestions([]))
-        .finally(() => setSuggestionLoading(false));
+        .catch(() => setEntrySuggestions([]))
+        .finally(() => setEntrySuggestionLoading(false));
     }, 250);
     return () => clearTimeout(timer);
-  }, [slotModalOpen, activeSlot?.id, activeSlot?.system_id, activeSlot?.category_id, materialQuery]);
+  }, [slotModalOpen, activeSlot?.id, activeSlot?.system_id, activeSlot?.category_id, entryKind, entryQuery]);
+
+  useEffect(() => {
+    setSelectedMaterial(null);
+    setEntrySuggestions([]);
+    setEntrySuggestionLoading(false);
+    setEntryQuery('');
+    setEntryQuantity('1');
+  }, [entryKind]);
 
   const handleDeleteSlot = async () => {
     if (!activeSlot?.id) return;
@@ -455,25 +451,44 @@ export default function ObjectSettingsTab() {
     }
   };
 
-  const handleAddMaterial = async (e) => {
+  const handleAddEntry = async (e) => {
     e.preventDefault();
-    if (!activeSlot?.id || !selectedMaterial?.id) return;
-    const qty = Number.parseFloat(materialQuantity);
+    if (!activeSlot?.id) return;
+    const qty = Number.parseFloat(entryQuantity);
     if (!Number.isFinite(qty) || qty <= 0) {
       setError('Количество должно быть больше нуля');
       return;
     }
+    const textName = String(entryQuery || '').trim();
     setSlotBusy(true);
     setError('');
     try {
-      await settingsApi.objectSettings.addMaterial(activeSlot.id, {
-        material_id: selectedMaterial.id,
-        quantity: qty,
-      });
-      setMaterialQuery('');
-      setMaterialSuggestions([]);
+      if (entryKind === 'material') {
+        if (!selectedMaterial?.id) {
+          setError('Выберите материал из подсказок');
+          return;
+        }
+        await settingsApi.objectSettings.addMaterial(activeSlot.id, {
+          material_id: selectedMaterial.id,
+          quantity: qty,
+        });
+      } else if (entryKind === 'equipment') {
+        if (!textName) {
+          setError('Введите название оборудования');
+          return;
+        }
+        await settingsApi.objectSettings.addEquipment(activeSlot.id, { name: textName, quantity: qty });
+      } else {
+        if (!textName) {
+          setError('Введите название работы');
+          return;
+        }
+        await settingsApi.objectSettings.addWork(activeSlot.id, { name: textName, quantity: qty });
+      }
+      setEntryQuery('');
+      setEntrySuggestions([]);
       setSelectedMaterial(null);
-      setMaterialQuantity('1');
+      setEntryQuantity('1');
       await load();
     } catch (err) {
       setError(err.message);
@@ -497,29 +512,6 @@ export default function ObjectSettingsTab() {
     }
   };
 
-  const handleAddEquipment = async (e) => {
-    e.preventDefault();
-    const name = String(equipmentName || '').trim();
-    const qty = Number.parseFloat(equipmentQuantity);
-    if (!activeSlot?.id || !name) return;
-    if (!Number.isFinite(qty) || qty <= 0) {
-      setError('Количество оборудования должно быть больше нуля');
-      return;
-    }
-    setSlotBusy(true);
-    setError('');
-    try {
-      await settingsApi.objectSettings.addEquipment(activeSlot.id, { name, quantity: qty });
-      setEquipmentName('');
-      setEquipmentQuantity('1');
-      await load();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSlotBusy(false);
-    }
-  };
-
   const handleDeleteEquipment = async (row) => {
     if (!row?.id) return;
     if (!confirm(`Удалить оборудование «${row.name}»?`)) return;
@@ -527,29 +519,6 @@ export default function ObjectSettingsTab() {
     setError('');
     try {
       await settingsApi.objectSettings.deleteEquipment(row.id);
-      await load();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSlotBusy(false);
-    }
-  };
-
-  const handleAddWork = async (e) => {
-    e.preventDefault();
-    const name = String(workName || '').trim();
-    const qty = Number.parseFloat(workQuantity);
-    if (!activeSlot?.id || !name) return;
-    if (!Number.isFinite(qty) || qty <= 0) {
-      setError('Количество работ должно быть больше нуля');
-      return;
-    }
-    setSlotBusy(true);
-    setError('');
-    try {
-      await settingsApi.objectSettings.addWork(activeSlot.id, { name, quantity: qty });
-      setWorkName('');
-      setWorkQuantity('1');
       await load();
     } catch (err) {
       setError(err.message);
@@ -619,6 +588,15 @@ export default function ObjectSettingsTab() {
   const activeSlotEquipment = activeSlotId ? (equipmentBySlot.get(activeSlotId) || []) : [];
   const activeSlotWorks = activeSlotId ? (worksBySlot.get(activeSlotId) || []) : [];
   const slotLocked = !activeSlot;
+  const isMaterialEntry = entryKind === 'material';
+  const entryPlaceholder = isMaterialEntry
+    ? 'Начните печатать название материала…'
+    : entryKind === 'equipment'
+      ? 'Введите название оборудования…'
+      : 'Введите название работы…';
+  const canAddEntry = !slotBusy && !slotLocked && (
+    isMaterialEntry ? !!selectedMaterial : String(entryQuery || '').trim().length > 0
+  );
 
   if (loading) return <p className="text-zinc-500 text-sm">Загрузка настроек объектов…</p>;
 
@@ -839,57 +817,69 @@ export default function ObjectSettingsTab() {
               )}
 
               <div className="space-y-3 rounded-xl border border-white/10 p-3">
-                <p className="text-zinc-200 text-sm font-medium">Добавить материал</p>
-                <form onSubmit={handleAddMaterial} className="grid gap-3 md:grid-cols-[1fr_120px_auto]">
-                  <div className="space-y-2">
-                    <input
-                      type="text"
-                      className="input"
-                      placeholder="Начните печатать название материала…"
-                      value={materialQuery}
-                      disabled={slotLocked}
-                      onChange={(e) => {
-                        setMaterialQuery(e.target.value);
-                        setSelectedMaterial(null);
-                      }}
-                    />
-                    {suggestionLoading && <p className="text-zinc-500 text-xs">Поиск материалов…</p>}
-                    {!suggestionLoading && materialSuggestions.length > 0 && (
-                      <div className="max-h-52 overflow-auto rounded-lg border border-white/10 bg-zinc-950/95">
-                        {materialSuggestions.map((row) => (
-                          <button
-                            key={row.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedMaterial(row);
-                              setMaterialQuery(row.name);
-                              setMaterialSuggestions([]);
-                            }}
-                            className="w-full text-left px-3 py-2 border-b border-white/5 hover:bg-white/10"
-                          >
-                            <p className="text-sm text-white">{row.name}</p>
-                            <p className="text-2xs text-zinc-400">Остаток: {row.quantity ?? 0} {row.unit || ''}</p>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                <p className="text-zinc-200 text-sm font-medium">Добавить позицию</p>
+                <p className="text-zinc-400 text-xs">
+                  Одна строка: выберите тип, укажите название/материал и количество.
+                </p>
+                <form onSubmit={handleAddEntry} className="grid gap-3 md:grid-cols-[170px_1fr_120px_auto]">
+                  <select
+                    value={entryKind}
+                    onChange={(e) => setEntryKind(e.target.value)}
+                    className="input"
+                    disabled={slotLocked}
+                  >
+                    <option value="material">Материал</option>
+                    <option value="equipment">Оборудование</option>
+                    <option value="work">Работа</option>
+                  </select>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder={entryPlaceholder}
+                    value={entryQuery}
+                    disabled={slotLocked}
+                    onChange={(e) => {
+                      setEntryQuery(e.target.value);
+                      if (entryKind === 'material') setSelectedMaterial(null);
+                    }}
+                    required
+                  />
                   <input
                     type="number"
                     min="0.0001"
                     step="0.0001"
-                    value={materialQuantity}
+                    value={entryQuantity}
                     disabled={slotLocked}
-                    onChange={(e) => setMaterialQuantity(e.target.value)}
+                    onChange={(e) => setEntryQuantity(e.target.value)}
                     className="input"
                     placeholder="Кол-во"
                     required
                   />
-                  <button type="submit" className="btn-primary text-sm" disabled={slotBusy || slotLocked || !selectedMaterial}>
+                  <button type="submit" className="btn-primary text-sm" disabled={!canAddEntry}>
                     Добавить
                   </button>
                 </form>
-                {selectedMaterial && (
+                {isMaterialEntry && entrySuggestionLoading && <p className="text-zinc-500 text-xs">Поиск материалов…</p>}
+                {isMaterialEntry && !entrySuggestionLoading && entrySuggestions.length > 0 && (
+                  <div className="max-h-52 overflow-auto rounded-lg border border-white/10 bg-zinc-950/95">
+                    {entrySuggestions.map((row) => (
+                      <button
+                        key={row.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedMaterial(row);
+                          setEntryQuery(row.name);
+                          setEntrySuggestions([]);
+                        }}
+                        className="w-full text-left px-3 py-2 border-b border-white/5 hover:bg-white/10"
+                      >
+                        <p className="text-sm text-white">{row.name}</p>
+                        <p className="text-2xs text-zinc-400">Остаток: {row.quantity ?? 0} {row.unit || ''}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {isMaterialEntry && selectedMaterial && (
                   <p className="text-zinc-400 text-xs">
                     Выбрано: {selectedMaterial.name} ({selectedMaterial.unit || 'ед.'})
                   </p>
@@ -937,31 +927,6 @@ export default function ObjectSettingsTab() {
                 <p className="text-zinc-400 text-xs">
                   Можно добавлять оборудование вручную, даже если его нет в позициях склада.
                 </p>
-                <form onSubmit={handleAddEquipment} className="grid gap-3 md:grid-cols-[1fr_120px_auto]">
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder="Название оборудования…"
-                    value={equipmentName}
-                    disabled={slotLocked}
-                    onChange={(e) => setEquipmentName(e.target.value)}
-                    required
-                  />
-                  <input
-                    type="number"
-                    min="0.0001"
-                    step="0.0001"
-                    value={equipmentQuantity}
-                    disabled={slotLocked}
-                    onChange={(e) => setEquipmentQuantity(e.target.value)}
-                    className="input"
-                    placeholder="Кол-во"
-                    required
-                  />
-                  <button type="submit" className="btn-primary text-sm" disabled={slotBusy || slotLocked}>
-                    Добавить
-                  </button>
-                </form>
                 {activeSlotEquipment.length ? (
                   <div className="space-y-1">
                     {activeSlotEquipment.map((row) => (
@@ -989,31 +954,6 @@ export default function ObjectSettingsTab() {
 
               <div className="space-y-3 rounded-xl border border-white/10 p-3">
                 <p className="text-zinc-200 text-sm font-medium">Работы в блоке</p>
-                <form onSubmit={handleAddWork} className="grid gap-3 md:grid-cols-[1fr_120px_auto]">
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder="Название работы…"
-                    value={workName}
-                    disabled={slotLocked}
-                    onChange={(e) => setWorkName(e.target.value)}
-                    required
-                  />
-                  <input
-                    type="number"
-                    min="0.0001"
-                    step="0.0001"
-                    value={workQuantity}
-                    disabled={slotLocked}
-                    onChange={(e) => setWorkQuantity(e.target.value)}
-                    className="input"
-                    placeholder="Кол-во"
-                    required
-                  />
-                  <button type="submit" className="btn-primary text-sm" disabled={slotBusy || slotLocked}>
-                    Добавить
-                  </button>
-                </form>
                 {activeSlotWorks.length ? (
                   <div className="space-y-1">
                     {activeSlotWorks.map((row) => (
