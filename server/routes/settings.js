@@ -1196,22 +1196,42 @@ router.post('/object-settings/location-systems', requirePermission('can_settings
 router.put('/object-settings/location-systems/:id', requirePermission('can_settings_work'), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Неверный id' });
+  const current = (await pool.query(
+    'SELECT id, location_kind, location_id, system_id, category_id FROM work_location_systems WHERE id = $1',
+    [id],
+  )).rows[0];
+  if (!current) return res.status(404).json({ error: 'Не найдено' });
+  const systemId = req.body?.system_id === undefined
+    ? current.system_id
+    : parseId(req.body?.system_id);
+  if (!systemId) return res.status(400).json({ error: 'Неверная система' });
+  const system = (await pool.query('SELECT id FROM material_systems WHERE id = $1', [systemId])).rows[0];
+  if (!system) return res.status(400).json({ error: 'Система не найдена' });
   const categoryId = req.body?.category_id == null || req.body?.category_id === ''
-    ? null
+    ? (req.body?.category_id === undefined ? current.category_id : null)
     : parseId(req.body?.category_id);
-  if (req.body?.category_id != null && req.body?.category_id !== '' && !categoryId) {
+  if (req.body?.category_id !== undefined && req.body?.category_id != null && req.body?.category_id !== '' && !categoryId) {
     return res.status(400).json({ error: 'Неверная категория' });
   }
   if (categoryId) {
     const category = (await pool.query('SELECT id FROM material_categories WHERE id = $1', [categoryId])).rows[0];
     if (!category) return res.status(400).json({ error: 'Категория не найдена' });
   }
+  const duplicate = (await pool.query(
+    `SELECT id
+     FROM work_location_systems
+     WHERE location_kind = $1 AND location_id = $2 AND system_id = $3 AND id <> $4
+     LIMIT 1`,
+    [current.location_kind, current.location_id, systemId, id],
+  )).rows[0];
+  if (duplicate) return res.status(400).json({ error: 'Эта система уже добавлена в локацию' });
+
   const updated = (await pool.query(
     `UPDATE work_location_systems
-     SET category_id = $1, updated_at = NOW()
-     WHERE id = $2
+     SET system_id = $1, category_id = $2, updated_at = NOW()
+     WHERE id = $3
      RETURNING id`,
-    [categoryId, id],
+    [systemId, categoryId, id],
   )).rows[0];
   if (!updated) return res.status(404).json({ error: 'Не найдено' });
   const row = (await pool.query(

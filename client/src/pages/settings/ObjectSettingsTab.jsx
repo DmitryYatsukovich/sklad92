@@ -28,98 +28,28 @@ function normalizePayload(payload) {
   };
 }
 
-function groupColorByIconKey(iconKey) {
-  const key = String(iconKey || '').toLowerCase();
-  if (key.includes('fire') || key.includes('smoke') || key.includes('heat') || key.includes('siren')) {
-    return 'bg-rose-500/15 text-rose-300 ring-rose-400/35';
-  }
-  if (key.includes('access') || key.includes('lock') || key.includes('card') || key.includes('turnstile') || key.includes('intercom')) {
-    return 'bg-violet-500/15 text-violet-300 ring-violet-400/35';
-  }
-  if (key.includes('video') || key.includes('camera') || key.includes('recorder') || key.includes('monitor')) {
-    return 'bg-cyan-500/15 text-cyan-300 ring-cyan-400/35';
-  }
-  if (key.includes('dispatch') || key.includes('automation') || key.includes('controller') || key.includes('network') || key.includes('server')) {
-    return 'bg-emerald-500/15 text-emerald-300 ring-emerald-400/35';
-  }
-  if (key.includes('electrical') || key.includes('cable') || key.includes('panel') || key.includes('socket') || key.includes('switch') || key.includes('lighting')) {
-    return 'bg-sky-500/15 text-sky-300 ring-sky-400/35';
-  }
-  return 'bg-zinc-500/20 text-zinc-200 ring-zinc-400/30';
-}
-
-function CategoryGlyph({ iconKey, className = 'h-4 w-4' }) {
-  const key = String(iconKey || '').toLowerCase();
-  if (key.includes('fire') || key.includes('smoke') || key.includes('heat') || key.includes('siren')) {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
-        <path d="M12 3c2 2 3 4 3 6 0 1.5-.5 2.7-1.6 3.8C12.2 14 12 15 12 16c0-1.2-.5-2.2-1.7-3.2C9.2 11.7 9 10.5 9 9c0-2 1-4 3-6z" stroke="currentColor" strokeWidth="1.7" />
-        <path d="M7 16c0 2.8 2.2 5 5 5s5-2.2 5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (key.includes('access') || key.includes('lock') || key.includes('card') || key.includes('turnstile') || key.includes('intercom')) {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
-        <rect x="6" y="11" width="12" height="9" rx="2" stroke="currentColor" strokeWidth="1.7" />
-        <path d="M9 11V8a3 3 0 0 1 6 0v3" stroke="currentColor" strokeWidth="1.7" />
-      </svg>
-    );
-  }
-  if (key.includes('video') || key.includes('camera') || key.includes('recorder') || key.includes('monitor')) {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
-        <path d="M3 10h12l3 3v3H6l-3-3v-3z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-        <path d="M15 10l4-2v2.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (key.includes('dispatch') || key.includes('automation') || key.includes('controller') || key.includes('network') || key.includes('server')) {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
-        <rect x="3" y="5" width="8" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
-        <rect x="13" y="5" width="8" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
-        <rect x="3" y="13" width="18" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
-      <path d="M13 2L5 13h6l-1 9 9-13h-6l1-7z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 function SystemSquare({ slot, onOpen, totals }) {
-  const hasCategory = !!slot.category_id;
-  const color = hasCategory
-    ? groupColorByIconKey(slot.category_icon_key)
-    : 'bg-zinc-500/15 text-zinc-300 ring-zinc-500/35';
+  const equipmentPreview = Array.isArray(slot.equipmentNames) ? slot.equipmentNames.filter(Boolean) : [];
+  const previewText = equipmentPreview.length
+    ? equipmentPreview.slice(0, 2).join(', ')
+    : 'Оборудование не добавлено';
   return (
     <button
       type="button"
       onClick={() => onOpen(slot)}
-      className={`w-24 h-24 rounded-lg border border-white/15 p-2 text-left transition hover:bg-white/10 ${color}`}
+      className="w-20 h-20 rounded-md border border-white/15 p-1.5 text-left transition hover:bg-white/10 bg-zinc-900/60 text-zinc-100"
       title={`${slot.system_name}${slot.category_name ? ` • ${slot.category_name}` : ''}`}
     >
       <div className="flex h-full flex-col justify-between">
-        <div className="flex items-start justify-between gap-2">
-          <span className="text-[10px] font-medium leading-tight">{slot.system_name}</span>
-          {hasCategory ? (
-            <span className={`inline-flex h-6 w-6 items-center justify-center rounded-md ring-1 ${color}`}>
-              <CategoryGlyph iconKey={slot.category_icon_key} className="h-4 w-4" />
-            </span>
-          ) : (
-            <span className="inline-flex h-6 w-6 items-center justify-center rounded-md ring-1 ring-white/20 bg-black/20 text-white/70 text-sm">
-              ?
-            </span>
-          )}
+        <div className="space-y-0.5">
+          <p className="text-[9px] font-semibold leading-tight truncate">{slot.system_name}</p>
+          <p className="text-[8px] text-zinc-400 leading-tight truncate">{slot.category_name || 'Без категории'}</p>
         </div>
-        <div className="text-[10px] text-zinc-200/90 leading-tight">
-          {slot.category_name || 'Выбрать категорию'}
-        </div>
-        <div className="text-[9px] text-zinc-300/80 leading-tight">
-          M:{totals?.materials || 0} E:{totals?.equipment || 0} W:{totals?.works || 0}
+        <div className="space-y-0.5">
+          <p className="text-[8px] text-zinc-200/90 leading-tight overflow-hidden text-ellipsis">{previewText}</p>
+          <p className="text-[8px] text-zinc-400 leading-tight">
+            M:{totals?.materials || 0} E:{totals?.equipment || 0} W:{totals?.works || 0}
+          </p>
         </div>
       </div>
     </button>
@@ -132,11 +62,11 @@ export default function ObjectSettingsTab() {
   const [error, setError] = useState('');
   const [collapsedFloors, setCollapsedFloors] = useState([]);
 
-  const [addSystemModal, setAddSystemModal] = useState({ open: false, locationKind: '', locationId: null, title: '' });
-  const [selectedSystemId, setSelectedSystemId] = useState('');
-
   const [slotModalOpen, setSlotModalOpen] = useState(false);
   const [activeSlot, setActiveSlot] = useState(null);
+  const [slotDraft, setSlotDraft] = useState({ locationKind: '', locationId: null, title: '' });
+  const [slotSystemId, setSlotSystemId] = useState('');
+  const [slotCategoryId, setSlotCategoryId] = useState('');
   const [materialQuery, setMaterialQuery] = useState('');
   const [materialSuggestions, setMaterialSuggestions] = useState([]);
   const [suggestionLoading, setSuggestionLoading] = useState(false);
@@ -391,39 +321,31 @@ export default function ObjectSettingsTab() {
     roomById,
   ]);
 
-  const openAddSystemModal = (locationKind, locationId, title) => {
-    setSelectedSystemId('');
-    setAddSystemModal({ open: true, locationKind, locationId, title });
-  };
-
-  const closeAddSystemModal = () => {
-    setAddSystemModal({ open: false, locationKind: '', locationId: null, title: '' });
-    setSelectedSystemId('');
-  };
-
-  const handleAddSystem = async (e) => {
-    e.preventDefault();
-    const systemId = Number.parseInt(selectedSystemId, 10);
-    if (!systemId || !addSystemModal.locationId || !addSystemModal.locationKind) return;
-    setSlotBusy(true);
-    setError('');
-    try {
-      await settingsApi.objectSettings.createLocationSystem({
-        location_kind: addSystemModal.locationKind,
-        location_id: addSystemModal.locationId,
-        system_id: systemId,
-      });
-      closeAddSystemModal();
-      await load();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSlotBusy(false);
-    }
+  const openCreateSlotModal = (locationKind, locationId, title) => {
+    setActiveSlot(null);
+    setSlotDraft({ locationKind, locationId, title });
+    setSlotSystemId('');
+    setSlotCategoryId('');
+    setSlotModalOpen(true);
+    setMaterialQuery('');
+    setMaterialSuggestions([]);
+    setSelectedMaterial(null);
+    setMaterialQuantity('1');
+    setEquipmentName('');
+    setEquipmentQuantity('1');
+    setWorkName('');
+    setWorkQuantity('1');
   };
 
   const openSlotModal = (slot) => {
     setActiveSlot(slot);
+    setSlotDraft({
+      locationKind: slot.location_kind,
+      locationId: slot.location_id,
+      title: slot.locationTitle || (slot.location_kind === 'room' ? 'Помещение' : 'Квартира'),
+    });
+    setSlotSystemId(String(slot.system_id || ''));
+    setSlotCategoryId(slot.category_id == null ? '' : String(slot.category_id));
     setSlotModalOpen(true);
     setMaterialQuery('');
     setMaterialSuggestions([]);
@@ -438,6 +360,9 @@ export default function ObjectSettingsTab() {
   const closeSlotModal = () => {
     setSlotModalOpen(false);
     setActiveSlot(null);
+    setSlotDraft({ locationKind: '', locationId: null, title: '' });
+    setSlotSystemId('');
+    setSlotCategoryId('');
     setMaterialQuery('');
     setMaterialSuggestions([]);
     setSelectedMaterial(null);
@@ -446,6 +371,50 @@ export default function ObjectSettingsTab() {
     setEquipmentQuantity('1');
     setWorkName('');
     setWorkQuantity('1');
+  };
+
+  const handleSaveSlotMeta = async (e) => {
+    e.preventDefault();
+    const systemId = Number.parseInt(slotSystemId, 10);
+    const categoryId = slotCategoryId ? Number.parseInt(slotCategoryId, 10) : null;
+    if (!systemId) {
+      setError('Выберите систему');
+      return;
+    }
+    if (slotCategoryId && !categoryId) {
+      setError('Неверная категория');
+      return;
+    }
+    if (!slotDraft.locationKind || !slotDraft.locationId) {
+      setError('Локация не выбрана');
+      return;
+    }
+    setSlotBusy(true);
+    setError('');
+    try {
+      let saved;
+      if (activeSlot?.id) {
+        saved = await settingsApi.objectSettings.updateLocationSystem(activeSlot.id, {
+          system_id: systemId,
+          category_id: categoryId,
+        });
+      } else {
+        saved = await settingsApi.objectSettings.createLocationSystem({
+          location_kind: slotDraft.locationKind,
+          location_id: slotDraft.locationId,
+          system_id: systemId,
+          category_id: categoryId,
+        });
+      }
+      setActiveSlot(saved);
+      setSlotSystemId(String(saved.system_id || ''));
+      setSlotCategoryId(saved.category_id == null ? '' : String(saved.category_id));
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSlotBusy(false);
+    }
   };
 
   useEffect(() => {
@@ -469,21 +438,6 @@ export default function ObjectSettingsTab() {
     }, 250);
     return () => clearTimeout(timer);
   }, [slotModalOpen, activeSlot?.id, activeSlot?.system_id, activeSlot?.category_id, materialQuery]);
-
-  const handleSelectCategory = async (categoryId) => {
-    if (!activeSlot?.id) return;
-    setSlotBusy(true);
-    setError('');
-    try {
-      const updated = await settingsApi.objectSettings.updateLocationSystem(activeSlot.id, { category_id: categoryId || null });
-      setActiveSlot(updated);
-      await load();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSlotBusy(false);
-    }
-  };
 
   const handleDeleteSlot = async () => {
     if (!activeSlot?.id) return;
@@ -628,7 +582,11 @@ export default function ObjectSettingsTab() {
           {slots.map((slot) => (
             <SystemSquare
               key={slot.id}
-              slot={slot}
+              slot={{
+                ...slot,
+                locationTitle: title,
+                equipmentNames: (equipmentBySlot.get(slot.id) || []).map((row) => row.name),
+              }}
               onOpen={openSlotModal}
               totals={{
                 materials: (materialsBySlot.get(slot.id) || []).length,
@@ -639,8 +597,8 @@ export default function ObjectSettingsTab() {
           ))}
           <button
             type="button"
-            onClick={() => openAddSystemModal(locationKind, locationId, title)}
-            className="w-24 h-24 rounded-lg border border-dashed border-white/20 bg-black/20 hover:bg-white/10 text-zinc-300 text-xs"
+            onClick={() => openCreateSlotModal(locationKind, locationId, title)}
+            className="w-20 h-20 rounded-md border border-dashed border-white/20 bg-black/20 hover:bg-white/10 text-zinc-300 text-[11px]"
           >
             + Система
           </button>
@@ -655,6 +613,12 @@ export default function ObjectSettingsTab() {
       prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key]
     ));
   };
+
+  const activeSlotId = activeSlot?.id || null;
+  const activeSlotMaterials = activeSlotId ? (materialsBySlot.get(activeSlotId) || []) : [];
+  const activeSlotEquipment = activeSlotId ? (equipmentBySlot.get(activeSlotId) || []) : [];
+  const activeSlotWorks = activeSlotId ? (worksBySlot.get(activeSlotId) || []) : [];
+  const slotLocked = !activeSlot;
 
   if (loading) return <p className="text-zinc-500 text-sm">Загрузка настроек объектов…</p>;
 
@@ -813,84 +777,66 @@ export default function ObjectSettingsTab() {
         })}
       </div>
 
-      {addSystemModal.open && (
-        <div className="modal-backdrop z-50" onClick={closeAddSystemModal} role="dialog" aria-modal="true">
-          <div className="card p-5 max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-white font-medium text-lg mb-4">Добавить систему</h3>
-            <p className="text-zinc-400 text-sm mb-3">{addSystemModal.title}</p>
-            <form onSubmit={handleAddSystem} className="space-y-4">
-              <div>
-                <label className="label">Система</label>
-                <select
-                  value={selectedSystemId}
-                  onChange={(e) => setSelectedSystemId(e.target.value)}
-                  className="input"
-                  required
-                >
-                  <option value="">— Выберите систему —</option>
-                  {data.systems.map((system) => (
-                    <option key={system.id} value={system.id}>{system.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={closeAddSystemModal} className="btn-ghost text-sm">Отмена</button>
-                <button type="submit" className="btn-primary text-sm" disabled={slotBusy}>
-                  {slotBusy ? 'Сохранение…' : 'Добавить'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {slotModalOpen && activeSlot && (
+      {slotModalOpen && (
         <div className="modal-backdrop z-50" onClick={closeSlotModal} role="dialog" aria-modal="true">
           <div className="card p-5 max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <div>
-                <h3 className="text-white font-medium text-lg">{activeSlot.system_name}</h3>
-                <p className="text-zinc-400 text-sm">Выберите категорию и материалы для монтажа</p>
+                <h3 className="text-white font-medium text-lg">
+                  {activeSlot ? `Настройка системы: ${activeSlot.system_name}` : 'Добавить систему'}
+                </h3>
+                <p className="text-zinc-400 text-sm">
+                  {slotDraft.title || (activeSlot?.location_kind === 'room' ? 'Помещение' : 'Квартира')}
+                </p>
               </div>
-              <button type="button" onClick={handleDeleteSlot} className="btn-ghost text-rose-300 text-sm" disabled={slotBusy}>
-                Удалить блок
-              </button>
+              {activeSlot && (
+                <button type="button" onClick={handleDeleteSlot} className="btn-ghost text-rose-300 text-sm" disabled={slotBusy}>
+                  Удалить блок
+                </button>
+              )}
             </div>
 
             <div className="space-y-4">
-              <div className="space-y-2">
-                <p className="text-zinc-200 text-sm font-medium">Категория</p>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  <button
-                    type="button"
-                    onClick={() => handleSelectCategory(null)}
-                    className={`rounded-lg border px-3 py-2 text-left ${!activeSlot.category_id ? 'border-sky-400/70 bg-sky-500/10' : 'border-white/10 bg-zinc-900/50 hover:bg-zinc-800/70'}`}
+              <form onSubmit={handleSaveSlotMeta} className="grid gap-3 md:grid-cols-[1fr_1fr_auto] rounded-xl border border-white/10 p-3">
+                <div>
+                  <label className="label">Система</label>
+                  <select
+                    value={slotSystemId}
+                    onChange={(e) => setSlotSystemId(e.target.value)}
+                    className="input"
+                    required
                   >
-                    Без категории
-                  </button>
-                  {data.categories.map((category) => {
-                    const selected = Number(activeSlot.category_id) === Number(category.id);
-                    const color = groupColorByIconKey(category.icon_key);
-                    return (
-                      <button
-                        key={category.id}
-                        type="button"
-                        onClick={() => handleSelectCategory(category.id)}
-                        className={`rounded-lg border px-3 py-2 text-left ${
-                          selected ? 'border-sky-400/70 bg-sky-500/10' : 'border-white/10 bg-zinc-900/50 hover:bg-zinc-800/70'
-                        }`}
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className={`inline-flex h-7 w-7 items-center justify-center rounded-md ring-1 ${color}`}>
-                            <CategoryGlyph iconKey={category.icon_key} className="h-4 w-4" />
-                          </span>
-                          <span className="text-sm text-white">{category.name}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
+                    <option value="">— Выберите систему —</option>
+                    {data.systems.map((system) => (
+                      <option key={system.id} value={system.id}>{system.name}</option>
+                    ))}
+                  </select>
                 </div>
-              </div>
+                <div>
+                  <label className="label">Категория</label>
+                  <select
+                    value={slotCategoryId}
+                    onChange={(e) => setSlotCategoryId(e.target.value)}
+                    className="input"
+                  >
+                    <option value="">Без категории</option>
+                    {data.categories.map((category) => (
+                      <option key={category.id} value={category.id}>{category.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-end">
+                  <button type="submit" className="btn-primary text-sm w-full" disabled={slotBusy}>
+                    {slotBusy ? 'Сохранение…' : (activeSlot ? 'Сохранить' : 'Создать')}
+                  </button>
+                </div>
+              </form>
+
+              {!activeSlot && (
+                <p className="text-zinc-400 text-sm">
+                  Сначала сохраните систему и категорию, затем добавляйте материалы, оборудование и работы.
+                </p>
+              )}
 
               <div className="space-y-3 rounded-xl border border-white/10 p-3">
                 <p className="text-zinc-200 text-sm font-medium">Добавить материал</p>
@@ -901,6 +847,7 @@ export default function ObjectSettingsTab() {
                       className="input"
                       placeholder="Начните печатать название материала…"
                       value={materialQuery}
+                      disabled={slotLocked}
                       onChange={(e) => {
                         setMaterialQuery(e.target.value);
                         setSelectedMaterial(null);
@@ -932,12 +879,13 @@ export default function ObjectSettingsTab() {
                     min="0.0001"
                     step="0.0001"
                     value={materialQuantity}
+                    disabled={slotLocked}
                     onChange={(e) => setMaterialQuantity(e.target.value)}
                     className="input"
                     placeholder="Кол-во"
                     required
                   />
-                  <button type="submit" className="btn-primary text-sm" disabled={slotBusy || !selectedMaterial}>
+                  <button type="submit" className="btn-primary text-sm" disabled={slotBusy || slotLocked || !selectedMaterial}>
                     Добавить
                   </button>
                 </form>
@@ -950,7 +898,7 @@ export default function ObjectSettingsTab() {
 
               <div className="space-y-2">
                 <p className="text-zinc-200 text-sm font-medium">Материалы в блоке</p>
-                {(materialsBySlot.get(activeSlot.id) || []).length ? (
+                {activeSlotMaterials.length ? (
                   <div className="table-wrap">
                     <table className="w-full text-left text-sm">
                       <thead>
@@ -961,7 +909,7 @@ export default function ObjectSettingsTab() {
                         </tr>
                       </thead>
                       <tbody>
-                        {(materialsBySlot.get(activeSlot.id) || []).map((row) => (
+                        {activeSlotMaterials.map((row) => (
                           <tr key={row.id} className="border-b border-white/5">
                             <td className="p-2 text-white">{row.material_name}</td>
                             <td className="p-2 text-zinc-300">{row.quantity} {row.material_unit || ''}</td>
@@ -986,12 +934,16 @@ export default function ObjectSettingsTab() {
 
               <div className="space-y-3 rounded-xl border border-white/10 p-3">
                 <p className="text-zinc-200 text-sm font-medium">Оборудование в блоке</p>
+                <p className="text-zinc-400 text-xs">
+                  Можно добавлять оборудование вручную, даже если его нет в позициях склада.
+                </p>
                 <form onSubmit={handleAddEquipment} className="grid gap-3 md:grid-cols-[1fr_120px_auto]">
                   <input
                     type="text"
                     className="input"
                     placeholder="Название оборудования…"
                     value={equipmentName}
+                    disabled={slotLocked}
                     onChange={(e) => setEquipmentName(e.target.value)}
                     required
                   />
@@ -1000,18 +952,19 @@ export default function ObjectSettingsTab() {
                     min="0.0001"
                     step="0.0001"
                     value={equipmentQuantity}
+                    disabled={slotLocked}
                     onChange={(e) => setEquipmentQuantity(e.target.value)}
                     className="input"
                     placeholder="Кол-во"
                     required
                   />
-                  <button type="submit" className="btn-primary text-sm" disabled={slotBusy}>
+                  <button type="submit" className="btn-primary text-sm" disabled={slotBusy || slotLocked}>
                     Добавить
                   </button>
                 </form>
-                {(equipmentBySlot.get(activeSlot.id) || []).length ? (
+                {activeSlotEquipment.length ? (
                   <div className="space-y-1">
-                    {(equipmentBySlot.get(activeSlot.id) || []).map((row) => (
+                    {activeSlotEquipment.map((row) => (
                       <div key={row.id} className="rounded border border-white/10 px-2 py-1.5 flex items-center justify-between gap-2">
                         <p className="text-sm text-zinc-200">{row.name}</p>
                         <div className="flex items-center gap-3">
@@ -1042,6 +995,7 @@ export default function ObjectSettingsTab() {
                     className="input"
                     placeholder="Название работы…"
                     value={workName}
+                    disabled={slotLocked}
                     onChange={(e) => setWorkName(e.target.value)}
                     required
                   />
@@ -1050,18 +1004,19 @@ export default function ObjectSettingsTab() {
                     min="0.0001"
                     step="0.0001"
                     value={workQuantity}
+                    disabled={slotLocked}
                     onChange={(e) => setWorkQuantity(e.target.value)}
                     className="input"
                     placeholder="Кол-во"
                     required
                   />
-                  <button type="submit" className="btn-primary text-sm" disabled={slotBusy}>
+                  <button type="submit" className="btn-primary text-sm" disabled={slotBusy || slotLocked}>
                     Добавить
                   </button>
                 </form>
-                {(worksBySlot.get(activeSlot.id) || []).length ? (
+                {activeSlotWorks.length ? (
                   <div className="space-y-1">
-                    {(worksBySlot.get(activeSlot.id) || []).map((row) => (
+                    {activeSlotWorks.map((row) => (
                       <div key={row.id} className="rounded border border-white/10 px-2 py-1.5 flex items-center justify-between gap-2">
                         <p className="text-sm text-zinc-200">{row.name}</p>
                         <div className="flex items-center gap-3">
