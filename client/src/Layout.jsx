@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, Suspense } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import TabLoader from './components/TabLoader';
 import { auth, stats as statsApi } from './api';
 import { syncActionLogToServer } from './lib/actionLog';
@@ -44,6 +44,7 @@ function formatBytes(n) {
 }
 
 export default function Layout({ user, onLogout }) {
+  const location = useLocation();
   const visibleTabs = tabs.filter((t) => {
     if (t.perms?.length) return t.perms.some((p) => user[p]);
     if (t.perm == null) return true;
@@ -152,11 +153,13 @@ export default function Layout({ user, onLogout }) {
   const timeStr = showDesktopMeta
     ? now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
     : '';
+  const wideWarehouseLayout = location.pathname.startsWith('/warehouse');
+  const shellMaxWidthClass = wideWarehouseLayout ? 'max-w-[120rem]' : 'max-w-[100rem]';
 
   return (
     <div className="min-h-screen flex flex-col">
       <header className="sticky top-0 z-20 border-b border-white/10 bg-black/95 backdrop-blur-md">
-        <div className="max-w-[100rem] mx-auto px-2 sm:px-3">
+        <div className={`${shellMaxWidthClass} mx-auto px-2 sm:px-3`}>
           <div className="flex items-center justify-between gap-2 h-9">
             <div className="flex items-center gap-2 shrink-0 min-w-0">
               <div className="w-6 h-6 rounded bg-white flex items-center justify-center shrink-0">
@@ -217,7 +220,7 @@ export default function Layout({ user, onLogout }) {
           </div>
         </div>
       </header>
-      <main className="flex-1 max-w-[100rem] w-full mx-auto px-2 sm:px-3 py-2">
+      <main className={`flex-1 ${shellMaxWidthClass} w-full mx-auto px-2 sm:px-3 py-2`}>
         <Suspense fallback={<TabLoader />}>
           <Outlet />
         </Suspense>

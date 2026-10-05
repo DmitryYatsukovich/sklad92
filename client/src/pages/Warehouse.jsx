@@ -545,9 +545,10 @@ export default function Warehouse({ user }) {
     if (!editing) return;
     setError('');
     const isPart = isMaterialPart(editing);
+    const isGroup = isMaterialGroupRow(editing);
     const parentId = editing.parent_material_id
-      || (isMaterialGroupRow(editing) ? editing.id : null);
-    const splittingExisting = splitEnabled && !isPart && !isMaterialGroupRow(editing);
+      || (isGroup ? editing.id : null);
+    const splittingExisting = splitEnabled && !isPart && !isGroup;
     try {
       if (splittingExisting) {
         if (!validateSplitBeforeSubmit()) return;
@@ -556,10 +557,16 @@ export default function Warehouse({ user }) {
           parts: buildSplitPartsPayload(),
         });
       } else {
-        await materialsApi.update(editing.id, formToPayload(form, {
-          includeQuantity: isPart || !isMaterialGroupRow(editing),
+        const payload = formToPayload(form, {
+          includeQuantity: isPart || !isGroup,
           includePartLabel: isPart,
-        }));
+        });
+        if (isGroup) {
+          delete payload.object_id;
+          delete payload.warehouse_id;
+          delete payload.rack_id;
+        }
+        await materialsApi.update(editing.id, payload);
       }
       setEditing(null);
       setForm(emptyMaterialForm());
@@ -1709,7 +1716,7 @@ export default function Warehouse({ user }) {
           />
         </div>
         <div className="overflow-x-auto max-h-[calc(100vh-7.5rem)] overflow-y-auto">
-          <table className="table-compact table-fixed min-w-[1900px]">
+          <table className="table-compact table-fixed w-full">
             <thead className="sticky top-0 bg-surface-900 z-10">
               <tr>
                 <th className="w-16 text-center text-zinc-500 text-2xs font-normal">№</th>
