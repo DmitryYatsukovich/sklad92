@@ -477,26 +477,24 @@ export default function ObjectSettingsTabRefactored() {
     const pushEntry = (objectId, slot, name, quantity, unit = '') => {
       const target = ensureObject(objectId);
       if (!target) return;
-      const key = normalizeNameKey(name);
-      if (!key) return;
+      const nameKey = normalizeNameKey(name);
+      if (!nameKey) return;
+      const systemId = slot?.system_id ? String(slot.system_id) : '';
+      const systemName = slot?.system_name || 'Без системы';
+      const key = `${systemId}::${nameKey}`;
       const prev = target.entriesMap.get(key) || {
         key,
         name: String(name || '').trim(),
+        systemId,
+        systemName,
         quantity: 0,
         unit: '',
         slotIdsSet: new Set(),
-        systemsMap: new Map(),
         categoriesMap: new Map(),
       };
       prev.quantity += Number(quantity || 0);
       if (!prev.unit && unit) prev.unit = unit;
       if (slot?.id) prev.slotIdsSet.add(slot.id);
-      if (slot?.system_id) {
-        const systemKey = String(slot.system_id);
-        if (!prev.systemsMap.has(systemKey)) {
-          prev.systemsMap.set(systemKey, { id: systemKey, name: slot.system_name || `Система #${systemKey}` });
-        }
-      }
       const categoryKey = slot?.category_id == null ? '' : String(slot.category_id);
       if (!prev.categoriesMap.has(categoryKey)) {
         prev.categoriesMap.set(categoryKey, {
@@ -535,10 +533,13 @@ export default function ObjectSettingsTabRefactored() {
           quantity: row.quantity,
           unit: row.unit,
           slotIds: [...row.slotIdsSet.values()],
-          systems: [...row.systemsMap.values()].sort((a, b) => naturalCompare(a.name, b.name)),
+          systems: [{ id: row.systemId, name: row.systemName }],
           categories: [...row.categoriesMap.values()].sort((a, b) => naturalCompare(a.name, b.name)),
         }))
-        .sort((a, b) => naturalCompare(a.name, b.name));
+        .sort((a, b) => (
+          naturalCompare(a.systems[0]?.name || '', b.systems[0]?.name || '')
+          || naturalCompare(a.name, b.name)
+        ));
       prepared.set(objectId, {
         entries,
         totalQty: entries.reduce((acc, row) => acc + Number(row.quantity || 0), 0),
@@ -1201,6 +1202,19 @@ export default function ObjectSettingsTabRefactored() {
         {sortedObjects.map((obj) => {
           const objectEntrances = entrancesByObject.get(obj.id) || [];
           const objectSummary = objectSummaryById.get(obj.id) || { entries: [], totalQty: 0 };
+          const summaryBySystem = objectSummary.entries.reduce((acc, row) => {
+            const systemName = row.systems?.[0]?.name || 'Без системы';
+            const list = acc.get(systemName) || [];
+            list.push(row);
+            acc.set(systemName, list);
+            return acc;
+          }, new Map());
+          const summarySystemGroups = [...summaryBySystem.entries()]
+            .map(([systemName, rows]) => ([
+              systemName,
+              [...rows].sort((a, b) => naturalCompare(a.name, b.name)),
+            ]))
+            .sort((a, b) => naturalCompare(a[0], b[0]));
           return (
             <article key={obj.id} className="rounded-2xl border border-sky-500/25 bg-sky-950/20 p-4 space-y-3">
               <div className="space-y-1">
@@ -1213,27 +1227,24 @@ export default function ObjectSettingsTabRefactored() {
               {!!objectSummary.entries.length && (
                 <div className="rounded-lg border border-white/10 bg-black/20 p-2">
                   <p className="text-zinc-300 text-xs mb-1">Позиции для завершения</p>
-                  <div className="space-y-1 max-h-40 overflow-auto pr-1">
-                    {objectSummary.entries.map((row) => (
-                      <div key={row.key} className="text-[11px] text-zinc-200 flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate">{row.name}</p>
-                          <p className="text-zinc-500 text-2xs">
-                            {row.systems.length ? `Системы: ${row.systems.map((s) => s.name).join(', ')}` : 'Система не указана'}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-zinc-400 whitespace-nowrap">
-                            {formatQty(row.quantity)}{row.unit ? ` ${row.unit}` : ''}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => openSummaryEditModal(obj.name, row)}
-                            className="px-1.5 py-0.5 rounded border border-white/15 text-[10px] text-zinc-200 hover:bg-white/10"
-                          >
-                            Изменить
-                          </button>
-                        </div>
+                  <div className="space-y-2 max-h-48 overflow-auto pr-1">
+                    {summarySystemGroups.map(([systemName, rows]) => (
+                      <div key={systemName} className="rounded border border-white/10 bg-white/[0.02] p-1.5 space-y-1">
+                        <p className="text-zinc-300 text-2xs font-semibold">{systemName}</p>
+                        {rows.map((row) => (
+                          <div key={row.key} className="text-[11px] text-zinc-200 flex items-center justify-between gap-2">
+                            <span className="truncate">
+                              {row.name} — <span className="text-zinc-400">{formatQty(row.quantity)}{row.unit ? ` ${row.unit}` : ''}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => openSummaryEditModal(obj.name, row)}
+                              className="px-1.5 py-0.5 rounded border border-white/15 text-[10px] text-zinc-200 hover:bg-white/10 shrink-0"
+                            >
+                              Изменить
+                            </button>
+                          </div>
+                        ))}
                       </div>
                     ))}
                   </div>
