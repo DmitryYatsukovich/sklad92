@@ -481,6 +481,7 @@ export default function Warehouse({ user }) {
     setGroupModalOpen(false);
     setGroupNameQuery('');
     setGroupSelectedIds([]);
+    setError('');
   };
 
   const openGroupFromEdit = () => {
@@ -493,9 +494,18 @@ export default function Warehouse({ user }) {
       setError('Групповой материал уже объединён');
       return;
     }
-    const initialName = String(editing.name || '').trim();
+    const initialName = String(form.name || editing.name || '').trim();
+    const normalized = initialName.toLowerCase();
+    const preselectedIds = list
+      .filter((row) => (
+        !isMaterialPart(row)
+        && !isMaterialGroupRow(row)
+        && materialHasStock(row)
+        && String(row.name || '').trim().toLowerCase() === normalized
+      ))
+      .map((row) => String(row.id));
     setGroupNameQuery(initialName);
-    setGroupSelectedIds(editing.id ? [String(editing.id)] : []);
+    setGroupSelectedIds(preselectedIds);
     setGroupModalOpen(true);
     setError('');
   };
@@ -2324,6 +2334,7 @@ export default function Warehouse({ user }) {
             <p className="text-zinc-400 text-sm mt-1">
               Обратная логика к разделению: выбранные позиции объединяются под общий QR-код, а их QR сохраняются у частей.
             </p>
+            {error && <p className="text-rose-400 text-xs mt-2">{error}</p>}
             <form onSubmit={handleGroupMaterials} className="space-y-4 mt-4">
               <div>
                 <label className="label">Наименование материалов</label>
