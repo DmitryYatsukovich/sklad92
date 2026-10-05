@@ -1868,7 +1868,9 @@ export default function Warehouse({ user }) {
                 const filteredChildParts = hasActiveFilters
                   ? childParts.filter((part) => materialMatchesActiveFilters(part))
                   : childParts;
-                const shownExpanded = expandedManual || (hasActiveFilters && filteredChildParts.length > 0);
+                // Группы должны раскрываться только по явному действию пользователя.
+                // При фильтрации оставляем их свернутыми по умолчанию.
+                const shownExpanded = expandedManual;
                 const partsLoading = loadingPartsIds.has(m.id);
                 const partsCount = materialPartsCount(m, childParts);
                 const joinDistinctBy = (rows, key) => {
