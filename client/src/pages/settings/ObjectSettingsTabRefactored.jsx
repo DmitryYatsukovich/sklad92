@@ -78,6 +78,8 @@ export default function ObjectSettingsTabRefactored() {
   const [entryQuantity, setEntryQuantity] = useState('1');
   const [slotBusy, setSlotBusy] = useState(false);
   const [copiedSlotTemplate, setCopiedSlotTemplate] = useState(null);
+  const [copiedLocationTemplate, setCopiedLocationTemplate] = useState(null);
+  const [copiedFloorTemplate, setCopiedFloorTemplate] = useState(null);
   const [pasteBusyKey, setPasteBusyKey] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -266,6 +268,75 @@ export default function ObjectSettingsTabRefactored() {
     });
     return rows.sort((a, b) => naturalCompare(a.name, b.name));
   }, [materialsBySlot, equipmentBySlot, worksBySlot]);
+
+  const buildSlotTemplate = useCallback((slot) => {
+    const entries = getSlotEntries(slot.id).map((entry) => ({
+      source: entry.source,
+      name: entry.name,
+      quantity: Number(entry.quantity || 0),
+      materialId: entry.materialId || null,
+    }));
+    return {
+      systemId: slot.system_id,
+      systemName: slot.system_name,
+      categoryId: slot.category_id ?? null,
+      categoryName: slot.category_name || '',
+      entries,
+    };
+  }, [getSlotEntries]);
+
+  const getLocationSlotTemplates = useCallback((locationKind, locationId) => {
+    const slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
+    return slots.map((slot) => buildSlotTemplate(slot));
+  }, [slotsByLocation, buildSlotTemplate]);
+
+  const pasteEntryToSlot = useCallback(async (locationSystemId, entry) => {
+    const quantity = Number(entry.quantity || 0);
+    if (!entry.name || !Number.isFinite(quantity) || quantity <= 0) return;
+
+    if (entry.source === 'material' && entry.materialId) {
+      try {
+        await settingsApi.objectSettings.addMaterial(locationSystemId, {
+          material_id: entry.materialId,
+          quantity,
+        });
+        return;
+      } catch {
+        // Материал мог быть удалён/изменён после копирования — сохраняем позицию как ручную.
+        await settingsApi.objectSettings.addEquipment(locationSystemId, {
+          name: entry.name,
+          quantity,
+        });
+        return;
+      }
+    }
+
+    if (entry.source === 'work') {
+      await settingsApi.objectSettings.addWork(locationSystemId, {
+        name: entry.name,
+        quantity,
+      });
+      return;
+    }
+
+    await settingsApi.objectSettings.addEquipment(locationSystemId, {
+      name: entry.name,
+      quantity,
+    });
+  }, []);
+
+  const cloneSlotTemplateToLocation = useCallback(async (locationKind, locationId, slotTemplate) => {
+    const created = await settingsApi.objectSettings.createLocationSystem({
+      location_kind: locationKind,
+      location_id: locationId,
+      system_id: slotTemplate.systemId,
+      category_id: slotTemplate.categoryId,
+    });
+    for (const entry of slotTemplate.entries || []) {
+      await pasteEntryToSlot(created.id, entry);
+    }
+    return created;
+  }, [pasteEntryToSlot]);
 
   const objectSummaryById = useMemo(() => {
     const summary = new Map();
@@ -541,56 +612,19 @@ export default function ObjectSettingsTabRefactored() {
 
   const handleCopyActiveSlot = () => {
     if (!activeSlot?.id) return;
-    const entries = getSlotEntries(activeSlot.id).map((entry) => ({
-      source: entry.source,
-      name: entry.name,
-      quantity: Number(entry.quantity || 0),
-      materialId: entry.materialId || null,
-    }));
-    setCopiedSlotTemplate({
-      systemId: activeSlot.system_id,
-      systemName: activeSlot.system_name,
-      categoryId: activeSlot.category_id ?? null,
-      categoryName: activeSlot.category_name || '',
-      entries,
-    });
+    setCopiedSlotTemplate(buildSlotTemplate(activeSlot));
     setNotice(`Блок «${activeSlot.system_name}${activeSlot.category_name ? ` • ${activeSlot.category_name}` : ''}» скопирован.`);
     setError('');
   };
 
   const handlePasteSlotToLocation = async (locationKind, locationId, title) => {
     if (!copiedSlotTemplate?.systemId) return;
-    const key = `${locationKind}:${locationId}`;
+    const key = `slot:${locationKind}:${locationId}`;
     setPasteBusyKey(key);
     setError('');
     setNotice('');
     try {
-      const created = await settingsApi.objectSettings.createLocationSystem({
-        location_kind: locationKind,
-        location_id: locationId,
-        system_id: copiedSlotTemplate.systemId,
-        category_id: copiedSlotTemplate.categoryId,
-      });
-      for (const entry of copiedSlotTemplate.entries || []) {
-        const quantity = Number(entry.quantity || 0);
-        if (!entry.name || !Number.isFinite(quantity) || quantity <= 0) continue;
-        if (entry.source === 'material' && entry.materialId) {
-          await settingsApi.objectSettings.addMaterial(created.id, {
-            material_id: entry.materialId,
-            quantity,
-          });
-        } else if (entry.source === 'work') {
-          await settingsApi.objectSettings.addWork(created.id, {
-            name: entry.name,
-            quantity,
-          });
-        } else {
-          await settingsApi.objectSettings.addEquipment(created.id, {
-            name: entry.name,
-            quantity,
-          });
-        }
-      }
+      await cloneSlotTemplateToLocation(locationKind, locationId, copiedSlotTemplate);
       setNotice(`Блок «${copiedSlotTemplate.systemName}» вставлен в «${title}».`);
       await load();
     } catch (err) {
@@ -600,10 +634,206 @@ export default function ObjectSettingsTabRefactored() {
     }
   };
 
+  const handleCopyLocationBlocks = (locationKind, locationId, title) => {
+    const slots = getLocationSlotTemplates(locationKind, locationId);
+    if (!slots.length) {
+      setError('В выбранной локации нет блоков для копирования.');
+      setNotice('');
+      return;
+    }
+    setCopiedLocationTemplate({
+      locationKind,
+      title,
+      slots,
+    });
+    setError('');
+    setNotice(`Блоки локации «${title}» скопированы.`);
+  };
+
+  const handlePasteLocationBlocks = async (locationKind, locationId, title) => {
+    if (!copiedLocationTemplate?.slots?.length) return;
+    if (copiedLocationTemplate.locationKind !== locationKind) {
+      setError('Можно вставлять только в локацию того же типа.');
+      setNotice('');
+      return;
+    }
+    const key = `location:${locationKind}:${locationId}`;
+    setPasteBusyKey(key);
+    setError('');
+    setNotice('');
+    try {
+      for (const slotTemplate of copiedLocationTemplate.slots) {
+        await cloneSlotTemplateToLocation(locationKind, locationId, slotTemplate);
+      }
+      setNotice(`Блоки локации вставлены в «${title}».`);
+      await load();
+    } catch (err) {
+      setError(err.message || 'Не удалось вставить блоки локации');
+    } finally {
+      setPasteBusyKey('');
+    }
+  };
+
+  const handleCopyFloorBlocks = (floor) => {
+    const floorApartmentsRaw = apartmentsByFloor.get(floor.id) || [];
+    const floorRoomsBucket = floorApartmentsRaw.find((x) => x.name === FLOOR_ROOMS_BUCKET_NAME);
+    const floorApartments = floorApartmentsRaw.filter((x) => x.name !== FLOOR_ROOMS_BUCKET_NAME);
+    const floorRooms = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
+
+    const items = [];
+
+    floorRooms.forEach((room) => {
+      const roomSlots = getLocationSlotTemplates('room', room.id);
+      if (!roomSlots.length) return;
+      items.push({
+        locationKind: 'room',
+        scope: 'floor',
+        roomName: room.name,
+        slots: roomSlots,
+      });
+    });
+
+    floorApartments.forEach((apartment) => {
+      const apartmentSlots = getLocationSlotTemplates('apartment', apartment.id);
+      if (apartmentSlots.length) {
+        items.push({
+          locationKind: 'apartment',
+          scope: 'apartment',
+          apartmentName: apartment.name,
+          slots: apartmentSlots,
+        });
+      }
+      (roomsByApartment.get(apartment.id) || []).forEach((room) => {
+        const roomSlots = getLocationSlotTemplates('room', room.id);
+        if (!roomSlots.length) return;
+        items.push({
+          locationKind: 'room',
+          scope: 'apartment',
+          apartmentName: apartment.name,
+          roomName: room.name,
+          slots: roomSlots,
+        });
+      });
+    });
+
+    if (!items.length) {
+      setError(`На этаже ${floor.name} нет блоков для копирования.`);
+      setNotice('');
+      return;
+    }
+
+    setCopiedFloorTemplate({
+      sourceFloorId: floor.id,
+      sourceFloorName: floor.name,
+      items,
+    });
+    setError('');
+    setNotice(`Блоки этажа «${floor.name}» скопированы.`);
+  };
+
+  const handlePasteFloorBlocks = async (targetFloor) => {
+    if (!copiedFloorTemplate?.items?.length) return;
+    const key = `floor:${targetFloor.id}`;
+    setPasteBusyKey(key);
+    setError('');
+    setNotice('');
+    try {
+      const targetApartmentsRaw = apartmentsByFloor.get(targetFloor.id) || [];
+      const targetRoomsBucket = targetApartmentsRaw.find((x) => x.name === FLOOR_ROOMS_BUCKET_NAME);
+      const targetApartments = targetApartmentsRaw.filter((x) => x.name !== FLOOR_ROOMS_BUCKET_NAME);
+      const targetFloorRooms = targetRoomsBucket ? (roomsByApartment.get(targetRoomsBucket.id) || []) : [];
+
+      const targetApartmentsByName = new Map();
+      targetApartments.forEach((apartment) => {
+        targetApartmentsByName.set(normalizeNameKey(apartment.name), apartment);
+      });
+      const targetFloorRoomsByName = new Map();
+      targetFloorRooms.forEach((room) => {
+        targetFloorRoomsByName.set(normalizeNameKey(room.name), room);
+      });
+      const targetApartmentRoomsByKey = new Map();
+      targetApartments.forEach((apartment) => {
+        const apartmentKey = normalizeNameKey(apartment.name);
+        (roomsByApartment.get(apartment.id) || []).forEach((room) => {
+          const roomKey = normalizeNameKey(room.name);
+          targetApartmentRoomsByKey.set(`${apartmentKey}::${roomKey}`, room);
+        });
+      });
+
+      let insertedBlocks = 0;
+      let skippedBlocks = 0;
+
+      for (const item of copiedFloorTemplate.items) {
+        let targetLocation = null;
+        if (item.locationKind === 'apartment') {
+          targetLocation = targetApartmentsByName.get(normalizeNameKey(item.apartmentName));
+        } else if (item.scope === 'floor') {
+          targetLocation = targetFloorRoomsByName.get(normalizeNameKey(item.roomName));
+        } else {
+          const apartmentKey = normalizeNameKey(item.apartmentName);
+          const roomKey = normalizeNameKey(item.roomName);
+          targetLocation = targetApartmentRoomsByKey.get(`${apartmentKey}::${roomKey}`);
+        }
+
+        if (!targetLocation?.id) {
+          skippedBlocks += item.slots.length;
+          continue;
+        }
+
+        for (const slotTemplate of item.slots || []) {
+          await cloneSlotTemplateToLocation(item.locationKind, targetLocation.id, slotTemplate);
+          insertedBlocks += 1;
+        }
+      }
+
+      if (!insertedBlocks) {
+        setError('Не удалось вставить блоки: на целевом этаже не найдены совпадающие помещения/квартиры.');
+      } else {
+        setNotice(
+          skippedBlocks
+            ? `Вставлено блоков: ${insertedBlocks}. Пропущено: ${skippedBlocks} (не найдены совпадающие локации).`
+            : `Вставлено блоков: ${insertedBlocks}.`,
+        );
+      }
+      await load();
+    } catch (err) {
+      setError(err.message || 'Не удалось вставить блоки этажа');
+    } finally {
+      setPasteBusyKey('');
+    }
+  };
+
+  const renderLocationActions = (locationKind, locationId, title) => {
+    const canPaste = copiedLocationTemplate && copiedLocationTemplate.locationKind === locationKind;
+    const locationBusy = pasteBusyKey === `location:${locationKind}:${locationId}`;
+    return (
+      <div className="flex flex-wrap items-center gap-1">
+        <button
+          type="button"
+          onClick={() => handleCopyLocationBlocks(locationKind, locationId, title)}
+          className="px-2 py-0.5 rounded border border-white/15 text-[10px] text-zinc-200 hover:bg-white/10"
+          disabled={!!pasteBusyKey || slotBusy}
+        >
+          Копировать все блоки
+        </button>
+        {canPaste && (
+          <button
+            type="button"
+            onClick={() => handlePasteLocationBlocks(locationKind, locationId, title)}
+            className="px-2 py-0.5 rounded border border-sky-400/40 text-[10px] text-sky-200 hover:bg-sky-900/30"
+            disabled={!!pasteBusyKey || slotBusy}
+          >
+            {locationBusy ? 'Вставка…' : 'Вставить блоки'}
+          </button>
+        )}
+      </div>
+    );
+  };
+
   const renderSystemSquares = (locationKind, locationId, title) => {
     const key = `${locationKind}:${locationId}`;
     const slots = slotsByLocation.get(key) || [];
-    const isPastingHere = pasteBusyKey === key;
+    const isPastingHere = pasteBusyKey === `slot:${key}`;
     return (
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
@@ -656,7 +886,7 @@ export default function ObjectSettingsTabRefactored() {
   return (
     <div className="space-y-4">
       <p className="text-zinc-400 text-sm">
-        План монтажа по объектам: добавляйте системы в квартиры и помещения, затем в каждой системе фиксируйте нужные позиции и количество. Можно создавать одинаковые блоки и быстро копировать их в другие локации.
+        План монтажа по объектам: добавляйте системы в квартиры и помещения, затем в каждой системе фиксируйте нужные позиции и количество. Можно создавать одинаковые блоки, копировать отдельный блок, а также все блоки помещения или этажа.
       </p>
       {error && <p className="text-rose-400 text-sm">{error}</p>}
       {notice && <p className="text-emerald-300 text-sm">{notice}</p>}
@@ -707,13 +937,33 @@ export default function ObjectSettingsTabRefactored() {
                               const collapsed = collapsedFloorSet.has(floor.id);
                               return (
                                 <div key={floor.id} className="rounded-lg border border-white/10 bg-black/20 p-2.5 space-y-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleFloor(floor.id)}
-                                    className="text-zinc-100 text-xs font-semibold hover:text-white"
-                                  >
-                                    Этаж {floor.name}
-                                  </button>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleFloor(floor.id)}
+                                      className="text-zinc-100 text-xs font-semibold hover:text-white"
+                                    >
+                                      Этаж {floor.name}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyFloorBlocks(floor)}
+                                      className="px-2 py-0.5 rounded border border-white/15 text-[10px] text-zinc-200 hover:bg-white/10"
+                                      disabled={!!pasteBusyKey || slotBusy}
+                                    >
+                                      Копировать этаж
+                                    </button>
+                                    {copiedFloorTemplate && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handlePasteFloorBlocks(floor)}
+                                        className="px-2 py-0.5 rounded border border-sky-400/40 text-[10px] text-sky-200 hover:bg-sky-900/30"
+                                        disabled={!!pasteBusyKey || slotBusy}
+                                      >
+                                        {pasteBusyKey === `floor:${floor.id}` ? 'Вставка…' : 'Вставить этаж'}
+                                      </button>
+                                    )}
+                                  </div>
                                   {!collapsed && (
                                     <div className="space-y-2">
                                       {floorRooms.length ? (
@@ -722,6 +972,7 @@ export default function ObjectSettingsTabRefactored() {
                                           {floorRooms.map((room) => (
                                             <div key={room.id} className="rounded border border-white/10 bg-black/20 px-2 py-1.5 space-y-1.5">
                                               <p className="text-zinc-200 text-2xs font-medium">Пом. {room.name}</p>
+                                              {renderLocationActions('room', room.id, `Пом. ${room.name}`)}
                                               {renderSystemSquares('room', room.id, `Пом. ${room.name}`)}
                                             </div>
                                           ))}
@@ -734,12 +985,14 @@ export default function ObjectSettingsTabRefactored() {
                                           {floorApartments.map((apartment) => (
                                             <div key={apartment.id} className="rounded border border-white/10 bg-black/20 px-2 py-1.5 space-y-1.5">
                                               <p className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</p>
+                                              {renderLocationActions('apartment', apartment.id, `Кв. ${apartment.name}`)}
                                               {renderSystemSquares('apartment', apartment.id, `Кв. ${apartment.name}`)}
                                               {(roomsByApartment.get(apartment.id) || []).length ? (
                                                 <div className="mt-1 space-y-1">
                                                   {(roomsByApartment.get(apartment.id) || []).map((room) => (
                                                     <div key={room.id} className="rounded border border-white/10 bg-zinc-800/70 px-2 py-1 space-y-1">
                                                       <p className="text-zinc-300 text-[10px] font-medium">Пом. {room.name}</p>
+                                                      {renderLocationActions('room', room.id, `Пом. ${room.name}`)}
                                                       {renderSystemSquares('room', room.id, `Пом. ${room.name}`)}
                                                     </div>
                                                   ))}
