@@ -70,6 +70,10 @@ function parseId(v) {
   return n > 0 ? n : null;
 }
 
+function normalizeMaterialName(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
 async function validateLocation(client, { object_id, warehouse_id, rack_id }) {
   const oid = parseId(object_id);
   let wid = parseId(warehouse_id);
@@ -385,6 +389,114 @@ router.post('/', requirePermission('can_warehouse'), async (req, res) => {
     res.status(201).json(await fetchMaterialRow(client, id));
   } catch (e) {
     if (e.code === '23505') return res.status(400).json({ error: 'Материал с таким кодом уже есть' });
+    throw e;
+  } finally {
+    client.release();
+  }
+});
+
+/** Сгруппировать несколько одноимённых материалов под новым общим QR-кодом */
+router.post('/group', requirePermission('can_warehouse'), async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  const materialIds = Array.isArray(req.body?.material_ids)
+    ? [...new Set(req.body.material_ids.map((v) => parseId(v)).filter(Boolean))]
+    : [];
+
+  if (!name) return res.status(400).json({ error: 'Укажите наименование группы' });
+  if (materialIds.length < 2) return res.status(400).json({ error: 'Выберите минимум 2 позиции для группировки' });
+
+  const normalizedName = normalizeMaterialName(name);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const rows = (await client.query(
+      `SELECT id, code, name, description, unit, price, production_price, quantity,
+              object_id, warehouse_id, rack_id, category_id, system_id, organization_id, parent_material_id, part_label
+       FROM materials
+       WHERE id = ANY($1::int[])
+       FOR UPDATE`,
+      [materialIds],
+    )).rows;
+    if (rows.length !== materialIds.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Часть выбранных материалов не найдена' });
+    }
+
+    const hasGrouped = (await client.query(
+      'SELECT parent_material_id FROM materials WHERE parent_material_id = ANY($1::int[]) LIMIT 1',
+      [materialIds],
+    )).rowCount > 0;
+    if (hasGrouped) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Нельзя группировать уже разделённые материалы' });
+    }
+
+    for (const row of rows) {
+      if (row.parent_material_id) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Нельзя группировать дочерние части' });
+      }
+      if (normalizeMaterialName(row.name) !== normalizedName) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Для группировки выберите материалы с одинаковым наименованием' });
+      }
+      if ((parseFloat(row.quantity) || 0) <= 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Группировать можно только позиции с количеством больше 0' });
+      }
+    }
+
+    const rowById = new Map(rows.map((row) => [row.id, row]));
+    const firstRow = rowById.get(materialIds[0]) || rows[0];
+    const parentCode = await uniqueCode(client);
+    const parentId = await insertMaterial(client, {
+      code: parentCode,
+      name,
+      description: String(firstRow.description || '').trim() || null,
+      unit: (firstRow.unit || 'шт').trim(),
+      price: parseFloat(firstRow.price) || 0,
+      production_price: parseFloat(firstRow.production_price) || 0,
+      quantity: 0,
+      object_id: null,
+      warehouse_id: null,
+      rack_id: null,
+      category_id: firstRow.category_id || null,
+      system_id: firstRow.system_id || null,
+      organization_id: firstRow.organization_id || null,
+    });
+
+    for (let i = 0; i < materialIds.length; i++) {
+      const id = materialIds[i];
+      const existingLabel = String(rowById.get(id)?.part_label || '').trim();
+      await client.query(
+        `UPDATE materials
+         SET parent_material_id = $1,
+             part_index = $2,
+             part_label = $3,
+             name = $4,
+             updated_at = NOW()
+         WHERE id = $5`,
+        [parentId, i + 1, existingLabel || `Часть ${i + 1}`, name, id],
+      );
+    }
+
+    await client.query('COMMIT');
+    const parent = await fetchMaterialRow(client, parentId);
+    const parts = (await client.query(
+      `SELECT ${MATERIAL_SELECT}${MATERIAL_GROUP_SELECT_EXTRA}
+       ${MATERIAL_FROM}
+       ${MATERIAL_GROUP_JOINS}
+       WHERE m.parent_material_id = $1
+       ORDER BY m.part_index NULLS LAST, m.id`,
+      [parentId],
+    )).rows;
+    res.status(201).json({
+      parent,
+      parts,
+      grouped_count: parts.length,
+    });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
     throw e;
   } finally {
     client.release();

@@ -196,6 +196,10 @@ export default function Warehouse({ user }) {
   const [splitEnabled, setSplitEnabled] = useState(false);
   const [splitSaved, setSplitSaved] = useState(false);
   const [splitParts, setSplitParts] = useState(() => defaultSplitParts(1));
+  const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [groupNameQuery, setGroupNameQuery] = useState('');
+  const [groupSelectedIds, setGroupSelectedIds] = useState([]);
+  const [groupSubmitting, setGroupSubmitting] = useState(false);
   const [expandedGroupIds, setExpandedGroupIds] = useState(() => new Set());
   const [groupPartsCache, setGroupPartsCache] = useState({});
   const [loadingPartsIds, setLoadingPartsIds] = useState(() => new Set());
@@ -472,6 +476,30 @@ export default function Warehouse({ user }) {
     loadCatalog();
   };
 
+  const closeGroupModal = (force = false) => {
+    if (groupSubmitting && !force) return;
+    setGroupModalOpen(false);
+    setGroupNameQuery('');
+    setGroupSelectedIds([]);
+  };
+
+  const openGroupFromEdit = () => {
+    if (!editing) return;
+    if (isMaterialPart(editing)) {
+      setError('Часть материала нельзя группировать');
+      return;
+    }
+    if (isMaterialGroupRow(editing)) {
+      setError('Групповой материал уже объединён');
+      return;
+    }
+    const initialName = String(editing.name || '').trim();
+    setGroupNameQuery(initialName);
+    setGroupSelectedIds(editing.id ? [String(editing.id)] : []);
+    setGroupModalOpen(true);
+    setError('');
+  };
+
   const handleAdd = async (e) => {
     e.preventDefault();
     setError('');
@@ -541,6 +569,62 @@ export default function Warehouse({ user }) {
         return;
       }
       setError(err.message);
+    }
+  };
+
+  const handleGroupMaterials = async (e) => {
+    e.preventDefault();
+    const groupedName = String(groupNameQuery || '').trim();
+    if (!groupedName) {
+      setError('Введите наименование для группировки');
+      return;
+    }
+    const normalizedName = groupedName.toLowerCase();
+    const selectedIds = [...new Set(groupSelectedIds
+      .map((value) => parseInt(value, 10))
+      .filter((value) => Number.isInteger(value) && value > 0))];
+    if (selectedIds.length < 2) {
+      setError('Выберите минимум 2 позиции для группировки');
+      return;
+    }
+
+    const byId = new Map(list.map((row) => [Number(row.id), row]));
+    const invalidName = selectedIds.find((id) => {
+      const row = byId.get(id);
+      return !row || String(row.name || '').trim().toLowerCase() !== normalizedName;
+    });
+    if (invalidName) {
+      setError('Для группировки выберите материалы строго с этим наименованием');
+      return;
+    }
+
+    setGroupSubmitting(true);
+    setError('');
+    try {
+      const result = await materialsApi.group({
+        name: groupedName,
+        material_ids: selectedIds,
+      });
+      setInfo(`Сгруппировано позиций: ${result.grouped_count ?? selectedIds.length}`);
+      closeGroupModal(true);
+      setShowAdd(false);
+      setEditing(null);
+      setForm(emptyMaterialForm());
+      resetSplitState();
+      load({ silent: true });
+    } catch (err) {
+      if (isOfflineQueuedError(err)) {
+        closeGroupModal(true);
+        setShowAdd(false);
+        setEditing(null);
+        setForm(emptyMaterialForm());
+        resetSplitState();
+        load({ silent: true });
+        return;
+      }
+      setError(err.message || 'Не удалось сгруппировать материалы');
+    } finally {
+      setGroupSubmitting(false);
     }
   };
 
@@ -856,6 +940,39 @@ export default function Warehouse({ user }) {
     });
     return matched.slice(0, 8);
   }, [editing, showAdd, form.name, knownMaterialNames]);
+
+  const normalizedGroupNameQuery = useMemo(
+    () => String(groupNameQuery || '').trim().toLowerCase(),
+    [groupNameQuery],
+  );
+
+  const groupCandidates = useMemo(() => {
+    if (!normalizedGroupNameQuery) return [];
+    const rows = list.filter((row) => (
+      !isMaterialPart(row)
+      && !isMaterialGroupRow(row)
+      && materialHasStock(row)
+      && String(row.name || '').trim().toLowerCase().includes(normalizedGroupNameQuery)
+    ));
+    rows.sort((a, b) => (
+      naturalStringCompare(a.name, b.name)
+      || naturalStringCompare(a.object_name, b.object_name)
+      || naturalStringCompare(a.warehouse_name, b.warehouse_name)
+      || naturalStringCompare(a.rack_name, b.rack_name)
+      || naturalStringCompare(a.code, b.code)
+    ));
+    return rows;
+  }, [list, normalizedGroupNameQuery]);
+
+  const toggleGroupCandidate = (id) => {
+    const key = String(id || '');
+    if (!key) return;
+    setGroupSelectedIds((prev) => (
+      prev.includes(key)
+        ? prev.filter((v) => v !== key)
+        : [...prev, key]
+    ));
+  };
 
   const applyMaterialName = (value) => {
     const next = String(value || '');
@@ -2153,6 +2270,15 @@ export default function Warehouse({ user }) {
                         </button>
                       </span>
                     )}
+                    {editing && !isMaterialPart(editing) && !isMaterialGroupRow(editing) && (
+                      <button
+                        type="button"
+                        className="btn-secondary text-sm"
+                        onClick={openGroupFromEdit}
+                      >
+                        Сгруппировать
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -2184,6 +2310,93 @@ export default function Warehouse({ user }) {
                   disabled={canUseSplit && splitEnabled && !splitSaved}
                 >
                   {editing ? (splitEnabled ? 'Сохранить разделение' : 'Сохранить') : 'Добавить'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {groupModalOpen && (
+        <div className="modal-backdrop z-50" onClick={() => closeGroupModal()} role="dialog" aria-modal="true">
+          <div className="card p-5 max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-white text-lg font-medium">Сгруппировать материалы</h3>
+            <p className="text-zinc-400 text-sm mt-1">
+              Обратная логика к разделению: выбранные позиции объединяются под общий QR-код, а их QR сохраняются у частей.
+            </p>
+            <form onSubmit={handleGroupMaterials} className="space-y-4 mt-4">
+              <div>
+                <label className="label">Наименование материалов</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={groupNameQuery}
+                  onChange={(e) => setGroupNameQuery(e.target.value)}
+                  placeholder="Введите точное наименование"
+                  autoFocus
+                  required
+                />
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-zinc-200 text-sm font-medium">Позиции для группировки</p>
+                  <span className="text-2xs text-zinc-500">
+                    Выбрано: {groupSelectedIds.length}
+                  </span>
+                </div>
+
+                {!normalizedGroupNameQuery && (
+                  <p className="text-zinc-500 text-xs">Начните вводить название, чтобы увидеть совпадающие материалы.</p>
+                )}
+                {normalizedGroupNameQuery && groupCandidates.length === 0 && (
+                  <p className="text-zinc-500 text-xs">По этому наименованию позиции не найдены.</p>
+                )}
+
+                {groupCandidates.length > 0 && (
+                  <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
+                    {groupCandidates.map((row) => {
+                      const key = String(row.id);
+                      const checked = groupSelectedIds.includes(key);
+                      return (
+                        <label
+                          key={row.id}
+                          className="flex items-start gap-2 rounded border border-white/10 bg-zinc-900/70 px-2 py-1.5 hover:bg-zinc-800/70 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleGroupCandidate(row.id)}
+                            className="mt-1"
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm text-zinc-100 truncate">{row.name}</span>
+                            <span className="block text-2xs text-zinc-500 truncate">
+                              {row.code} · {locationLabel(row)} · {materialRowQuantity(row)} {row.unit || 'шт'}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => closeGroupModal()}
+                  disabled={groupSubmitting}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={groupSubmitting || groupSelectedIds.length < 2}
+                >
+                  {groupSubmitting ? 'Группировка…' : 'Сгруппировать'}
                 </button>
               </div>
             </form>

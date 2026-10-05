@@ -314,6 +314,7 @@ export const materials = {
   getParts: (id) => request(`/api/materials/${id}/parts`),
   addPart: (id, body) => request(`/api/materials/${id}/parts`, { method: 'POST', body: JSON.stringify(body) }),
   split: (id, body) => request(`/api/materials/${id}/split`, { method: 'POST', body: JSON.stringify(body) }),
+  group: (body) => request('/api/materials/group', { method: 'POST', body: JSON.stringify(body) }),
   update: (id, body) => request(`/api/materials/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   delete: (id) => request(`/api/materials/${id}`, { method: 'DELETE' }),
   deleteAll: () => request('/api/materials/all', { method: 'DELETE' }),

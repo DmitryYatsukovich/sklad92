@@ -15,6 +15,12 @@ function formatQty(value) {
   return Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 });
 }
 
+function toggleSelection(list, value) {
+  const key = String(value ?? '');
+  if (!key) return list;
+  return list.includes(key) ? list.filter((x) => x !== key) : [...list, key];
+}
+
 function asObjects(value) {
   return Array.isArray(value) ? value.filter((row) => row && typeof row === 'object') : [];
 }
@@ -60,6 +66,38 @@ function SystemSquare({ slot, onOpen, totals }) {
   );
 }
 
+function MultiSelectFilter({ label, options, selectedValues, onToggle }) {
+  const selectedCount = selectedValues.length;
+  return (
+    <details className="filter-field relative w-full sm:w-56">
+      <summary className="input cursor-pointer list-none">
+        <span className="inline-flex w-full items-center justify-between gap-2">
+          <span className="truncate">{label}</span>
+          <span className="text-zinc-500 text-2xs">{selectedCount ? `${selectedCount}` : '▼'}</span>
+        </span>
+      </summary>
+      <div className="absolute z-30 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-white/10 bg-surface-900 p-2 shadow-xl">
+        {options.length === 0 && (
+          <p className="px-1 py-1 text-2xs text-zinc-500">Нет вариантов</p>
+        )}
+        {options.map((option) => (
+          <label
+            key={option.value}
+            className="flex items-center gap-2 px-1 py-1.5 text-2xs text-zinc-200 hover:bg-white/5 rounded"
+          >
+            <input
+              type="checkbox"
+              checked={selectedValues.includes(option.value)}
+              onChange={() => onToggle(option.value)}
+            />
+            <span className="truncate">{option.label}</span>
+          </label>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 export default function ObjectSettingsTabRefactored() {
   const [data, setData] = useState(normalizePayload({}));
   const [loading, setLoading] = useState(true);
@@ -82,19 +120,38 @@ export default function ObjectSettingsTabRefactored() {
   const [copiedFloorTemplate, setCopiedFloorTemplate] = useState(null);
   const [pasteBusyKey, setPasteBusyKey] = useState('');
   const [notice, setNotice] = useState('');
+  const [selectedSystemIds, setSelectedSystemIds] = useState([]);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
 
-  const load = useCallback(() => {
-    setLoading(true);
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setError('');
-    settingsApi.objectSettings.layout()
-      .then((payload) => setData(normalizePayload(payload)))
-      .catch((e) => setError(e.message || 'Ошибка загрузки настроек объектов'))
-      .finally(() => setLoading(false));
+    try {
+      const payload = await settingsApi.objectSettings.layout();
+      setData(normalizePayload(payload));
+    } catch (e) {
+      setError(e.message || 'Ошибка загрузки настроек объектов');
+    } finally {
+      if (!silent) setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
+
+  useEffect(() => {
+    const onPointerDown = (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('.filter-field')) return;
+      document.querySelectorAll('.filter-field[open]').forEach((node) => {
+        node.removeAttribute('open');
+      });
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, []);
 
   const sortedObjects = useMemo(() => [...data.objects].sort((a, b) => naturalCompare(a.name, b.name)), [data.objects]);
   const sortedEntrances = useMemo(() => [...data.entrances].sort((a, b) => (
@@ -167,6 +224,29 @@ export default function ObjectSettingsTabRefactored() {
     });
     return map;
   }, [sortedRooms]);
+
+  const systemFilterOptions = useMemo(
+    () => [...data.systems]
+      .sort((a, b) => naturalCompare(a.name, b.name))
+      .map((system) => ({ value: String(system.id), label: system.name })),
+    [data.systems],
+  );
+
+  const categoryFilterOptions = useMemo(
+    () => [...data.categories]
+      .sort((a, b) => naturalCompare(a.name, b.name))
+      .map((category) => ({ value: String(category.id), label: category.name })),
+    [data.categories],
+  );
+
+  const hasSlotFilters = selectedSystemIds.length > 0 || selectedCategoryIds.length > 0;
+
+  const slotMatchesFilters = useCallback((slot) => {
+    if (!slot) return false;
+    if (selectedSystemIds.length && !selectedSystemIds.includes(String(slot.system_id || ''))) return false;
+    if (selectedCategoryIds.length && !selectedCategoryIds.includes(String(slot.category_id || ''))) return false;
+    return true;
+  }, [selectedSystemIds, selectedCategoryIds]);
 
   const slotsByLocation = useMemo(() => {
     const map = new Map();
@@ -363,15 +443,21 @@ export default function ObjectSettingsTabRefactored() {
     };
 
     data.locationSystemMaterials.forEach((row) => {
-      const objectId = getSlotObjectId(slotById.get(row.location_system_id));
+      const slot = slotById.get(row.location_system_id);
+      if (!slotMatchesFilters(slot)) return;
+      const objectId = getSlotObjectId(slot);
       pushEntry(objectId, row.material_name, row.quantity, row.material_unit || '');
     });
     data.locationSystemEquipment.forEach((row) => {
-      const objectId = getSlotObjectId(slotById.get(row.location_system_id));
+      const slot = slotById.get(row.location_system_id);
+      if (!slotMatchesFilters(slot)) return;
+      const objectId = getSlotObjectId(slot);
       pushEntry(objectId, row.name, row.quantity);
     });
     data.locationSystemWorks.forEach((row) => {
-      const objectId = getSlotObjectId(slotById.get(row.location_system_id));
+      const slot = slotById.get(row.location_system_id);
+      if (!slotMatchesFilters(slot)) return;
+      const objectId = getSlotObjectId(slot);
       pushEntry(objectId, row.name, row.quantity);
     });
 
@@ -391,6 +477,7 @@ export default function ObjectSettingsTabRefactored() {
     slotById,
     apartmentById,
     roomById,
+    slotMatchesFilters,
   ]);
 
   const knownManualEntries = useMemo(() => {
@@ -508,7 +595,7 @@ export default function ObjectSettingsTabRefactored() {
       setActiveSlot(saved);
       setSlotSystemId(String(saved.system_id || ''));
       setSlotCategoryId(saved.category_id == null ? '' : String(saved.category_id));
-      await load();
+      await load({ silent: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -546,7 +633,7 @@ export default function ObjectSettingsTabRefactored() {
     try {
       await settingsApi.objectSettings.deleteLocationSystem(activeSlot.id);
       closeSlotModal();
-      await load();
+      await load({ silent: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -581,7 +668,7 @@ export default function ObjectSettingsTabRefactored() {
         });
       }
       resetEntryEditor();
-      await load();
+      await load({ silent: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -602,7 +689,7 @@ export default function ObjectSettingsTabRefactored() {
       } else if (entry.source === 'work') {
         await settingsApi.objectSettings.deleteWork(entry.id);
       }
-      await load();
+      await load({ silent: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -626,7 +713,7 @@ export default function ObjectSettingsTabRefactored() {
     try {
       await cloneSlotTemplateToLocation(locationKind, locationId, copiedSlotTemplate);
       setNotice(`Блок «${copiedSlotTemplate.systemName}» вставлен в «${title}».`);
-      await load();
+      await load({ silent: true });
     } catch (err) {
       setError(err.message || 'Не удалось вставить блок');
     } finally {
@@ -666,7 +753,7 @@ export default function ObjectSettingsTabRefactored() {
         await cloneSlotTemplateToLocation(locationKind, locationId, slotTemplate);
       }
       setNotice(`Блоки локации вставлены в «${title}».`);
-      await load();
+      await load({ silent: true });
     } catch (err) {
       setError(err.message || 'Не удалось вставить блоки локации');
     } finally {
@@ -795,7 +882,7 @@ export default function ObjectSettingsTabRefactored() {
             : `Вставлено блоков: ${insertedBlocks}.`,
         );
       }
-      await load();
+      await load({ silent: true });
     } catch (err) {
       setError(err.message || 'Не удалось вставить блоки этажа');
     } finally {
@@ -832,8 +919,9 @@ export default function ObjectSettingsTabRefactored() {
 
   const renderSystemSquares = (locationKind, locationId, title) => {
     const key = `${locationKind}:${locationId}`;
-    const slots = slotsByLocation.get(key) || [];
+    const slots = (slotsByLocation.get(key) || []).filter(slotMatchesFilters);
     const isPastingHere = pasteBusyKey === `slot:${key}`;
+    if (!slots.length && hasSlotFilters) return null;
     return (
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
@@ -890,6 +978,36 @@ export default function ObjectSettingsTabRefactored() {
       </p>
       {error && <p className="text-rose-400 text-sm">{error}</p>}
       {notice && <p className="text-emerald-300 text-sm">{notice}</p>}
+
+      <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+        <p className="text-zinc-200 text-sm font-medium">Фильтры блоков</p>
+        <div className="flex flex-wrap gap-2">
+          <MultiSelectFilter
+            label="Система"
+            options={systemFilterOptions}
+            selectedValues={selectedSystemIds}
+            onToggle={(value) => setSelectedSystemIds((prev) => toggleSelection(prev, value))}
+          />
+          <MultiSelectFilter
+            label="Категория"
+            options={categoryFilterOptions}
+            selectedValues={selectedCategoryIds}
+            onToggle={(value) => setSelectedCategoryIds((prev) => toggleSelection(prev, value))}
+          />
+          {(selectedSystemIds.length > 0 || selectedCategoryIds.length > 0) && (
+            <button
+              type="button"
+              className="btn-ghost text-sm"
+              onClick={() => {
+                setSelectedSystemIds([]);
+                setSelectedCategoryIds([]);
+              }}
+            >
+              Сбросить фильтры
+            </button>
+          )}
+        </div>
+      </div>
 
       <div className="space-y-4">
         {sortedObjects.map((obj) => {
@@ -970,11 +1088,17 @@ export default function ObjectSettingsTabRefactored() {
                                         <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 space-y-1.5">
                                           <p className="text-zinc-200 text-2xs font-medium">Помещения на этаже</p>
                                           {floorRooms.map((room) => (
-                                            <div key={room.id} className="rounded border border-white/10 bg-black/20 px-2 py-1.5 space-y-1.5">
-                                              <p className="text-zinc-200 text-2xs font-medium">Пом. {room.name}</p>
-                                              {renderLocationActions('room', room.id, `Пом. ${room.name}`)}
-                                              {renderSystemSquares('room', room.id, `Пом. ${room.name}`)}
-                                            </div>
+                                            (() => {
+                                              const roomSquares = renderSystemSquares('room', room.id, `Пом. ${room.name}`);
+                                              if (!roomSquares) return null;
+                                              return (
+                                                <div key={room.id} className="rounded border border-white/10 bg-black/20 px-2 py-1.5 space-y-1.5">
+                                                  <p className="text-zinc-200 text-2xs font-medium">Пом. {room.name}</p>
+                                                  {renderLocationActions('room', room.id, `Пом. ${room.name}`)}
+                                                  {roomSquares}
+                                                </div>
+                                              );
+                                            })()
                                           ))}
                                         </div>
                                       ) : null}
@@ -983,22 +1107,37 @@ export default function ObjectSettingsTabRefactored() {
                                         <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 space-y-1.5">
                                           <p className="text-zinc-200 text-2xs font-medium">Квартиры на этаже</p>
                                           {floorApartments.map((apartment) => (
-                                            <div key={apartment.id} className="rounded border border-white/10 bg-black/20 px-2 py-1.5 space-y-1.5">
-                                              <p className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</p>
-                                              {renderLocationActions('apartment', apartment.id, `Кв. ${apartment.name}`)}
-                                              {renderSystemSquares('apartment', apartment.id, `Кв. ${apartment.name}`)}
-                                              {(roomsByApartment.get(apartment.id) || []).length ? (
-                                                <div className="mt-1 space-y-1">
-                                                  {(roomsByApartment.get(apartment.id) || []).map((room) => (
-                                                    <div key={room.id} className="rounded border border-white/10 bg-zinc-800/70 px-2 py-1 space-y-1">
-                                                      <p className="text-zinc-300 text-[10px] font-medium">Пом. {room.name}</p>
-                                                      {renderLocationActions('room', room.id, `Пом. ${room.name}`)}
-                                                      {renderSystemSquares('room', room.id, `Пом. ${room.name}`)}
+                                            (() => {
+                                              const apartmentSquares = renderSystemSquares('apartment', apartment.id, `Кв. ${apartment.name}`);
+                                              const apartmentRoomCards = (roomsByApartment.get(apartment.id) || []).map((room) => {
+                                                const roomSquares = renderSystemSquares('room', room.id, `Пом. ${room.name}`);
+                                                if (!roomSquares) return null;
+                                                return (
+                                                  <div key={room.id} className="rounded border border-white/10 bg-zinc-800/70 px-2 py-1 space-y-1">
+                                                    <p className="text-zinc-300 text-[10px] font-medium">Пом. {room.name}</p>
+                                                    {renderLocationActions('room', room.id, `Пом. ${room.name}`)}
+                                                    {roomSquares}
+                                                  </div>
+                                                );
+                                              }).filter(Boolean);
+                                              if (!apartmentSquares && apartmentRoomCards.length === 0) return null;
+                                              return (
+                                                <div key={apartment.id} className="rounded border border-white/10 bg-black/20 px-2 py-1.5 space-y-1.5">
+                                                  <p className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</p>
+                                                  {apartmentSquares && (
+                                                    <>
+                                                      {renderLocationActions('apartment', apartment.id, `Кв. ${apartment.name}`)}
+                                                      {apartmentSquares}
+                                                    </>
+                                                  )}
+                                                  {!!apartmentRoomCards.length && (
+                                                    <div className="mt-1 space-y-1">
+                                                      {apartmentRoomCards}
                                                     </div>
-                                                  ))}
+                                                  )}
                                                 </div>
-                                              ) : null}
-                                            </div>
+                                              );
+                                            })()
                                           ))}
                                         </div>
                                       ) : (
