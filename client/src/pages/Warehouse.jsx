@@ -952,7 +952,7 @@ export default function Warehouse({ user }) {
       !isMaterialPart(row)
       && !isMaterialGroupRow(row)
       && materialHasStock(row)
-      && String(row.name || '').trim().toLowerCase().includes(normalizedGroupNameQuery)
+      && String(row.name || '').trim().toLowerCase() === normalizedGroupNameQuery
     ));
     rows.sort((a, b) => (
       naturalStringCompare(a.name, b.name)
@@ -2350,7 +2350,7 @@ export default function Warehouse({ user }) {
                   <p className="text-zinc-500 text-xs">Начните вводить название, чтобы увидеть совпадающие материалы.</p>
                 )}
                 {normalizedGroupNameQuery && groupCandidates.length === 0 && (
-                  <p className="text-zinc-500 text-xs">По этому наименованию позиции не найдены.</p>
+                  <p className="text-zinc-500 text-xs">По точному названию позиции не найдены.</p>
                 )}
 
                 {groupCandidates.length > 0 && (
