@@ -11,6 +11,7 @@ export default function MaterialPartsModal({
   material,
   catalog,
   rackNameCounts = null,
+  startAddPart = false,
   onClose,
   onUpdated,
   onOpenMenu,
@@ -23,7 +24,7 @@ export default function MaterialPartsModal({
   const [editingPart, setEditingPart] = useState(null);
   const [partForm, setPartForm] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [addPartOpen, setAddPartOpen] = useState(false);
+  const [addPartOpen, setAddPartOpen] = useState(Boolean(startAddPart));
   const [addForm, setAddForm] = useState({ quantity: '', object_id: '', warehouse_id: '', rack_id: '', part_label: '' });
 
   const load = () => {
@@ -48,6 +49,10 @@ export default function MaterialPartsModal({
   useEffect(() => {
     load();
   }, [material?.id]);
+
+  useEffect(() => {
+    setAddPartOpen(Boolean(startAddPart));
+  }, [startAddPart, material?.id]);
 
   const openEditPart = (p) => {
     setEditingPart(p);

@@ -193,6 +193,7 @@ export default function Warehouse({ user }) {
   const [info, setInfo] = useState('');
   const [historyMaterial, setHistoryMaterial] = useState(null);
   const [partsModalMaterial, setPartsModalMaterial] = useState(null);
+  const [partsModalStartAdd, setPartsModalStartAdd] = useState(false);
   const [splitEnabled, setSplitEnabled] = useState(false);
   const [splitSaved, setSplitSaved] = useState(false);
   const [splitParts, setSplitParts] = useState(() => defaultSplitParts(1));
@@ -406,6 +407,7 @@ export default function Warehouse({ user }) {
 
   const openMaterialRowClick = (m) => {
     if (isMaterialGroupRow(m)) {
+      setPartsModalStartAdd(false);
       setPartsModalMaterial(m);
       return;
     }
@@ -543,7 +545,8 @@ export default function Warehouse({ user }) {
     if (!editing) return;
     setError('');
     const isPart = isMaterialPart(editing);
-    const parentId = editing.parent_material_id;
+    const parentId = editing.parent_material_id
+      || (isMaterialGroupRow(editing) ? editing.id : null);
     const splittingExisting = splitEnabled && !isPart && !isMaterialGroupRow(editing);
     try {
       if (splittingExisting) {
@@ -1706,12 +1709,12 @@ export default function Warehouse({ user }) {
           />
         </div>
         <div className="overflow-x-auto max-h-[calc(100vh-7.5rem)] overflow-y-auto">
-          <table className="table-compact">
+          <table className="table-compact table-fixed min-w-[1900px]">
             <thead className="sticky top-0 bg-surface-900 z-10">
               <tr>
                 <th className="w-16 text-center text-zinc-500 text-2xs font-normal">№</th>
                 <th className="w-14 text-center text-zinc-500 text-2xs font-normal">QR</th>
-                <th>
+                <th className="w-[22rem] min-w-[20rem]">
                   <button type="button" onClick={() => toggleSort('name')} className="sort-btn">
                     Наимен. <SortIcon column="name" />
                   </button>
@@ -1803,7 +1806,7 @@ export default function Warehouse({ user }) {
                     Описание <SortIcon column="description" />
                   </button>
                 </th>
-                <th className="w-24" />
+                <th className="w-40" />
               </tr>
             </thead>
             <tbody>
@@ -1876,7 +1879,7 @@ export default function Warehouse({ user }) {
                         )}
                       </td>
                       <td
-                        className={`text-white max-w-[14rem] ${isChild ? 'pl-4' : ''}`}
+                        className={`text-white max-w-[20rem] ${isChild ? 'pl-4' : ''}`}
                         title={isChild ? `${partNames.name}${partNames.partLabel ? ` · ${partNames.partLabel}` : ''}` : materialDisplayName(row)}
                       >
                         {isChild ? (
@@ -1947,8 +1950,21 @@ export default function Warehouse({ user }) {
                       <td className="text-zinc-400 text-2xs max-w-[20rem] truncate" title={row.description || ''}>
                         {row.description || '—'}
                       </td>
-                      <td onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-1 justify-end">
+                      <td className="w-40" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1 justify-end whitespace-nowrap">
+                          {!isChild && isGroup && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPartsModalStartAdd(true);
+                                setPartsModalMaterial(row);
+                              }}
+                              className="btn-ghost px-1"
+                            >
+                              + В группу
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); openEdit(row); }}
@@ -1999,12 +2015,17 @@ export default function Warehouse({ user }) {
       {partsModalMaterial && (
         <MaterialPartsModal
           material={partsModalMaterial}
+          startAddPart={partsModalStartAdd}
           catalog={catalog}
           rackNameCounts={rackNameCounts}
-          onClose={() => setPartsModalMaterial(null)}
+          onClose={() => {
+            setPartsModalMaterial(null);
+            setPartsModalStartAdd(false);
+          }}
           onUpdated={load}
           onOpenMenu={(m) => {
             setPartsModalMaterial(null);
+            setPartsModalStartAdd(false);
             openMaterialMenu(m);
           }}
         />
