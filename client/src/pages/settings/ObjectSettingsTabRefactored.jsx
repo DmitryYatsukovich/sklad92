@@ -122,6 +122,14 @@ export default function ObjectSettingsTabRefactored() {
   const [notice, setNotice] = useState('');
   const [selectedSystemIds, setSelectedSystemIds] = useState([]);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
+  const [selectedApartmentScopes, setSelectedApartmentScopes] = useState([]);
+  const [selectedRoomNames, setSelectedRoomNames] = useState([]);
+  const [summaryEditOpen, setSummaryEditOpen] = useState(false);
+  const [summaryEditTarget, setSummaryEditTarget] = useState(null);
+  const [summaryEditName, setSummaryEditName] = useState('');
+  const [summaryEditSystemId, setSummaryEditSystemId] = useState('');
+  const [summaryEditCategoryId, setSummaryEditCategoryId] = useState('');
+  const [summaryEditBusy, setSummaryEditBusy] = useState(false);
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -225,6 +233,12 @@ export default function ObjectSettingsTabRefactored() {
     return map;
   }, [sortedRooms]);
 
+  const roomNameById = useMemo(() => {
+    const map = new Map();
+    sortedRooms.forEach((row) => map.set(row.id, row.name));
+    return map;
+  }, [sortedRooms]);
+
   const systemFilterOptions = useMemo(
     () => [...data.systems]
       .sort((a, b) => naturalCompare(a.name, b.name))
@@ -239,14 +253,46 @@ export default function ObjectSettingsTabRefactored() {
     [data.categories],
   );
 
-  const hasSlotFilters = selectedSystemIds.length > 0 || selectedCategoryIds.length > 0;
+  const apartmentFilterOptions = useMemo(
+    () => [{ value: 'all', label: 'Все квартиры' }],
+    [],
+  );
+
+  const roomFilterOptions = useMemo(() => {
+    const names = new Map();
+    data.locationSystems.forEach((slot) => {
+      if (slot.location_kind !== 'room') return;
+      const roomName = roomNameById.get(slot.location_id);
+      const key = normalizeNameKey(roomName);
+      if (!key || names.has(key)) return;
+      names.set(key, roomName);
+    });
+    return [...names.entries()]
+      .sort((a, b) => naturalCompare(a[1], b[1]))
+      .map(([value, label]) => ({ value, label }));
+  }, [data.locationSystems, roomNameById]);
+
+  const hasSlotFilters = selectedSystemIds.length > 0
+    || selectedCategoryIds.length > 0
+    || selectedApartmentScopes.length > 0
+    || selectedRoomNames.length > 0;
 
   const slotMatchesFilters = useCallback((slot) => {
     if (!slot) return false;
     if (selectedSystemIds.length && !selectedSystemIds.includes(String(slot.system_id || ''))) return false;
     if (selectedCategoryIds.length && !selectedCategoryIds.includes(String(slot.category_id || ''))) return false;
+    const apartmentsSelected = selectedApartmentScopes.includes('all');
+    if (apartmentsSelected || selectedRoomNames.length) {
+      if (slot.location_kind === 'apartment') {
+        if (!apartmentsSelected) return false;
+      } else if (slot.location_kind === 'room') {
+        if (!selectedRoomNames.length) return false;
+        const roomNameKey = normalizeNameKey(roomNameById.get(slot.location_id));
+        if (!selectedRoomNames.includes(roomNameKey)) return false;
+      }
+    }
     return true;
-  }, [selectedSystemIds, selectedCategoryIds]);
+  }, [selectedSystemIds, selectedCategoryIds, selectedApartmentScopes, selectedRoomNames, roomNameById]);
 
   const slotsByLocation = useMemo(() => {
     const map = new Map();
@@ -255,9 +301,6 @@ export default function ObjectSettingsTabRefactored() {
       const list = map.get(key) || [];
       list.push(slot);
       map.set(key, list);
-    });
-    map.forEach((list, key) => {
-      map.set(key, [...list].sort((a, b) => naturalCompare(a.system_name, b.system_name)));
     });
     return map;
   }, [data.locationSystems]);
@@ -431,14 +474,36 @@ export default function ObjectSettingsTabRefactored() {
       if (slot.location_kind === 'room') return roomById.get(slot.location_id)?.object_id || null;
       return null;
     };
-    const pushEntry = (objectId, name, quantity, unit = '') => {
+    const pushEntry = (objectId, slot, name, quantity, unit = '') => {
       const target = ensureObject(objectId);
       if (!target) return;
       const key = normalizeNameKey(name);
       if (!key) return;
-      const prev = target.entriesMap.get(key) || { key, name: String(name || '').trim(), quantity: 0, unit: '' };
+      const prev = target.entriesMap.get(key) || {
+        key,
+        name: String(name || '').trim(),
+        quantity: 0,
+        unit: '',
+        slotIdsSet: new Set(),
+        systemsMap: new Map(),
+        categoriesMap: new Map(),
+      };
       prev.quantity += Number(quantity || 0);
       if (!prev.unit && unit) prev.unit = unit;
+      if (slot?.id) prev.slotIdsSet.add(slot.id);
+      if (slot?.system_id) {
+        const systemKey = String(slot.system_id);
+        if (!prev.systemsMap.has(systemKey)) {
+          prev.systemsMap.set(systemKey, { id: systemKey, name: slot.system_name || `Система #${systemKey}` });
+        }
+      }
+      const categoryKey = slot?.category_id == null ? '' : String(slot.category_id);
+      if (!prev.categoriesMap.has(categoryKey)) {
+        prev.categoriesMap.set(categoryKey, {
+          id: categoryKey,
+          name: slot?.category_name || 'Без категории',
+        });
+      }
       target.entriesMap.set(key, prev);
     };
 
@@ -446,24 +511,34 @@ export default function ObjectSettingsTabRefactored() {
       const slot = slotById.get(row.location_system_id);
       if (!slotMatchesFilters(slot)) return;
       const objectId = getSlotObjectId(slot);
-      pushEntry(objectId, row.material_name, row.quantity, row.material_unit || '');
+      pushEntry(objectId, slot, row.material_name, row.quantity, row.material_unit || '');
     });
     data.locationSystemEquipment.forEach((row) => {
       const slot = slotById.get(row.location_system_id);
       if (!slotMatchesFilters(slot)) return;
       const objectId = getSlotObjectId(slot);
-      pushEntry(objectId, row.name, row.quantity);
+      pushEntry(objectId, slot, row.name, row.quantity);
     });
     data.locationSystemWorks.forEach((row) => {
       const slot = slotById.get(row.location_system_id);
       if (!slotMatchesFilters(slot)) return;
       const objectId = getSlotObjectId(slot);
-      pushEntry(objectId, row.name, row.quantity);
+      pushEntry(objectId, slot, row.name, row.quantity);
     });
 
     const prepared = new Map();
     summary.forEach((raw, objectId) => {
-      const entries = [...raw.entriesMap.values()].sort((a, b) => naturalCompare(a.name, b.name));
+      const entries = [...raw.entriesMap.values()]
+        .map((row) => ({
+          key: row.key,
+          name: row.name,
+          quantity: row.quantity,
+          unit: row.unit,
+          slotIds: [...row.slotIdsSet.values()],
+          systems: [...row.systemsMap.values()].sort((a, b) => naturalCompare(a.name, b.name)),
+          categories: [...row.categoriesMap.values()].sort((a, b) => naturalCompare(a.name, b.name)),
+        }))
+        .sort((a, b) => naturalCompare(a.name, b.name));
       prepared.set(objectId, {
         entries,
         totalQty: entries.reduce((acc, row) => acc + Number(row.quantity || 0), 0),
@@ -890,9 +965,93 @@ export default function ObjectSettingsTabRefactored() {
     }
   };
 
+  const hasLocationBlocks = useCallback((locationKind, locationId) => (
+    (slotsByLocation.get(`${locationKind}:${locationId}`) || []).length > 0
+  ), [slotsByLocation]);
+
+  const handleDeleteLocationBlocks = async (locationKind, locationId, title) => {
+    const currentCount = (slotsByLocation.get(`${locationKind}:${locationId}`) || []).length;
+    if (!currentCount) {
+      setError(`В «${title}» пока нет блоков для удаления.`);
+      setNotice('');
+      return;
+    }
+    if (!confirm(`Удалить все блоки в «${title}»?`)) return;
+    const key = `location:${locationKind}:${locationId}`;
+    setPasteBusyKey(key);
+    setError('');
+    setNotice('');
+    try {
+      const result = await settingsApi.objectSettings.deleteLocationBlocks(locationKind, locationId);
+      setNotice(`Удалено блоков: ${result?.deleted_blocks ?? currentCount} (${title}).`);
+      await load({ silent: true });
+    } catch (err) {
+      setError(err.message || 'Не удалось удалить блоки локации');
+    } finally {
+      setPasteBusyKey('');
+    }
+  };
+
+  const openSummaryEditModal = (objectName, row) => {
+    if (!row?.slotIds?.length) return;
+    setSummaryEditTarget({
+      objectName,
+      sourceName: row.name,
+      slotIds: [...row.slotIds],
+    });
+    setSummaryEditName(row.name || '');
+    setSummaryEditSystemId(row.systems.length === 1 ? row.systems[0].id : '');
+    setSummaryEditCategoryId(row.categories.length === 1 ? row.categories[0].id : '');
+    setSummaryEditOpen(true);
+    setError('');
+  };
+
+  const closeSummaryEditModal = () => {
+    setSummaryEditOpen(false);
+    setSummaryEditTarget(null);
+    setSummaryEditName('');
+    setSummaryEditSystemId('');
+    setSummaryEditCategoryId('');
+  };
+
+  const handleApplySummaryEdit = async (e) => {
+    e.preventDefault();
+    if (!summaryEditTarget?.slotIds?.length) return;
+    const nextName = String(summaryEditName || '').trim();
+    const systemId = Number.parseInt(summaryEditSystemId, 10);
+    const categoryId = summaryEditCategoryId ? Number.parseInt(summaryEditCategoryId, 10) : null;
+    if (!nextName) return setError('Укажите название позиции');
+    if (!systemId) return setError('Выберите систему');
+    if (summaryEditCategoryId && !categoryId) return setError('Неверная категория');
+
+    setSummaryEditBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const result = await settingsApi.objectSettings.bulkRenameEntry({
+        source_name: summaryEditTarget.sourceName,
+        name: nextName,
+        system_id: systemId,
+        category_id: categoryId,
+        slot_ids: summaryEditTarget.slotIds,
+      });
+      const updated = result?.updated_entries ?? 0;
+      setNotice(updated
+        ? `Обновлено позиций: ${updated}.`
+        : 'Подходящие позиции не найдены для изменения.');
+      closeSummaryEditModal();
+      await load({ silent: true });
+    } catch (err) {
+      setError(err.message || 'Не удалось изменить позицию');
+    } finally {
+      setSummaryEditBusy(false);
+    }
+  };
+
   const renderLocationActions = (locationKind, locationId, title) => {
     const canPaste = copiedLocationTemplate && copiedLocationTemplate.locationKind === locationKind;
     const locationBusy = pasteBusyKey === `location:${locationKind}:${locationId}`;
+    const blockCount = (slotsByLocation.get(`${locationKind}:${locationId}`) || []).length;
     return (
       <div className="flex flex-wrap items-center gap-1">
         <button
@@ -913,6 +1072,14 @@ export default function ObjectSettingsTabRefactored() {
             {locationBusy ? 'Вставка…' : 'Вставить блоки'}
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => handleDeleteLocationBlocks(locationKind, locationId, title)}
+          className="px-2 py-0.5 rounded border border-rose-400/40 text-[10px] text-rose-200 hover:bg-rose-900/30 disabled:opacity-40"
+          disabled={!!pasteBusyKey || slotBusy || blockCount === 0}
+        >
+          Удалить блоки
+        </button>
       </div>
     );
   };
@@ -920,13 +1087,20 @@ export default function ObjectSettingsTabRefactored() {
   const renderSystemSquares = (locationKind, locationId, title) => {
     const key = `${locationKind}:${locationId}`;
     const slots = (slotsByLocation.get(key) || []).filter(slotMatchesFilters);
+    const sortedSlotCards = slots
+      .map((slot) => ({ slot, entries: getSlotEntries(slot.id) }))
+      .sort((a, b) => (
+        naturalCompare(a.slot.system_name, b.slot.system_name)
+        || naturalCompare(a.entries[0]?.name || '', b.entries[0]?.name || '')
+        || naturalCompare(a.slot.category_name || '', b.slot.category_name || '')
+        || (a.slot.id - b.slot.id)
+      ));
     const isPastingHere = pasteBusyKey === `slot:${key}`;
-    if (!slots.length && hasSlotFilters) return null;
+    if (!sortedSlotCards.length && hasSlotFilters) return null;
     return (
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
-          {slots.map((slot) => {
-            const entries = getSlotEntries(slot.id);
+          {sortedSlotCards.map(({ slot, entries }) => {
             return (
               <SystemSquare
                 key={slot.id}
@@ -994,13 +1168,27 @@ export default function ObjectSettingsTabRefactored() {
             selectedValues={selectedCategoryIds}
             onToggle={(value) => setSelectedCategoryIds((prev) => toggleSelection(prev, value))}
           />
-          {(selectedSystemIds.length > 0 || selectedCategoryIds.length > 0) && (
+          <MultiSelectFilter
+            label="Квартиры"
+            options={apartmentFilterOptions}
+            selectedValues={selectedApartmentScopes}
+            onToggle={(value) => setSelectedApartmentScopes((prev) => toggleSelection(prev, value))}
+          />
+          <MultiSelectFilter
+            label="Помещения"
+            options={roomFilterOptions}
+            selectedValues={selectedRoomNames}
+            onToggle={(value) => setSelectedRoomNames((prev) => toggleSelection(prev, value))}
+          />
+          {hasSlotFilters && (
             <button
               type="button"
               className="btn-ghost text-sm"
               onClick={() => {
                 setSelectedSystemIds([]);
                 setSelectedCategoryIds([]);
+                setSelectedApartmentScopes([]);
+                setSelectedRoomNames([]);
               }}
             >
               Сбросить фильтры
@@ -1027,11 +1215,25 @@ export default function ObjectSettingsTabRefactored() {
                   <p className="text-zinc-300 text-xs mb-1">Позиции для завершения</p>
                   <div className="space-y-1 max-h-40 overflow-auto pr-1">
                     {objectSummary.entries.map((row) => (
-                      <div key={row.key} className="text-[11px] text-zinc-200 flex justify-between gap-2">
-                        <span>{row.name}</span>
-                        <span className="text-zinc-400 whitespace-nowrap">
-                          {formatQty(row.quantity)}{row.unit ? ` ${row.unit}` : ''}
-                        </span>
+                      <div key={row.key} className="text-[11px] text-zinc-200 flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate">{row.name}</p>
+                          <p className="text-zinc-500 text-2xs">
+                            {row.systems.length ? `Системы: ${row.systems.map((s) => s.name).join(', ')}` : 'Система не указана'}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-zinc-400 whitespace-nowrap">
+                            {formatQty(row.quantity)}{row.unit ? ` ${row.unit}` : ''}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => openSummaryEditModal(obj.name, row)}
+                            className="px-1.5 py-0.5 rounded border border-white/15 text-[10px] text-zinc-200 hover:bg-white/10"
+                          >
+                            Изменить
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1053,8 +1255,22 @@ export default function ObjectSettingsTabRefactored() {
                               const floorApartments = floorApartmentsRaw.filter((x) => x.name !== FLOOR_ROOMS_BUCKET_NAME);
                               const floorRooms = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
                               const collapsed = collapsedFloorSet.has(floor.id);
+                              const floorHasBlocks = (
+                                floorRooms.some((room) => hasLocationBlocks('room', room.id))
+                                || floorApartments.some((apartment) => (
+                                  hasLocationBlocks('apartment', apartment.id)
+                                  || (roomsByApartment.get(apartment.id) || []).some((room) => hasLocationBlocks('room', room.id))
+                                ))
+                              );
                               return (
-                                <div key={floor.id} className="rounded-lg border border-white/10 bg-black/20 p-2.5 space-y-2">
+                                <div
+                                  key={floor.id}
+                                  className={`rounded-lg border p-2.5 space-y-2 ${
+                                    floorHasBlocks
+                                      ? 'border-white/10 bg-black/20'
+                                      : 'border-rose-500/50 bg-rose-950/20'
+                                  }`}
+                                >
                                   <div className="flex flex-wrap items-center gap-2">
                                     <button
                                       type="button"
@@ -1091,8 +1307,16 @@ export default function ObjectSettingsTabRefactored() {
                                             (() => {
                                               const roomSquares = renderSystemSquares('room', room.id, `Пом. ${room.name}`);
                                               if (!roomSquares) return null;
+                                              const roomHasBlocks = hasLocationBlocks('room', room.id);
                                               return (
-                                                <div key={room.id} className="rounded border border-white/10 bg-black/20 px-2 py-1.5 space-y-1.5">
+                                                <div
+                                                  key={room.id}
+                                                  className={`rounded border px-2 py-1.5 space-y-1.5 ${
+                                                    roomHasBlocks
+                                                      ? 'border-white/10 bg-black/20'
+                                                      : 'border-rose-500/50 bg-rose-950/20'
+                                                  }`}
+                                                >
                                                   <p className="text-zinc-200 text-2xs font-medium">Пом. {room.name}</p>
                                                   {renderLocationActions('room', room.id, `Пом. ${room.name}`)}
                                                   {roomSquares}
@@ -1112,8 +1336,16 @@ export default function ObjectSettingsTabRefactored() {
                                               const apartmentRoomCards = (roomsByApartment.get(apartment.id) || []).map((room) => {
                                                 const roomSquares = renderSystemSquares('room', room.id, `Пом. ${room.name}`);
                                                 if (!roomSquares) return null;
+                                                const roomHasBlocks = hasLocationBlocks('room', room.id);
                                                 return (
-                                                  <div key={room.id} className="rounded border border-white/10 bg-zinc-800/70 px-2 py-1 space-y-1">
+                                                  <div
+                                                    key={room.id}
+                                                    className={`rounded border px-2 py-1 space-y-1 ${
+                                                      roomHasBlocks
+                                                        ? 'border-white/10 bg-zinc-800/70'
+                                                        : 'border-rose-500/50 bg-rose-950/30'
+                                                    }`}
+                                                  >
                                                     <p className="text-zinc-300 text-[10px] font-medium">Пом. {room.name}</p>
                                                     {renderLocationActions('room', room.id, `Пом. ${room.name}`)}
                                                     {roomSquares}
@@ -1121,8 +1353,19 @@ export default function ObjectSettingsTabRefactored() {
                                                 );
                                               }).filter(Boolean);
                                               if (!apartmentSquares && apartmentRoomCards.length === 0) return null;
+                                              const apartmentHasBlocks = (
+                                                hasLocationBlocks('apartment', apartment.id)
+                                                || (roomsByApartment.get(apartment.id) || []).some((room) => hasLocationBlocks('room', room.id))
+                                              );
                                               return (
-                                                <div key={apartment.id} className="rounded border border-white/10 bg-black/20 px-2 py-1.5 space-y-1.5">
+                                                <div
+                                                  key={apartment.id}
+                                                  className={`rounded border px-2 py-1.5 space-y-1.5 ${
+                                                    apartmentHasBlocks
+                                                      ? 'border-white/10 bg-black/20'
+                                                      : 'border-rose-500/50 bg-rose-950/20'
+                                                  }`}
+                                                >
                                                   <p className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</p>
                                                   {apartmentSquares && (
                                                     <>
@@ -1163,6 +1406,74 @@ export default function ObjectSettingsTabRefactored() {
           );
         })}
       </div>
+
+      {summaryEditOpen && (
+        <div className="modal-backdrop z-50" onClick={closeSummaryEditModal} role="dialog" aria-modal="true">
+          <div className="card p-5 max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-white text-lg font-medium">Изменить позицию для завершения</h3>
+            <p className="text-zinc-400 text-sm mt-1">
+              {summaryEditTarget?.objectName
+                ? `${summaryEditTarget.objectName} · Найдено блоков: ${summaryEditTarget.slotIds.length}`
+                : 'Выберите новые параметры позиции. Изменения применяются к отфильтрованным блокам.'}
+            </p>
+
+            <form className="space-y-3 mt-4" onSubmit={handleApplySummaryEdit}>
+              <div>
+                <label className="label">Название</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={summaryEditName}
+                  onChange={(e) => setSummaryEditName(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="label">Система</label>
+                  <select
+                    value={summaryEditSystemId}
+                    onChange={(e) => setSummaryEditSystemId(e.target.value)}
+                    className="input"
+                    required
+                  >
+                    <option value="">— Выберите систему —</option>
+                    {data.systems.map((system) => (
+                      <option key={system.id} value={system.id}>{system.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Категория</label>
+                  <select
+                    value={summaryEditCategoryId}
+                    onChange={(e) => setSummaryEditCategoryId(e.target.value)}
+                    className="input"
+                  >
+                    <option value="">Без категории</option>
+                    {data.categories.map((category) => (
+                      <option key={category.id} value={category.id}>{category.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  className="btn-secondary text-sm"
+                  onClick={closeSummaryEditModal}
+                  disabled={summaryEditBusy}
+                >
+                  Отмена
+                </button>
+                <button type="submit" className="btn-primary text-sm" disabled={summaryEditBusy}>
+                  {summaryEditBusy ? 'Применение…' : 'Применить'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {slotModalOpen && (
         <div className="modal-backdrop z-50" onClick={closeSlotModal} role="dialog" aria-modal="true">

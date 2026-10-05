@@ -431,6 +431,10 @@ export const settings = {
       request(`/api/settings/object-settings/location-systems/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
     deleteLocationSystem: (id) =>
       request(`/api/settings/object-settings/location-systems/${id}`, { method: 'DELETE' }),
+    deleteLocationBlocks: (locationKind, locationId) =>
+      request(`/api/settings/object-settings/locations/${encodeURIComponent(locationKind)}/${locationId}/blocks`, {
+        method: 'DELETE',
+      }),
     materialSuggestions: (systemId, q = '', categoryId = null) => {
       const params = new URLSearchParams();
       params.set('system_id', String(systemId));
@@ -438,6 +442,11 @@ export const settings = {
       if (categoryId) params.set('category_id', String(categoryId));
       return request(`/api/settings/object-settings/material-suggestions?${params.toString()}`);
     },
+    bulkRenameEntry: (body) =>
+      request('/api/settings/object-settings/entries/bulk-rename', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
     addMaterial: (locationSystemId, body) =>
       request(`/api/settings/object-settings/location-systems/${locationSystemId}/materials`, {
         method: 'POST',

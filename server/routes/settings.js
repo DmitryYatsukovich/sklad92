@@ -1241,6 +1241,21 @@ router.delete('/object-settings/location-systems/:id', requirePermission('can_se
   res.json({ ok: true });
 });
 
+router.delete('/object-settings/locations/:locationKind/:locationId/blocks', requirePermission('can_settings_work'), async (req, res) => {
+  const locationKind = String(req.params.locationKind || '').trim();
+  const locationId = parseId(req.params.locationId);
+  if (!locationId || !['apartment', 'room'].includes(locationKind)) {
+    return res.status(400).json({ error: 'Неверные данные' });
+  }
+  const location = await loadLocationByKind(pool, locationKind, locationId);
+  if (!location) return res.status(404).json({ error: 'Локация не найдена' });
+  const removed = await pool.query(
+    'DELETE FROM work_location_systems WHERE location_kind = $1 AND location_id = $2 RETURNING id',
+    [locationKind, locationId],
+  );
+  res.json({ ok: true, deleted_blocks: removed.rowCount });
+});
+
 router.get('/object-settings/material-suggestions', requirePermission('can_settings_work'), async (req, res) => {
   const systemId = parseId(req.query.system_id);
   const q = String(req.query.q || '').trim();
@@ -1273,6 +1288,226 @@ router.get('/object-settings/material-suggestions', requirePermission('can_setti
     params,
   )).rows;
   res.json(rows);
+});
+
+router.post('/object-settings/entries/bulk-rename', requirePermission('can_settings_work'), async (req, res) => {
+  const sourceName = parseRequiredName(req.body?.source_name);
+  const nextName = parseRequiredName(req.body?.name);
+  const targetSystemId = parseId(req.body?.system_id);
+  const targetCategoryId = req.body?.category_id == null || req.body?.category_id === ''
+    ? null
+    : parseId(req.body?.category_id);
+  const slotIds = Array.isArray(req.body?.slot_ids)
+    ? [...new Set(req.body.slot_ids.map((v) => parseId(v)).filter(Boolean))]
+    : [];
+  if (!sourceName || !nextName || !targetSystemId || !slotIds.length) {
+    return res.status(400).json({ error: 'Неверные данные' });
+  }
+  if (req.body?.category_id != null && req.body?.category_id !== '' && !targetCategoryId) {
+    return res.status(400).json({ error: 'Неверная категория' });
+  }
+
+  const system = (await pool.query('SELECT id FROM material_systems WHERE id = $1', [targetSystemId])).rows[0];
+  if (!system) return res.status(400).json({ error: 'Система не найдена' });
+  if (targetCategoryId) {
+    const category = (await pool.query('SELECT id FROM material_categories WHERE id = $1', [targetCategoryId])).rows[0];
+    if (!category) return res.status(400).json({ error: 'Категория не найдена' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const sourceSlots = (await client.query(
+      `SELECT id, location_kind, location_id
+       FROM work_location_systems
+       WHERE id = ANY($1::int[])`,
+      [slotIds],
+    )).rows;
+    if (!sourceSlots.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Блоки для изменения не найдены' });
+    }
+    const sourceSlotIds = sourceSlots.map((row) => row.id);
+
+    const [
+      materialEntries,
+      equipmentEntries,
+      workEntries,
+    ] = await Promise.all([
+      client.query(
+        `SELECT lm.id, lm.location_system_id, lm.material_id, lm.quantity,
+                ls.location_kind, ls.location_id
+         FROM work_location_system_materials lm
+         JOIN work_location_systems ls ON ls.id = lm.location_system_id
+         JOIN materials m ON m.id = lm.material_id
+         WHERE lm.location_system_id = ANY($1::int[])
+           AND LOWER(TRIM(m.name)) = LOWER(TRIM($2))`,
+        [sourceSlotIds, sourceName],
+      ),
+      client.query(
+        `SELECT eq.id, eq.location_system_id, eq.quantity,
+                ls.location_kind, ls.location_id
+         FROM work_location_system_equipment eq
+         JOIN work_location_systems ls ON ls.id = eq.location_system_id
+         WHERE eq.location_system_id = ANY($1::int[])
+           AND LOWER(TRIM(eq.name)) = LOWER(TRIM($2))`,
+        [sourceSlotIds, sourceName],
+      ),
+      client.query(
+        `SELECT w.id, w.location_system_id, w.quantity,
+                ls.location_kind, ls.location_id
+         FROM work_location_system_works w
+         JOIN work_location_systems ls ON ls.id = w.location_system_id
+         WHERE w.location_system_id = ANY($1::int[])
+           AND LOWER(TRIM(w.name)) = LOWER(TRIM($2))`,
+        [sourceSlotIds, sourceName],
+      ),
+    ]);
+
+    const totalMatched = materialEntries.rowCount + equipmentEntries.rowCount + workEntries.rowCount;
+    if (!totalMatched) {
+      await client.query('COMMIT');
+      return res.json({
+        ok: true,
+        matched_entries: 0,
+        updated_entries: 0,
+        converted_material_entries: 0,
+        created_target_blocks: 0,
+      });
+    }
+
+    const targetSlotsCache = new Map();
+    let createdTargetBlocks = 0;
+    const touchedLocations = new Set();
+
+    const resolveTargetSlotId = async (locationKind, locationId) => {
+      const key = `${locationKind}:${locationId}`;
+      if (targetSlotsCache.has(key)) return targetSlotsCache.get(key);
+      const existing = (await client.query(
+        `SELECT id
+         FROM work_location_systems
+         WHERE location_kind = $1
+           AND location_id = $2
+           AND system_id = $3
+           AND (($4::int IS NULL AND category_id IS NULL) OR category_id = $4)
+         ORDER BY id
+         LIMIT 1`,
+        [locationKind, locationId, targetSystemId, targetCategoryId],
+      )).rows[0];
+      if (existing?.id) {
+        targetSlotsCache.set(key, existing.id);
+        return existing.id;
+      }
+      const inserted = (await client.query(
+        `INSERT INTO work_location_systems (location_kind, location_id, system_id, category_id)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id`,
+        [locationKind, locationId, targetSystemId, targetCategoryId],
+      )).rows[0];
+      createdTargetBlocks += 1;
+      targetSlotsCache.set(key, inserted.id);
+      return inserted.id;
+    };
+
+    let updatedEquipment = 0;
+    for (const row of equipmentEntries.rows) {
+      const targetSlotId = await resolveTargetSlotId(row.location_kind, row.location_id);
+      await client.query(
+        `UPDATE work_location_system_equipment
+         SET location_system_id = $1, name = $2, updated_at = NOW()
+         WHERE id = $3`,
+        [targetSlotId, nextName, row.id],
+      );
+      updatedEquipment += 1;
+      touchedLocations.add(`${row.location_kind}:${row.location_id}`);
+    }
+
+    let updatedWorks = 0;
+    for (const row of workEntries.rows) {
+      const targetSlotId = await resolveTargetSlotId(row.location_kind, row.location_id);
+      await client.query(
+        `UPDATE work_location_system_works
+         SET location_system_id = $1, name = $2, updated_at = NOW()
+         WHERE id = $3`,
+        [targetSlotId, nextName, row.id],
+      );
+      updatedWorks += 1;
+      touchedLocations.add(`${row.location_kind}:${row.location_id}`);
+    }
+
+    const exactMaterial = (await client.query(
+      `SELECT id
+       FROM materials
+       WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))
+         AND system_id = $2
+         AND (($3::int IS NULL AND category_id IS NULL) OR category_id = $3)
+       ORDER BY (parent_material_id IS NOT NULL), id
+       LIMIT 1`,
+      [nextName, targetSystemId, targetCategoryId],
+    )).rows[0];
+    const replacementMaterialId = exactMaterial?.id || null;
+
+    let updatedMaterials = 0;
+    let convertedMaterials = 0;
+    for (const row of materialEntries.rows) {
+      const targetSlotId = await resolveTargetSlotId(row.location_kind, row.location_id);
+      if (replacementMaterialId) {
+        const duplicate = (await client.query(
+          `SELECT id
+           FROM work_location_system_materials
+           WHERE location_system_id = $1
+             AND material_id = $2
+             AND id <> $3
+           LIMIT 1`,
+          [targetSlotId, replacementMaterialId, row.id],
+        )).rows[0];
+        if (duplicate?.id) {
+          await client.query(
+            `UPDATE work_location_system_materials
+             SET quantity = quantity + $1, updated_at = NOW()
+             WHERE id = $2`,
+            [row.quantity, duplicate.id],
+          );
+          await client.query('DELETE FROM work_location_system_materials WHERE id = $1', [row.id]);
+        } else {
+          await client.query(
+            `UPDATE work_location_system_materials
+             SET location_system_id = $1, material_id = $2, updated_at = NOW()
+             WHERE id = $3`,
+            [targetSlotId, replacementMaterialId, row.id],
+          );
+        }
+        updatedMaterials += 1;
+      } else {
+        await client.query(
+          `INSERT INTO work_location_system_equipment (location_system_id, name, quantity)
+           VALUES ($1, $2, $3)`,
+          [targetSlotId, nextName, row.quantity],
+        );
+        await client.query('DELETE FROM work_location_system_materials WHERE id = $1', [row.id]);
+        convertedMaterials += 1;
+      }
+      touchedLocations.add(`${row.location_kind}:${row.location_id}`);
+    }
+
+    await client.query('COMMIT');
+    res.json({
+      ok: true,
+      matched_entries: totalMatched,
+      updated_entries: updatedEquipment + updatedWorks + updatedMaterials + convertedMaterials,
+      updated_material_entries: updatedMaterials,
+      converted_material_entries: convertedMaterials,
+      updated_equipment_entries: updatedEquipment,
+      updated_work_entries: updatedWorks,
+      created_target_blocks: createdTargetBlocks,
+      affected_locations: touchedLocations.size,
+    });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 });
 
 router.post('/object-settings/location-systems/:id/materials', requirePermission('can_settings_work'), async (req, res) => {
