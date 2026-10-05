@@ -1169,28 +1169,23 @@ router.post('/object-settings/location-systems', requirePermission('can_settings
     const category = (await pool.query('SELECT id FROM material_categories WHERE id = $1', [categoryId])).rows[0];
     if (!category) return res.status(400).json({ error: 'Категория не найдена' });
   }
-  try {
-    const created = (await pool.query(
-      `INSERT INTO work_location_systems (location_kind, location_id, system_id, category_id)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, location_kind, location_id, system_id, category_id, created_at, updated_at`,
-      [locationKind, locationId, systemId, categoryId],
-    )).rows[0];
-    const withMeta = (await pool.query(
-      `SELECT ls.id, ls.location_kind, ls.location_id, ls.system_id, ls.category_id, ls.created_at, ls.updated_at,
-              s.name AS system_name,
-              c.name AS category_name, c.icon_key AS category_icon_key
-       FROM work_location_systems ls
-       JOIN material_systems s ON s.id = ls.system_id
-       LEFT JOIN material_categories c ON c.id = ls.category_id
-       WHERE ls.id = $1`,
-      [created.id],
-    )).rows[0];
-    res.status(201).json(withMeta);
-  } catch (e) {
-    if (e.code === '23505') return res.status(400).json({ error: 'Эта система уже добавлена в локацию' });
-    throw e;
-  }
+  const created = (await pool.query(
+    `INSERT INTO work_location_systems (location_kind, location_id, system_id, category_id)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, location_kind, location_id, system_id, category_id, created_at, updated_at`,
+    [locationKind, locationId, systemId, categoryId],
+  )).rows[0];
+  const withMeta = (await pool.query(
+    `SELECT ls.id, ls.location_kind, ls.location_id, ls.system_id, ls.category_id, ls.created_at, ls.updated_at,
+            s.name AS system_name,
+            c.name AS category_name, c.icon_key AS category_icon_key
+     FROM work_location_systems ls
+     JOIN material_systems s ON s.id = ls.system_id
+     LEFT JOIN material_categories c ON c.id = ls.category_id
+     WHERE ls.id = $1`,
+    [created.id],
+  )).rows[0];
+  res.status(201).json(withMeta);
 });
 
 router.put('/object-settings/location-systems/:id', requirePermission('can_settings_work'), async (req, res) => {
@@ -1217,15 +1212,6 @@ router.put('/object-settings/location-systems/:id', requirePermission('can_setti
     const category = (await pool.query('SELECT id FROM material_categories WHERE id = $1', [categoryId])).rows[0];
     if (!category) return res.status(400).json({ error: 'Категория не найдена' });
   }
-  const duplicate = (await pool.query(
-    `SELECT id
-     FROM work_location_systems
-     WHERE location_kind = $1 AND location_id = $2 AND system_id = $3 AND id <> $4
-     LIMIT 1`,
-    [current.location_kind, current.location_id, systemId, id],
-  )).rows[0];
-  if (duplicate) return res.status(400).json({ error: 'Эта система уже добавлена в локацию' });
-
   const updated = (await pool.query(
     `UPDATE work_location_systems
      SET system_id = $1, category_id = $2, updated_at = NOW()

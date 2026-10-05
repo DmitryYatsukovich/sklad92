@@ -177,6 +177,7 @@ const statements = [
     CHECK (location_kind IN ('apartment', 'room')),
     UNIQUE (location_kind, location_id, system_id)
   )`,
+  `ALTER TABLE work_location_systems DROP CONSTRAINT IF EXISTS work_location_systems_location_kind_location_id_system_id_key`,
   `CREATE INDEX IF NOT EXISTS idx_wls_location ON work_location_systems(location_kind, location_id)`,
   `CREATE INDEX IF NOT EXISTS idx_wls_system ON work_location_systems(system_id)`,
   `CREATE TABLE IF NOT EXISTS work_location_system_materials (

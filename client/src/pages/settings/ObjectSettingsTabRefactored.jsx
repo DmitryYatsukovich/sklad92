@@ -77,6 +77,9 @@ export default function ObjectSettingsTabRefactored() {
   const [selectedMaterial, setSelectedMaterial] = useState(null);
   const [entryQuantity, setEntryQuantity] = useState('1');
   const [slotBusy, setSlotBusy] = useState(false);
+  const [copiedSlotTemplate, setCopiedSlotTemplate] = useState(null);
+  const [pasteBusyKey, setPasteBusyKey] = useState('');
+  const [notice, setNotice] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
@@ -238,6 +241,7 @@ export default function ObjectSettingsTabRefactored() {
         name: row.material_name,
         quantity: Number(row.quantity || 0),
         unit: row.material_unit || '',
+        materialId: row.material_id,
       });
     });
     (equipmentBySlot.get(slotId) || []).forEach((row) => {
@@ -535,9 +539,71 @@ export default function ObjectSettingsTabRefactored() {
     }
   };
 
+  const handleCopyActiveSlot = () => {
+    if (!activeSlot?.id) return;
+    const entries = getSlotEntries(activeSlot.id).map((entry) => ({
+      source: entry.source,
+      name: entry.name,
+      quantity: Number(entry.quantity || 0),
+      materialId: entry.materialId || null,
+    }));
+    setCopiedSlotTemplate({
+      systemId: activeSlot.system_id,
+      systemName: activeSlot.system_name,
+      categoryId: activeSlot.category_id ?? null,
+      categoryName: activeSlot.category_name || '',
+      entries,
+    });
+    setNotice(`Блок «${activeSlot.system_name}${activeSlot.category_name ? ` • ${activeSlot.category_name}` : ''}» скопирован.`);
+    setError('');
+  };
+
+  const handlePasteSlotToLocation = async (locationKind, locationId, title) => {
+    if (!copiedSlotTemplate?.systemId) return;
+    const key = `${locationKind}:${locationId}`;
+    setPasteBusyKey(key);
+    setError('');
+    setNotice('');
+    try {
+      const created = await settingsApi.objectSettings.createLocationSystem({
+        location_kind: locationKind,
+        location_id: locationId,
+        system_id: copiedSlotTemplate.systemId,
+        category_id: copiedSlotTemplate.categoryId,
+      });
+      for (const entry of copiedSlotTemplate.entries || []) {
+        const quantity = Number(entry.quantity || 0);
+        if (!entry.name || !Number.isFinite(quantity) || quantity <= 0) continue;
+        if (entry.source === 'material' && entry.materialId) {
+          await settingsApi.objectSettings.addMaterial(created.id, {
+            material_id: entry.materialId,
+            quantity,
+          });
+        } else if (entry.source === 'work') {
+          await settingsApi.objectSettings.addWork(created.id, {
+            name: entry.name,
+            quantity,
+          });
+        } else {
+          await settingsApi.objectSettings.addEquipment(created.id, {
+            name: entry.name,
+            quantity,
+          });
+        }
+      }
+      setNotice(`Блок «${copiedSlotTemplate.systemName}» вставлен в «${title}».`);
+      await load();
+    } catch (err) {
+      setError(err.message || 'Не удалось вставить блок');
+    } finally {
+      setPasteBusyKey('');
+    }
+  };
+
   const renderSystemSquares = (locationKind, locationId, title) => {
     const key = `${locationKind}:${locationId}`;
     const slots = slotsByLocation.get(key) || [];
+    const isPastingHere = pasteBusyKey === key;
     return (
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
@@ -559,6 +625,17 @@ export default function ObjectSettingsTabRefactored() {
           >
             + Система
           </button>
+          {copiedSlotTemplate && (
+            <button
+              type="button"
+              onClick={() => handlePasteSlotToLocation(locationKind, locationId, title)}
+              className="w-20 h-20 rounded-md border border-dashed border-sky-400/40 bg-sky-900/20 hover:bg-sky-800/30 text-sky-100 text-[11px]"
+              disabled={!!pasteBusyKey || slotBusy}
+              title={`Вставить блок: ${copiedSlotTemplate.systemName}`}
+            >
+              {isPastingHere ? 'Вставка…' : 'Вставить'}
+            </button>
+          )}
         </div>
       </div>
     );
@@ -579,9 +656,10 @@ export default function ObjectSettingsTabRefactored() {
   return (
     <div className="space-y-4">
       <p className="text-zinc-400 text-sm">
-        План монтажа по объектам: добавляйте системы в квартиры и помещения, затем в каждой системе фиксируйте нужные позиции и количество.
+        План монтажа по объектам: добавляйте системы в квартиры и помещения, затем в каждой системе фиксируйте нужные позиции и количество. Можно создавать одинаковые блоки и быстро копировать их в другие локации.
       </p>
       {error && <p className="text-rose-400 text-sm">{error}</p>}
+      {notice && <p className="text-emerald-300 text-sm">{notice}</p>}
 
       <div className="space-y-4">
         {sortedObjects.map((obj) => {
@@ -707,9 +785,19 @@ export default function ObjectSettingsTabRefactored() {
                 </p>
               </div>
               {activeSlot && (
-                <button type="button" onClick={handleDeleteSlot} className="btn-ghost text-rose-300 text-sm" disabled={slotBusy}>
-                  Удалить блок
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyActiveSlot}
+                    className="btn-secondary text-sm"
+                    disabled={slotBusy}
+                  >
+                    Копировать блок
+                  </button>
+                  <button type="button" onClick={handleDeleteSlot} className="btn-ghost text-rose-300 text-sm" disabled={slotBusy}>
+                    Удалить блок
+                  </button>
+                </div>
               )}
             </div>
 
