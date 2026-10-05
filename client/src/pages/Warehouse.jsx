@@ -28,6 +28,7 @@ import {
   materialRowQuantity,
   materialPartsCount,
   materialGroupSummary,
+  materialGroupParentId,
   materialPartDisplayName,
   materialPartQuantity,
   materialHasStock,
@@ -194,6 +195,8 @@ export default function Warehouse({ user }) {
   const [historyMaterial, setHistoryMaterial] = useState(null);
   const [partsModalMaterial, setPartsModalMaterial] = useState(null);
   const [partsModalStartAdd, setPartsModalStartAdd] = useState(false);
+  const [activePartGroupParts, setActivePartGroupParts] = useState([]);
+  const [activePartGroupLoading, setActivePartGroupLoading] = useState(false);
   const [splitEnabled, setSplitEnabled] = useState(false);
   const [splitSaved, setSplitSaved] = useState(false);
   const [splitParts, setSplitParts] = useState(() => defaultSplitParts(1));
@@ -711,7 +714,38 @@ export default function Warehouse({ user }) {
     setIssueToUserId('');
     setIssueUserQuery('');
     setMoveForm(emptyMaterialForm());
+    setActivePartGroupParts([]);
+    setActivePartGroupLoading(false);
   };
+
+  useEffect(() => {
+    if (!activeMaterial || activeStep !== 'menu' || !isMaterialPart(activeMaterial)) {
+      setActivePartGroupParts([]);
+      setActivePartGroupLoading(false);
+      return undefined;
+    }
+    const parentId = materialGroupParentId(activeMaterial);
+    if (!parentId) {
+      setActivePartGroupParts([]);
+      setActivePartGroupLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setActivePartGroupLoading(true);
+    materialsApi.getParts(parentId)
+      .then((data) => {
+        if (!cancelled) {
+          setActivePartGroupParts(filterPartsInStock(data.parts || []));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setActivePartGroupParts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setActivePartGroupLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeMaterial?.id, activeStep]);
 
   const openMoveStep = () => {
     if (!activeMaterial) return;
@@ -2485,7 +2519,45 @@ export default function Warehouse({ user }) {
             {!isMaterialGroupRow(activeMaterial) && (
               <p className="text-2xs text-zinc-500 mb-3">{locationLabel(activeMaterial)}</p>
             )}
-            <MaterialStockSummary material={activeMaterial} className="mb-4" />
+            <MaterialStockSummary
+              material={activeMaterial}
+              stockLabel={isMaterialPart(activeMaterial) ? 'Количество этой части' : 'На складе'}
+              className="mb-4"
+            />
+            {(() => {
+              if (!isMaterialPart(activeMaterial)) return null;
+              const groupInfo = materialGroupSummary(activeMaterial);
+              if (!groupInfo) return null;
+              const otherParts = activePartGroupParts.filter((part) => part.id !== activeMaterial.id);
+              return (
+                <div className="mb-4 rounded-lg border border-white/10 bg-white/5 p-3 text-left">
+                  <p className="text-2xs text-zinc-400 mb-2">
+                    Всего на складе:{' '}
+                    <span className="text-zinc-100 tabular-nums">{formatSumQty(groupInfo.totalQty)} {groupInfo.unit || ''}</span>
+                  </p>
+                  <p className="text-2xs text-zinc-500 mb-1">Остальные части:</p>
+                  {activePartGroupLoading && (
+                    <p className="text-2xs text-zinc-500">Загрузка…</p>
+                  )}
+                  {!activePartGroupLoading && otherParts.length > 0 && (
+                    <ul className="space-y-1 max-h-24 overflow-y-auto">
+                      {otherParts.map((part) => (
+                        <li key={part.id} className="text-2xs text-zinc-300">
+                          {part.part_label || `Часть ${part.part_index}`}
+                          {' — '}
+                          <span className="tabular-nums">{formatSumQty(part.quantity)}</span>
+                          {part.unit ? ` ${part.unit}` : ''}
+                          <span className="text-zinc-500"> · {locationLabel(part)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {!activePartGroupLoading && otherParts.length === 0 && (
+                    <p className="text-2xs text-zinc-500">Других частей нет</p>
+                  )}
+                </div>
+              );
+            })()}
             {error && <p className="text-red-400 text-xs mb-3">{error}</p>}
             <div className="flex flex-col gap-2">
               <button type="button" onClick={() => setActiveStep('add')} className="btn-primary w-full py-2.5">
