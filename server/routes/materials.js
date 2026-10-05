@@ -802,12 +802,6 @@ router.put('/:id', requirePermission('can_warehouse'), async (req, res) => {
       'SELECT 1 FROM materials WHERE parent_material_id = $1 LIMIT 1',
       [id],
     )).rowCount > 0;
-    if (hasChildren && (object_id !== undefined || warehouse_id !== undefined || rack_id !== undefined)) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({
-        error: 'У группового материала место хранения задаётся для каждой части отдельно',
-      });
-    }
     if (hasChildren && quantity !== undefined) {
       await client.query('ROLLBACK');
       return res.status(400).json({
@@ -964,6 +958,7 @@ router.put('/:id', requirePermission('can_warehouse'), async (req, res) => {
       || category_id !== undefined
       || system_id !== undefined
       || organization_id !== undefined
+      || (hasChildren && (object_id !== undefined || warehouse_id !== undefined || rack_id !== undefined))
     ) {
       const parentId = exists.parent_material_id || (hasChildren ? id : null);
       if (parentId) {
@@ -993,6 +988,10 @@ router.put('/:id', requirePermission('can_warehouse'), async (req, res) => {
         if (organization_id !== undefined) {
           childFields.push(`organization_id = $${ci++}`);
           childVals.push(refs.organizationId);
+        }
+        if (hasChildren && (object_id !== undefined || warehouse_id !== undefined || rack_id !== undefined)) {
+          childFields.push(`object_id = $${ci++}`, `warehouse_id = $${ci++}`, `rack_id = $${ci++}`);
+          childVals.push(loc.object_id, loc.warehouse_id, loc.rack_id);
         }
         if (childFields.length) {
           childFields.push('updated_at = NOW()');

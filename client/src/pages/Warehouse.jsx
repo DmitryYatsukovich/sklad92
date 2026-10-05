@@ -562,9 +562,13 @@ export default function Warehouse({ user }) {
           includePartLabel: isPart,
         });
         if (isGroup) {
-          delete payload.object_id;
-          delete payload.warehouse_id;
-          delete payload.rack_id;
+          const locationSelected = [form.object_id, form.warehouse_id, form.rack_id]
+            .some((v) => String(v || '').trim() !== '');
+          if (!locationSelected) {
+            delete payload.object_id;
+            delete payload.warehouse_id;
+            delete payload.rack_id;
+          }
         }
         await materialsApi.update(editing.id, payload);
       }
@@ -1833,6 +1837,20 @@ export default function Warehouse({ user }) {
                 const shownExpanded = expandedManual || (hasActiveFilters && filteredChildParts.length > 0);
                 const partsLoading = loadingPartsIds.has(m.id);
                 const partsCount = materialPartsCount(m, childParts);
+                const joinDistinctBy = (rows, key) => {
+                  const seen = new Set();
+                  const values = [];
+                  for (const row of rows || []) {
+                    const value = String(row?.[key] || '').trim();
+                    if (!value || seen.has(value)) continue;
+                    seen.add(value);
+                    values.push(value);
+                  }
+                  return values.join(', ');
+                };
+                const groupObjectName = m.group_object_names_label || joinDistinctBy(childParts, 'object_name') || '—';
+                const groupWarehouseName = m.group_warehouse_names_label || joinDistinctBy(childParts, 'warehouse_name') || '—';
+                const groupRackName = m.group_rack_names_label || joinDistinctBy(childParts, 'rack_name') || '—';
 
                 const renderRow = (row, { isChild = false, childIndex } = {}) => {
                   const rowUnitPrice = Number(row.price) || unitPrice;
@@ -1929,14 +1947,23 @@ export default function Warehouse({ user }) {
                           )}
                         </button>
                       </td>
-                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.object_name || ''}>
-                        {row.object_name || '—'}
+                      <td
+                        className="text-zinc-500 max-w-[10rem] truncate text-2xs"
+                        title={!isChild && isGroup ? groupObjectName : (row.object_name || '')}
+                      >
+                        {(!isChild && isGroup ? groupObjectName : (row.object_name || '—'))}
                       </td>
-                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.warehouse_name || ''}>
-                        {row.warehouse_name || '—'}
+                      <td
+                        className="text-zinc-500 max-w-[10rem] truncate text-2xs"
+                        title={!isChild && isGroup ? groupWarehouseName : (row.warehouse_name || '')}
+                      >
+                        {(!isChild && isGroup ? groupWarehouseName : (row.warehouse_name || '—'))}
                       </td>
-                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.rack_name || ''}>
-                        {row.rack_name || '—'}
+                      <td
+                        className="text-zinc-500 max-w-[10rem] truncate text-2xs"
+                        title={!isChild && isGroup ? groupRackName : (row.rack_name || '')}
+                      >
+                        {(!isChild && isGroup ? groupRackName : (row.rack_name || '—'))}
                       </td>
                       <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.system_name || ''}>
                         {row.system_name || '—'}
@@ -2136,7 +2163,7 @@ export default function Warehouse({ user }) {
                   </div>
                 )}
               </div>
-              {((!editing && !splitEnabled) || (editing && isMaterialPart(editing)) || (editing && !isMaterialGroupRow(editing) && !isMaterialPart(editing) && !splitEnabled)) && (
+              {((!editing && !splitEnabled) || (editing && isMaterialPart(editing)) || (editing && !isMaterialPart(editing) && !splitEnabled)) && (
                 <MaterialLocationFields
                   catalog={catalog}
                   form={form}
@@ -2247,7 +2274,8 @@ export default function Warehouse({ user }) {
               )}
               {editing && isMaterialGroupRow(editing) && (
                 <p className="text-slate-500 text-xs">
-                  Место и количество задаются для каждой части — раскройте строку в таблице и нажмите «Изм» у нужной части.
+                  Для группы можно задать общий объект/склад/стеллаж — он применится ко всем частям.
+                  Также каждую часть можно редактировать отдельно через «Изм» в раскрытой группе.
                 </p>
               )}
               <div className="grid grid-cols-2 gap-4">

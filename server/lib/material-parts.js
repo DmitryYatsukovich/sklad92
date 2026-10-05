@@ -83,9 +83,36 @@ export const MATERIAL_GROUP_LOCATIONS_SUBQUERY = `
      LEFT JOIN warehouse_objects o ON o.id = c.object_id
      LEFT JOIN warehouses w ON w.id = c.warehouse_id
      LEFT JOIN warehouse_racks r ON r.id = c.rack_id
-     WHERE c.parent_material_id = m.id AND COALESCE(c.quantity, 0) > 0
+     WHERE c.parent_material_id = COALESCE(m.parent_material_id, m.id) AND COALESCE(c.quantity, 0) > 0
    ) t
    WHERE loc IS NOT NULL)`;
+
+/** Подзапрос: уникальные объекты частей группы через запятую */
+export const MATERIAL_GROUP_OBJECTS_SUBQUERY = `
+  (SELECT NULLIF(string_agg(DISTINCT o.name, ', ' ORDER BY o.name), '')
+   FROM materials c
+   LEFT JOIN warehouse_objects o ON o.id = c.object_id
+   WHERE c.parent_material_id = COALESCE(m.parent_material_id, m.id)
+     AND COALESCE(c.quantity, 0) > 0
+     AND o.name IS NOT NULL)`;
+
+/** Подзапрос: уникальные склады частей группы через запятую */
+export const MATERIAL_GROUP_WAREHOUSES_SUBQUERY = `
+  (SELECT NULLIF(string_agg(DISTINCT w.name, ', ' ORDER BY w.name), '')
+   FROM materials c
+   LEFT JOIN warehouses w ON w.id = c.warehouse_id
+   WHERE c.parent_material_id = COALESCE(m.parent_material_id, m.id)
+     AND COALESCE(c.quantity, 0) > 0
+     AND w.name IS NOT NULL)`;
+
+/** Подзапрос: уникальные стеллажи частей группы через запятую */
+export const MATERIAL_GROUP_RACKS_SUBQUERY = `
+  (SELECT NULLIF(string_agg(DISTINCT r.name, ', ' ORDER BY r.name), '')
+   FROM materials c
+   LEFT JOIN warehouse_racks r ON r.id = c.rack_id
+   WHERE c.parent_material_id = COALESCE(m.parent_material_id, m.id)
+     AND COALESCE(c.quantity, 0) > 0
+     AND r.name IS NOT NULL)`;
 
 export const MATERIAL_GROUP_SELECT_EXTRA = `,
   m.parent_material_id,
@@ -97,7 +124,10 @@ export const MATERIAL_GROUP_SELECT_EXTRA = `,
    WHERE c.parent_material_id = COALESCE(m.parent_material_id, m.id) AND COALESCE(c.quantity, 0) > 0) AS parts_count,
   (SELECT COALESCE(SUM(c.quantity), 0) FROM materials c
    WHERE c.parent_material_id = COALESCE(m.parent_material_id, m.id)) AS group_total_quantity,
-  ${MATERIAL_GROUP_LOCATIONS_SUBQUERY} AS group_locations_label`;
+  ${MATERIAL_GROUP_LOCATIONS_SUBQUERY} AS group_locations_label,
+  ${MATERIAL_GROUP_OBJECTS_SUBQUERY} AS group_object_names_label,
+  ${MATERIAL_GROUP_WAREHOUSES_SUBQUERY} AS group_warehouse_names_label,
+  ${MATERIAL_GROUP_RACKS_SUBQUERY} AS group_rack_names_label`;
 
 export const MATERIAL_GROUP_JOINS = `
   LEFT JOIN materials pmap ON pmap.id = m.parent_material_id`;
