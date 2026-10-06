@@ -45,6 +45,25 @@ function formatDate(iso) {
   });
 }
 
+function parseIssuanceEventTags(rawNote) {
+  const text = String(rawNote || '');
+  const tagRe = /\[\[evt:([a-z_]+);([^\]]*)\]\]/gi;
+  const events = [];
+  let match;
+  while ((match = tagRe.exec(text)) !== null) {
+    const [, type, payloadText] = match;
+    const payload = {};
+    for (const chunk of String(payloadText || '').split(';')) {
+      const [k, v] = chunk.split('=');
+      if (!k) continue;
+      payload[k.trim()] = v ? decodeURIComponent(v) : '';
+    }
+    events.push({ type: String(type || '').toLowerCase(), payload });
+  }
+  const cleanNote = text.replace(tagRe, '').trim();
+  return { events, cleanNote };
+}
+
 function formatSumMoney(n) {
   const s = (Number(n) || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return `${s} ₽`;
@@ -113,18 +132,27 @@ function issuanceHistoryLines(row) {
   const issuer = row.issued_by_name || row.issued_by_login || '—';
   const recipient = row.issued_to_name || row.issued_to_login || '—';
   const qtyLabel = `${formatSumQty(row.quantity)} ${row.unit || 'шт'}`;
-  const note = asText(row.note).trim();
-  const transferLike = /передач/i.test(note);
+  const { events, cleanNote } = parseIssuanceEventTags(row.note);
   const lines = [
-    transferLike
-      ? `Передал (${qtyLabel}) — кому передал: ${recipient}`
-      : `Выдал (${qtyLabel}) — кому выдал: ${recipient}`,
+    `Выдал (${qtyLabel}) — кому выдал: ${recipient} · ${formatDate(row.issued_at)}`,
   ];
-  if ((Number(row.returned_quantity) || 0) > 0) {
-    lines.push(`Вернул на склад (${formatSumQty(row.returned_quantity)} ${row.unit || 'шт'}) — ${recipient}`);
+  if (issuer && issuer !== '—') {
+    lines.push(`Кем выдан: ${issuer}`);
   }
-  if (note) lines.push(`Прим.: ${note}`);
-  if (issuer && issuer !== '—') lines.push(`Оформил: ${issuer}`);
+  for (const evt of events) {
+    const qty = evt.payload.qty ? `${formatSumQty(evt.payload.qty)} ${row.unit || 'шт'}` : null;
+    const at = evt.payload.at ? formatDate(evt.payload.at) : '—';
+    if (evt.type === 'transfer') {
+      const to = evt.payload.to || 'пользователь';
+      lines.push(`Передал (${qty || '—'}) — кому передал: ${to} · ${at}`);
+    } else if (evt.type === 'return') {
+      lines.push(`Вернул на склад (${qty || '—'}) · ${at}`);
+    }
+  }
+  if (events.length === 0 && (Number(row.returned_quantity) || 0) > 0) {
+    lines.push(`Вернул на склад (${formatSumQty(row.returned_quantity)} ${row.unit || 'шт'}) · ${formatDate(row.returned_at || row.updated_at)}`);
+  }
+  if (cleanNote) lines.push(`Прим.: ${cleanNote}`);
   return lines;
 }
 
@@ -272,9 +300,15 @@ export default function Issuance({ user }) {
     || !!user?.can_issuance_all
     || !!user?.can_issuance_all_received;
   const scopedIssuances = useMemo(() => {
-    if (canViewAllIssuances || canViewAllIssued || canViewAllReceived) return mergedIssuances;
     const uid = Number(user?.id || 0);
     if (!uid) return [];
+    if (canViewAllIssuances || (canViewAllIssued && canViewAllReceived)) return mergedIssuances;
+    if (!canViewAllIssued && canViewAllReceived) {
+      return mergedIssuances.filter((row) => Number(row?.issued_by_user_id || 0) === uid);
+    }
+    if (canViewAllIssued && !canViewAllReceived) {
+      return mergedIssuances.filter((row) => Number(row?.issued_to_user_id || 0) === uid);
+    }
     return mergedIssuances.filter((row) => {
       const byUser = Number(row?.issued_by_user_id || 0) === uid;
       const toUser = Number(row?.issued_to_user_id || 0) === uid;

@@ -36,6 +36,20 @@ function sendServerWinsConflict(res, row) {
   });
 }
 
+function appendIssuanceEventTag(note, tag) {
+  const base = String(note || '').trim();
+  if (!base) return tag;
+  return `${base}\n${tag}`;
+}
+
+function makeIssuanceEventTag(type, data = {}) {
+  const payload = Object.entries(data)
+    .filter(([, v]) => v != null && v !== '')
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+    .join(';');
+  return `[[evt:${type};${payload}]]`;
+}
+
 // Выдать материал пользователю
 router.post('/issue', async (req, res) => {
   const { material_id, issued_to_user_id, quantity, note } = req.body || {};
@@ -110,7 +124,7 @@ router.post('/return', async (req, res) => {
   try {
     await client.query('BEGIN');
     const iss = (await client.query(
-      'SELECT id, material_id, quantity, returned_quantity, updated_at FROM issuances WHERE id = $1 FOR UPDATE',
+      'SELECT id, material_id, quantity, returned_quantity, note, updated_at FROM issuances WHERE id = $1 FOR UPDATE',
       [issuance_id],
     )).rows[0];
     if (!iss) {
@@ -142,14 +156,21 @@ router.post('/return', async (req, res) => {
     const qtyAfter = parseFloat(upd.rows[0].quantity);
     const newReturned = already + retQty;
 
+    const returnEventTag = makeIssuanceEventTag('return', {
+      qty: retQty,
+      at: new Date().toISOString(),
+    });
+    const nextNote = appendIssuanceEventTag(iss.note, returnEventTag);
+
     const issUpd = await client.query(
       `UPDATE issuances
        SET returned_quantity = $1::numeric,
+           note = $3,
            returned_at = COALESCE(returned_at, NOW()),
            updated_at = NOW()
        WHERE id = $2
        RETURNING returned_quantity, updated_at`,
-      [newReturned, issuance_id],
+      [newReturned, issuance_id, nextNote],
     );
 
     await logQuantityChange(client, {
@@ -190,7 +211,7 @@ router.post('/transfer', async (req, res) => {
   try {
     await client.query('BEGIN');
     const iss = (await client.query(
-      `SELECT i.id, i.material_id, i.issued_to_user_id, i.quantity, i.returned_quantity, i.updated_at,
+      `SELECT i.id, i.material_id, i.issued_to_user_id, i.quantity, i.returned_quantity, i.note, i.updated_at,
               m.name AS material_name, m.unit
        FROM issuances i
        JOIN materials m ON m.id = i.material_id
@@ -238,15 +259,23 @@ router.post('/transfer', async (req, res) => {
       return res.status(404).json({ error: 'Пользователь-получатель не найден' });
     }
 
+    const toName = toUser.display_name || toUser.login || `#${toUser.id}`;
+    const transferEventTag = makeIssuanceEventTag('transfer', {
+      qty,
+      to: toName,
+      at: new Date().toISOString(),
+    });
+    const nextSourceNote = appendIssuanceEventTag(iss.note, transferEventTag);
     const nextReturned = Number(iss.returned_quantity || 0) + qty;
     const sourceUpd = await client.query(
       `UPDATE issuances
        SET returned_quantity = $1::numeric,
+           note = $3,
            returned_at = COALESCE(returned_at, NOW()),
            updated_at = NOW()
        WHERE id = $2
        RETURNING returned_quantity, updated_at`,
-      [nextReturned, issuanceId],
+      [nextReturned, issuanceId, nextSourceNote],
     );
 
     const fromName = fromUser?.display_name || fromUser?.login || `#${iss.issued_to_user_id}`;
@@ -508,11 +537,18 @@ router.get('/issuances', async (req, res) => {
     || !!req.user?.can_issuance_all
     || !!req.user?.can_issuance_all_received;
   const viewerUserId = Number(req.user?.id || req.session?.userId || 0);
-  const restrictToOwnByBoth = !canViewAllByIssued && !canViewAllByReceived;
-  const whereSql = restrictToOwnByBoth
-    ? 'WHERE (i.issued_by_user_id = $1 OR i.issued_to_user_id = $1)'
-    : '';
-  const params = restrictToOwnByBoth ? [viewerUserId] : [];
+  let whereSql = '';
+  let params = [];
+  if (!canViewAllByIssued && !canViewAllByReceived) {
+    whereSql = 'WHERE (i.issued_by_user_id = $1 OR i.issued_to_user_id = $1)';
+    params = [viewerUserId];
+  } else if (!canViewAllByIssued && canViewAllByReceived) {
+    whereSql = 'WHERE i.issued_by_user_id = $1';
+    params = [viewerUserId];
+  } else if (canViewAllByIssued && !canViewAllByReceived) {
+    whereSql = 'WHERE i.issued_to_user_id = $1';
+    params = [viewerUserId];
+  }
   const r = await pool.query(
     `SELECT i.id, i.material_id, i.issued_to_user_id, i.issued_by_user_id,
             i.quantity, i.issued_at, i.returned_at, i.returned_quantity, i.note, i.updated_at,

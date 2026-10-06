@@ -92,7 +92,12 @@ export default function RolesTab() {
 
   const openEdit = (row) => {
     setEditing(row);
-    setForm(roleToForm(row, permissionDefs));
+    const next = roleToForm(row, permissionDefs);
+    if (next.can_issuance_all) {
+      next.can_issuance_all_issued = true;
+      next.can_issuance_all_received = true;
+    }
+    setForm(next);
     setError('');
     setFormOpen(true);
   };
@@ -182,12 +187,20 @@ export default function RolesTab() {
 
   const setIssuanceScope = (allUsers) => {
     if (editing?.is_admin_role) return;
-    setForm((f) => ({ ...f, can_issuance_all_issued: allUsers }));
+    setForm((f) => {
+      const next = { ...f, can_issuance_all_issued: allUsers };
+      next.can_issuance_all = !!(next.can_issuance_all_issued && next.can_issuance_all_received);
+      return next;
+    });
   };
 
   const setIssuanceReceiveScope = (allUsers) => {
     if (editing?.is_admin_role) return;
-    setForm((f) => ({ ...f, can_issuance_all_received: allUsers }));
+    setForm((f) => {
+      const next = { ...f, can_issuance_all_received: allUsers };
+      next.can_issuance_all = !!(next.can_issuance_all_issued && next.can_issuance_all_received);
+      return next;
+    });
   };
 
   const selectAllPerms = (value) => {
@@ -205,8 +218,12 @@ export default function RolesTab() {
     if (!name && !editing?.is_admin_role) return setError('Укажите название роли');
     setError('');
     const body = { name: editing?.is_admin_role ? 'Администратор' : name };
+    const effectiveForm = {
+      ...form,
+      can_issuance_all: !!(form.can_issuance_all_issued && form.can_issuance_all_received),
+    };
     permissionDefs.forEach((p) => {
-      body[p.key] = editing?.is_admin_role ? true : !!form[p.key];
+      body[p.key] = editing?.is_admin_role ? true : !!effectiveForm[p.key];
     });
     try {
       if (editing) await rolesApi.update(editing.id, body);
