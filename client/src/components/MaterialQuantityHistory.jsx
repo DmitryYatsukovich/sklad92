@@ -102,6 +102,8 @@ export default function MaterialQuantityHistory({ material, onClose }) {
                 {(data?.entries || []).map((e) => {
                   const delta = Number(e.delta);
                   const isNeg = delta < 0;
+                  const isReturnEvent = e.kind === 'return' || e.kind === 'return_adjust';
+                  const returnFrom = e.return_from_name || e.return_from_login || '';
                   const partCell = e.part_title
                     || (e.parent_material_id ? `Часть ${e.part_index || '?'}` : '—');
                   return (
@@ -114,6 +116,14 @@ export default function MaterialQuantityHistory({ material, onClose }) {
                       )}
                       <td className="text-xs">
                         <div className="text-zinc-300">{KIND_LABELS[e.kind] || e.kind}</div>
+                        {isReturnEvent && returnFrom && (
+                          <div
+                            className="text-2xs text-zinc-400 truncate max-w-[10rem]"
+                            title={`Возврат от: ${returnFrom}`}
+                          >
+                            Возврат от: {returnFrom}
+                          </div>
+                        )}
                         {e.note && (
                           <div className="text-2xs text-zinc-500 truncate max-w-[10rem]" title={e.note}>
                             {e.note}

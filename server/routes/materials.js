@@ -1163,6 +1163,7 @@ router.get('/:id/quantity-history', requirePermission('can_warehouse'), async (r
   const r = await pool.query(
     `SELECT l.id, l.material_id, l.delta, l.quantity_after, l.kind, l.note, l.created_at, l.issuance_id,
             u.login AS user_login, u.display_name AS user_name,
+            ru.login AS return_from_login, ru.display_name AS return_from_name,
             m.part_index, m.part_label, m.parent_material_id,
             CASE
               WHEN m.parent_material_id IS NULL THEN NULL
@@ -1171,6 +1172,8 @@ router.get('/:id/quantity-history', requirePermission('can_warehouse'), async (r
      FROM material_quantity_log l
      JOIN materials m ON m.id = l.material_id
      LEFT JOIN users u ON u.id = l.user_id
+     LEFT JOIN issuances iss ON iss.id = l.issuance_id
+     LEFT JOIN users ru ON ru.id = iss.issued_to_user_id
      WHERE l.material_id = ANY($1::int[])
      ORDER BY l.created_at DESC
      LIMIT 500`,

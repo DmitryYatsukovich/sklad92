@@ -55,7 +55,7 @@ function createEmptyFilters() {
   };
 }
 
-const NUMERIC_SORT_COLS = new Set(['price', 'production_price', 'quantity', 'cost_total', 'smr_total']);
+const NUMERIC_SORT_COLS = new Set(['price', 'production_price', 'quantity', 'on_hands_quantity', 'cost_total', 'smr_total']);
 
 const filterInputCls = 'filter-input';
 
@@ -1123,21 +1123,24 @@ export default function Warehouse({ user }) {
 
   const totals = useMemo(() => {
     let quantity = 0;
+    let onHandsQuantity = 0;
     let price = 0;
     let smr = 0;
     let costTotal = 0;
     let smrTotal = 0;
     for (const m of sortedList) {
       const q = materialRowQuantity(m);
+      const oh = Number(m.on_hands_quantity) || 0;
       const p = Number(m.price) || 0;
       const s = Number(m.production_price) || 0;
       quantity += q;
+      onHandsQuantity += oh;
       price += p;
       smr += s;
       costTotal += q * p;
       smrTotal += q * s;
     }
-    return { quantity, price, smr, costTotal, smrTotal };
+    return { quantity, onHandsQuantity, price, smr, costTotal, smrTotal };
   }, [sortedList]);
 
   const paginationResetKey = useMemo(
@@ -1777,6 +1780,14 @@ export default function Warehouse({ user }) {
                   onSort={toggleSort}
                   sum={formatSumQty(totals.quantity)}
                 />
+                <ThWithSum
+                  label="На руках"
+                  column="on_hands_quantity"
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  onSort={toggleSort}
+                  sum={formatSumQty(totals.onHandsQuantity)}
+                />
                 <th>
                   <button type="button" onClick={() => toggleSort('object_name')} className="sort-btn">
                     Объект <SortIcon column="object_name" />
@@ -1894,6 +1905,7 @@ export default function Warehouse({ user }) {
                   const rowQty = isChild
                     ? materialPartQuantity(row)
                     : materialRowQuantity(row);
+                  const rowOnHands = Number(row.on_hands_quantity) || 0;
                   const rowCost = rowQty * rowUnitPrice;
                   const rowSmr = rowQty * rowUnitSmr;
                   const partNames = isChild ? materialPartDisplayName(row, m.name) : null;
@@ -1983,6 +1995,16 @@ export default function Warehouse({ user }) {
                           )}
                         </button>
                       </td>
+                      <td className="text-right tabular-nums">
+                        {rowOnHands > 0 ? (
+                          <>
+                            <span className="text-amber-300">{formatSumQty(rowOnHands)}</span>
+                            <span className="text-zinc-500 font-normal text-2xs ml-0.5">{row.unit || m.unit || ''}</span>
+                          </>
+                        ) : (
+                          <span className="text-zinc-600">—</span>
+                        )}
+                      </td>
                       <td
                         className="text-zinc-500 max-w-[10rem] truncate text-2xs"
                         title={!isChild && isGroup ? groupObjectName : (row.object_name || '')}
@@ -2053,7 +2075,7 @@ export default function Warehouse({ user }) {
                     {renderRow(m)}
                     {isGroup && shownExpanded && partsLoading && filteredChildParts.length === 0 && (
                       <tr className="bg-zinc-900/50">
-                        <td colSpan={18} className="text-2xs text-zinc-500 py-2 pl-4">
+                        <td colSpan={19} className="text-2xs text-zinc-500 py-2 pl-4">
                           Загрузка частей…
                         </td>
                       </tr>

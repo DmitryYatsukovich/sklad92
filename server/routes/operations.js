@@ -124,7 +124,12 @@ router.post('/return', async (req, res) => {
   try {
     await client.query('BEGIN');
     const iss = (await client.query(
-      'SELECT id, material_id, quantity, returned_quantity, note, updated_at FROM issuances WHERE id = $1 FOR UPDATE',
+      `SELECT i.id, i.material_id, i.quantity, i.returned_quantity, i.note, i.updated_at,
+              i.issued_to_user_id, u.login AS issued_to_login, u.display_name AS issued_to_name
+       FROM issuances i
+       LEFT JOIN users u ON u.id = i.issued_to_user_id
+       WHERE i.id = $1
+       FOR UPDATE`,
       [issuance_id],
     )).rows[0];
     if (!iss) {
@@ -173,6 +178,7 @@ router.post('/return', async (req, res) => {
       [newReturned, issuance_id, nextNote],
     );
 
+    const returnFrom = iss.issued_to_name || iss.issued_to_login || `#${iss.issued_to_user_id}`;
     await logQuantityChange(client, {
       materialId: iss.material_id,
       userId: req.session.userId,
@@ -180,7 +186,7 @@ router.post('/return', async (req, res) => {
       quantityAfter: qtyAfter,
       kind: 'return',
       issuanceId: issuance_id,
-      note: `Возврат +${retQty}`,
+      note: `Возврат от ${returnFrom} +${retQty}`,
     });
 
     await client.query('COMMIT');

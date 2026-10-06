@@ -8,7 +8,13 @@ export const MATERIAL_SELECT = `
   r.name AS rack_name,
   c.name AS category_name,
   s.name AS system_name,
-  org.name AS organization_name`;
+  org.name AS organization_name,
+  COALESCE((
+    SELECT SUM(GREATEST(i.quantity - COALESCE(i.returned_quantity, 0), 0))
+    FROM issuances i
+    JOIN materials im ON im.id = i.material_id
+    WHERE im.id = m.id OR im.parent_material_id = m.id
+  ), 0) AS on_hands_quantity`;
 
 export const MATERIAL_FROM = `
   FROM materials m

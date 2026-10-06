@@ -74,6 +74,14 @@ function formatSumQty(n) {
   return x.toLocaleString('ru-RU', { maximumFractionDigits: 4 });
 }
 
+function calcDaysOnHands(issuedAt, netQty) {
+  if (!(Number(netQty) > 0)) return null;
+  const issuedTs = new Date(issuedAt || 0).getTime();
+  if (!Number.isFinite(issuedTs) || issuedTs <= 0) return null;
+  const elapsedMs = Math.max(Date.now() - issuedTs, 0);
+  return Math.floor(elapsedMs / (24 * 60 * 60 * 1000)) + 1;
+}
+
 function asArrayOfObjects(value) {
   return Array.isArray(value)
     ? value.filter((row) => row && typeof row === 'object' && !Array.isArray(row))
@@ -122,6 +130,7 @@ function enrichRow(i, materialPrices) {
     _netQty: netQty,
     _cost: netQty * unitPrice,
     _smr: netQty * unitSmr,
+    _daysOnHands: calcDaysOnHands(row.issued_at, netQty),
     _issuer: (issuedByName || issuedByLogin).toLowerCase(),
     _recipient: (issuedToName || issuedToLogin).toLowerCase(),
     _materialSearch: `${materialName} ${materialCode}`.toLowerCase(),
@@ -369,6 +378,9 @@ export default function Issuance({ user }) {
       } else if (sortBy === 'net_qty') {
         va = a._netQty;
         vb = b._netQty;
+      } else if (sortBy === 'days_on_hands') {
+        va = Number(a._daysOnHands || 0);
+        vb = Number(b._daysOnHands || 0);
       } else if (sortBy === 'cost') {
         va = a._cost;
         vb = b._cost;
@@ -782,6 +794,11 @@ export default function Issuance({ user }) {
                   sum={formatSumQty(totals.netQty)}
                   sumClassName="text-emerald-300"
                 />
+                <th className="text-right">
+                  <button type="button" onClick={() => toggleSort('days_on_hands')} className="sort-btn ml-auto">
+                    Суток на руках <SortIcon column="days_on_hands" />
+                  </button>
+                </th>
                 <ThWithSum
                   label="Стоимость"
                   column="cost"
@@ -855,6 +872,9 @@ export default function Issuance({ user }) {
                     <td className="text-right tabular-nums">
                       <span className="text-emerald-300">{formatSumQty(i._netQty)}</span>
                       <span className="text-zinc-500 text-2xs"> {i.unit}</span>
+                    </td>
+                    <td className="text-right tabular-nums text-zinc-300">
+                      {i._daysOnHands ? `${i._daysOnHands} сут.` : '—'}
                     </td>
                     <td className="text-right text-zinc-400 tabular-nums">{i._cost.toFixed(2)}</td>
                     <td className="text-right text-zinc-400 tabular-nums">{i._smr.toFixed(2)}</td>
