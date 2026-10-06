@@ -110,12 +110,19 @@ function enrichRow(i, materialPrices) {
 function issuanceHistoryLines(row) {
   const issuer = row.issued_by_name || row.issued_by_login || '—';
   const recipient = row.issued_to_name || row.issued_to_login || '—';
-  const lines = [`Выдал: ${issuer} → ${recipient}`];
-  if ((Number(row.returned_quantity) || 0) > 0) {
-    lines.push(`Вернул: ${recipient} → склад (${formatSumQty(row.returned_quantity)} ${row.unit || 'шт'})`);
-  }
+  const qtyLabel = `${formatSumQty(row.quantity)} ${row.unit || 'шт'}`;
   const note = asText(row.note).trim();
+  const transferLike = /передач/i.test(note);
+  const lines = [
+    transferLike
+      ? `Передал (${qtyLabel}) — кому передал: ${recipient}`
+      : `Выдал (${qtyLabel}) — кому выдал: ${recipient}`,
+  ];
+  if ((Number(row.returned_quantity) || 0) > 0) {
+    lines.push(`Вернул на склад (${formatSumQty(row.returned_quantity)} ${row.unit || 'шт'}) — ${recipient}`);
+  }
   if (note) lines.push(`Прим.: ${note}`);
+  if (issuer && issuer !== '—') lines.push(`Оформил: ${issuer}`);
   return lines;
 }
 
@@ -188,7 +195,8 @@ export default function Issuance({ user }) {
     if (!silent) setLoading(true);
     Promise.all([
       operationsApi.issuances(),
-      materialsApi.list(),
+      // Для сотрудников без доступа к «Склад» выдачи всё равно должны загружаться.
+      materialsApi.list().catch(() => []),
       materialsApi.usersForIssuance().catch(() => []),
     ])
       .then(([iss, mats, users]) => {
@@ -404,9 +412,8 @@ export default function Issuance({ user }) {
   };
 
   const openReturn = (row) => {
-    const returned = Number(row.returned_quantity || 0);
     setReturnRow(row);
-    setReturnQuantity(returned > 0 ? String(returned) : '');
+    setReturnQuantity('');
     setError('');
   };
 
@@ -499,18 +506,21 @@ export default function Issuance({ user }) {
   const handleReturn = async (e) => {
     e.preventDefault();
     if (!returnRow) return;
-    const totalReturned = parseFloat(returnQuantity);
-    const issued = Number(returnRow.quantity);
-    if (Number.isNaN(totalReturned) || totalReturned < 0) {
+    const amountToReturn = parseFloat(returnQuantity);
+    const onHands = Math.max(remainingQty(returnRow), 0);
+    if (Number.isNaN(amountToReturn) || amountToReturn <= 0) {
       return setError('Укажите корректное количество');
     }
-    if (totalReturned > issued) {
-      return setError(`Не больше выданного: ${issued} ${returnRow.unit}`);
+    if (amountToReturn > onHands + 1e-9) {
+      return setError(`Можно вернуть не больше, чем на руках: ${onHands} ${returnRow.unit}`);
     }
     setSubmitting(true);
     setError('');
     try {
-      await operationsApi.setReturnedQuantity(returnRow.id, totalReturned);
+      await operationsApi.return({
+        issuance_id: returnRow.id,
+        returned_quantity: amountToReturn,
+      });
       closeReturn();
       load();
     } catch (err) {
@@ -779,10 +789,10 @@ export default function Issuance({ user }) {
                     <td className="text-right text-zinc-400 tabular-nums">{i._cost.toFixed(2)}</td>
                     <td className="text-right text-zinc-400 tabular-nums">{i._smr.toFixed(2)}</td>
                     <td className="text-right">
-                      {canReturn || i._returned > 0 ? (
+                      {canReturn ? (
                         <div className="inline-flex items-center gap-1">
                           <button type="button" onClick={() => openReturn(i)} className="btn-ghost px-1 text-xs">
-                            {i._returned > 0 ? 'Изменить' : 'Возврат'}
+                            Возврат
                           </button>
                           {canReturn && (
                             <button type="button" onClick={() => openTransfer(i)} className="btn-ghost px-1 text-xs">
@@ -827,12 +837,12 @@ export default function Issuance({ user }) {
             {error && <p className="alert-error mb-3">{error}</p>}
             <form onSubmit={handleReturn} className="space-y-3">
               <div>
-                <label className="label">Всего возвращено на склад</label>
+                <label className="label">Возвратить сейчас на склад</label>
                 <input
                   type="number"
                   step="any"
-                  min="0"
-                  max={Number(returnRow.quantity)}
+                  min="0.0001"
+                  max={Math.max(remainingQty(returnRow), 0)}
                   value={returnQuantity}
                   onChange={(e) => setReturnQuantity(e.target.value)}
                   className="input"
@@ -840,7 +850,7 @@ export default function Issuance({ user }) {
                   required
                 />
                 <p className="text-2xs text-zinc-500 mt-1">
-                  Итоговое количество на складе (0 — без возврата). У получателя остаётся: {remainingQty(returnRow)} {returnRow.unit}
+                  Доступно к возврату: {remainingQty(returnRow)} {returnRow.unit}
                 </p>
               </div>
               <div className="flex gap-2 justify-end flex-wrap">
