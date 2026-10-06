@@ -15,6 +15,29 @@ function formatQty(value) {
   return Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 });
 }
 
+const CATEGORY_SQUARE_ACCENTS = [
+  'border-sky-400/45 bg-sky-950/40 text-sky-100',
+  'border-emerald-400/45 bg-emerald-950/35 text-emerald-100',
+  'border-violet-400/45 bg-violet-950/35 text-violet-100',
+  'border-amber-400/45 bg-amber-950/35 text-amber-100',
+  'border-rose-400/45 bg-rose-950/35 text-rose-100',
+  'border-cyan-400/45 bg-cyan-950/35 text-cyan-100',
+  'border-lime-400/45 bg-lime-950/35 text-lime-100',
+  'border-fuchsia-400/45 bg-fuchsia-950/35 text-fuchsia-100',
+];
+
+function getCategorySquareAccent(categoryId) {
+  if (categoryId == null || categoryId === '') return 'border-white/15 bg-zinc-900/60 text-zinc-100';
+  const n = Number.parseInt(String(categoryId), 10);
+  if (Number.isInteger(n)) {
+    return CATEGORY_SQUARE_ACCENTS[Math.abs(n) % CATEGORY_SQUARE_ACCENTS.length];
+  }
+  const source = String(categoryId);
+  let hash = 0;
+  for (let i = 0; i < source.length; i += 1) hash += source.charCodeAt(i);
+  return CATEGORY_SQUARE_ACCENTS[Math.abs(hash) % CATEGORY_SQUARE_ACCENTS.length];
+}
+
 function toggleSelection(list, value) {
   const key = String(value ?? '');
   if (!key) return list;
@@ -42,16 +65,36 @@ function normalizePayload(payload) {
   };
 }
 
-function SystemSquare({ slot, onOpen, totals }) {
+function SystemSquare({
+  slot,
+  onOpen,
+  totals,
+  categoryAccentClass,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
+}) {
   const entriesPreview = Array.isArray(slot.entryNames) ? slot.entryNames.filter(Boolean) : [];
   const previewText = entriesPreview.length ? entriesPreview.slice(0, 2).join(', ') : 'Позиции не добавлены';
   return (
     <button
       type="button"
-      onClick={() => onOpen(slot)}
-      className="w-20 h-20 rounded-md border border-white/15 p-1.5 text-left transition hover:bg-white/10 bg-zinc-900/60 text-zinc-100"
+      onClick={() => {
+        if (selectionMode) {
+          onToggleSelect?.(slot);
+          return;
+        }
+        onOpen(slot);
+      }}
+      className={`relative w-20 h-20 rounded-md border p-1.5 text-left transition hover:bg-white/10 ${categoryAccentClass || 'border-white/15 bg-zinc-900/60 text-zinc-100'} ${selectionMode ? (selected ? 'ring-2 ring-white/70' : 'ring-1 ring-white/25') : ''}`}
       title={`${slot.system_name}${slot.category_name ? ` • ${slot.category_name}` : ''}`}
     >
+      {selectionMode && (
+        <span
+          className={`absolute top-1 right-1 h-3.5 w-3.5 rounded-full border ${selected ? 'bg-white border-white' : 'bg-transparent border-white/60'}`}
+          aria-hidden="true"
+        />
+      )}
       <div className="flex h-full flex-col justify-between">
         <div className="space-y-0.5">
           <p className="text-[9px] font-semibold leading-tight truncate">{slot.system_name}</p>
@@ -124,6 +167,8 @@ export default function ObjectSettingsTabRefactored() {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
   const [selectedApartmentScopes, setSelectedApartmentScopes] = useState([]);
   const [selectedRoomNames, setSelectedRoomNames] = useState([]);
+  const [multiCopyLocationKey, setMultiCopyLocationKey] = useState('');
+  const [multiCopySelectedSlotIds, setMultiCopySelectedSlotIds] = useState([]);
   const [summaryEditOpen, setSummaryEditOpen] = useState(false);
   const [summaryEditTarget, setSummaryEditTarget] = useState(null);
   const [summaryEditName, setSummaryEditName] = useState('');
@@ -993,6 +1038,52 @@ export default function ObjectSettingsTabRefactored() {
     }
   };
 
+  const handleStartMultiCopySelection = (locationKind, locationId) => {
+    const key = `${locationKind}:${locationId}`;
+    const slots = (slotsByLocation.get(key) || []).filter(slotMatchesFilters);
+    if (!slots.length) {
+      setError('В выбранной локации нет блоков для копирования.');
+      setNotice('');
+      return;
+    }
+    setError('');
+    setNotice('Выберите блоки и нажмите «Копировать».');
+    setMultiCopyLocationKey(key);
+    setMultiCopySelectedSlotIds([]);
+  };
+
+  const handleCancelMultiCopySelection = () => {
+    setMultiCopyLocationKey('');
+    setMultiCopySelectedSlotIds([]);
+    setError('');
+  };
+
+  const handleToggleMultiCopySlot = (slot) => {
+    if (!slot?.id) return;
+    setMultiCopySelectedSlotIds((prev) => toggleSelection(prev, String(slot.id)));
+  };
+
+  const handleCopySelectedBlocks = (locationKind, locationId, title) => {
+    const key = `${locationKind}:${locationId}`;
+    if (multiCopyLocationKey !== key) return;
+    const selectedSet = new Set(multiCopySelectedSlotIds.map((id) => String(id)));
+    const selectedSlots = (slotsByLocation.get(key) || []).filter((slot) => selectedSet.has(String(slot.id)));
+    if (!selectedSlots.length) {
+      setError('Сначала выберите хотя бы один блок.');
+      setNotice('');
+      return;
+    }
+    setCopiedLocationTemplate({
+      locationKind,
+      title,
+      slots: selectedSlots.map((slot) => buildSlotTemplate(slot)),
+    });
+    setError('');
+    setNotice(`Выбрано и скопировано блоков: ${selectedSlots.length} (${title}).`);
+    setMultiCopyLocationKey('');
+    setMultiCopySelectedSlotIds([]);
+  };
+
   const openSummaryEditModal = (objectName, row) => {
     if (!row?.slotIds?.length) return;
     setSummaryEditTarget({
@@ -1052,7 +1143,10 @@ export default function ObjectSettingsTabRefactored() {
   const renderLocationActions = (locationKind, locationId, title) => {
     const canPaste = copiedLocationTemplate && copiedLocationTemplate.locationKind === locationKind;
     const locationBusy = pasteBusyKey === `location:${locationKind}:${locationId}`;
-    const blockCount = (slotsByLocation.get(`${locationKind}:${locationId}`) || []).length;
+    const key = `${locationKind}:${locationId}`;
+    const blockCount = (slotsByLocation.get(key) || []).length;
+    const selectingMultiple = multiCopyLocationKey === key;
+    const selectedCount = selectingMultiple ? multiCopySelectedSlotIds.length : 0;
     return (
       <div className="flex flex-wrap items-center gap-1">
         <button
@@ -1063,6 +1157,35 @@ export default function ObjectSettingsTabRefactored() {
         >
           Копировать все блоки
         </button>
+        {!selectingMultiple ? (
+          <button
+            type="button"
+            onClick={() => handleStartMultiCopySelection(locationKind, locationId)}
+            className="px-2 py-0.5 rounded border border-indigo-400/40 text-[10px] text-indigo-200 hover:bg-indigo-900/30"
+            disabled={!!pasteBusyKey || slotBusy || blockCount === 0}
+          >
+            Копировать несколько
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => handleCopySelectedBlocks(locationKind, locationId, title)}
+              className="px-2 py-0.5 rounded border border-indigo-300/60 text-[10px] text-indigo-100 hover:bg-indigo-900/40 disabled:opacity-40"
+              disabled={!!pasteBusyKey || slotBusy || selectedCount === 0}
+            >
+              Копировать ({selectedCount})
+            </button>
+            <button
+              type="button"
+              onClick={handleCancelMultiCopySelection}
+              className="px-2 py-0.5 rounded border border-white/20 text-[10px] text-zinc-300 hover:bg-white/10"
+              disabled={!!pasteBusyKey || slotBusy}
+            >
+              Отмена выбора
+            </button>
+          </>
+        )}
         {canPaste && (
           <button
             type="button"
@@ -1097,17 +1220,23 @@ export default function ObjectSettingsTabRefactored() {
         || (a.slot.id - b.slot.id)
       ));
     const isPastingHere = pasteBusyKey === `slot:${key}`;
+    const selectingMultiple = multiCopyLocationKey === key;
     if (!sortedSlotCards.length && hasSlotFilters) return null;
     return (
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           {sortedSlotCards.map(({ slot, entries }) => {
+            const selectedForMultiCopy = selectingMultiple && multiCopySelectedSlotIds.includes(String(slot.id));
             return (
               <SystemSquare
                 key={slot.id}
                 slot={{ ...slot, locationTitle: title, entryNames: entries.map((row) => row.name) }}
                 onOpen={openSlotModal}
                 totals={{ positions: entries.length }}
+                categoryAccentClass={getCategorySquareAccent(slot.category_id)}
+                selectionMode={selectingMultiple}
+                selected={selectedForMultiCopy}
+                onToggleSelect={handleToggleMultiCopySlot}
               />
             );
           })}
@@ -1265,6 +1394,11 @@ export default function ObjectSettingsTabRefactored() {
                               const floorRoomsBucket = floorApartmentsRaw.find((x) => x.name === FLOOR_ROOMS_BUCKET_NAME);
                               const floorApartments = floorApartmentsRaw.filter((x) => x.name !== FLOOR_ROOMS_BUCKET_NAME);
                               const floorRooms = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
+                              const floorApartmentRoomsCount = floorApartments.reduce(
+                                (acc, apartment) => acc + (roomsByApartment.get(apartment.id) || []).length,
+                                0,
+                              );
+                              const floorRoomsCount = floorRooms.length + floorApartmentRoomsCount;
                               const collapsed = collapsedFloorSet.has(floor.id);
                               const floorHasBlocks = (
                                 floorRooms.some((room) => hasLocationBlocks('room', room.id))
@@ -1290,6 +1424,9 @@ export default function ObjectSettingsTabRefactored() {
                                     >
                                       Этаж {floor.name}
                                     </button>
+                                    <span className="text-[10px] text-zinc-400">
+                                      Квартир: {floorApartments.length} · Помещений: {floorRoomsCount}
+                                    </span>
                                     <button
                                       type="button"
                                       onClick={() => handleCopyFloorBlocks(floor)}
