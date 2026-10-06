@@ -129,23 +129,33 @@ function MultiSelectFilter({ label, options, selectedValues, onToggle }) {
   );
 }
 
-function ThWithSum({ label, column, sortBy, sortDir, onSort, sum, sumClassName = 'text-zinc-500', align = 'right' }) {
+function ThWithSum({
+  label,
+  column,
+  sortBy,
+  sortDir,
+  onSort,
+  sum,
+  sumClassName = 'text-zinc-500',
+  align = 'right',
+  thClassName = '',
+}) {
   const SortIcon = () => {
     if (sortBy !== column) return <span className="opacity-30">↕</span>;
     return sortDir === 'asc' ? <span>↑</span> : <span>↓</span>;
   };
   return (
-    <th className={align === 'right' ? 'text-right' : ''}>
+    <th className={`${align === 'right' ? 'text-right' : ''} ${thClassName}`}>
       <button
         type="button"
         onClick={() => onSort(column)}
-        className={`sort-btn gap-0.5 flex flex-col ${align === 'right' ? 'ml-auto items-end' : 'items-start'}`}
+        className={`sort-btn gap-0.5 flex flex-col min-w-0 max-w-full ${align === 'right' ? 'ml-auto items-end' : 'items-start'}`}
       >
-        <span className="inline-flex items-center gap-0.5">
+        <span className="inline-flex items-center gap-0.5 whitespace-nowrap max-w-full">
           {label} <SortIcon />
         </span>
         {sum != null && (
-          <span className={`text-2xs font-normal tabular-nums ${sumClassName}`}>
+          <span className={`text-2xs font-normal tabular-nums whitespace-nowrap ${sumClassName}`}>
             {sum}
           </span>
         )}
@@ -1757,7 +1767,7 @@ export default function Warehouse({ user }) {
           />
         </div>
         <div className="overflow-x-auto max-h-[calc(100vh-7.5rem)] overflow-y-auto">
-          <table className="table-compact table-auto md:table-fixed min-w-[96rem] md:min-w-full w-full">
+          <table className="table-compact table-auto min-w-[120rem] w-full">
             <thead className="sticky top-0 bg-surface-900 z-10">
               <tr>
                 <th className="w-16 text-center text-zinc-500 text-2xs font-normal">№</th>
@@ -1767,7 +1777,7 @@ export default function Warehouse({ user }) {
                     Наимен. <SortIcon column="name" />
                   </button>
                 </th>
-                <th>
+                <th className="w-[4.5rem]">
                   <button type="button" onClick={() => toggleSort('unit')} className="sort-btn">
                     Ед. <SortIcon column="unit" />
                   </button>
@@ -1779,6 +1789,7 @@ export default function Warehouse({ user }) {
                   sortDir={sortDir}
                   onSort={toggleSort}
                   sum={formatSumQty(totals.quantity)}
+                  thClassName="w-[6.5rem]"
                 />
                 <ThWithSum
                   label="На руках"
@@ -1787,33 +1798,34 @@ export default function Warehouse({ user }) {
                   sortDir={sortDir}
                   onSort={toggleSort}
                   sum={formatSumQty(totals.onHandsQuantity)}
+                  thClassName="w-[7rem]"
                 />
-                <th>
+                <th className="w-[7rem]">
                   <button type="button" onClick={() => toggleSort('object_name')} className="sort-btn">
                     Объект <SortIcon column="object_name" />
                   </button>
                 </th>
-                <th>
+                <th className="w-[7rem]">
                   <button type="button" onClick={() => toggleSort('warehouse_name')} className="sort-btn">
                     Склад <SortIcon column="warehouse_name" />
                   </button>
                 </th>
-                <th>
+                <th className="w-[7rem]">
                   <button type="button" onClick={() => toggleSort('rack_name')} className="sort-btn">
                     Стеллаж <SortIcon column="rack_name" />
                   </button>
                 </th>
-                <th>
+                <th className="w-[7rem]">
                   <button type="button" onClick={() => toggleSort('system_name')} className="sort-btn">
                     Система <SortIcon column="system_name" />
                   </button>
                 </th>
-                <th>
+                <th className="w-[8rem]">
                   <button type="button" onClick={() => toggleSort('organization_name')} className="sort-btn">
                     Организация <SortIcon column="organization_name" />
                   </button>
                 </th>
-                <th>
+                <th className="w-[7rem]">
                   <button type="button" onClick={() => toggleSort('category_name')} className="sort-btn">
                     Кат. <SortIcon column="category_name" />
                   </button>
@@ -1825,6 +1837,7 @@ export default function Warehouse({ user }) {
                   sortDir={sortDir}
                   onSort={toggleSort}
                   sum={formatSumMoney(totals.price)}
+                  thClassName="w-[8.5rem]"
                 />
                 <ThWithSum
                   label="Стоимость"
@@ -1834,6 +1847,7 @@ export default function Warehouse({ user }) {
                   onSort={toggleSort}
                   sum={formatSumMoney(totals.costTotal)}
                   sumClassName="text-zinc-400"
+                  thClassName="w-[8.5rem]"
                 />
                 <ThWithSum
                   label="СМР за ед."
@@ -1842,6 +1856,7 @@ export default function Warehouse({ user }) {
                   sortDir={sortDir}
                   onSort={toggleSort}
                   sum={formatSumMoney(totals.smr)}
+                  thClassName="w-[8.5rem]"
                 />
                 <ThWithSum
                   label="СМР"
@@ -1851,13 +1866,14 @@ export default function Warehouse({ user }) {
                   onSort={toggleSort}
                   sum={formatSumMoney(totals.smrTotal)}
                   sumClassName="text-zinc-400"
+                  thClassName="w-[8.5rem]"
                 />
-                <th>
+                <th className="w-[8rem]">
                   <button type="button" onClick={() => toggleSort('updated_at')} className="sort-btn">
                     Изменён <SortIcon column="updated_at" />
                   </button>
                 </th>
-                <th>
+                <th className="w-[14rem] min-w-[12rem]">
                   <button type="button" onClick={() => toggleSort('description')} className="sort-btn">
                     Описание <SortIcon column="description" />
                   </button>
