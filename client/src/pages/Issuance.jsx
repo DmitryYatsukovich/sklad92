@@ -254,9 +254,17 @@ export default function Issuance({ user }) {
     [issuances, pendingMutations, materials, issueUsers, user],
   );
 
+  const canViewAllIssuances = user?.role === 'admin' || !!user?.can_issuance_all;
+  const scopedIssuances = useMemo(() => {
+    if (canViewAllIssuances) return mergedIssuances;
+    const uid = Number(user?.id || 0);
+    if (!uid) return [];
+    return mergedIssuances.filter((row) => Number(row?.issued_to_user_id || 0) === uid);
+  }, [mergedIssuances, canViewAllIssuances, user?.id]);
+
   const enriched = useMemo(
-    () => mergedIssuances.map((i) => enrichRow(i, materialPrices)),
-    [mergedIssuances, materialPrices],
+    () => scopedIssuances.map((i) => enrichRow(i, materialPrices)),
+    [scopedIssuances, materialPrices],
   );
 
   const hasActiveFilters = Object.values(filters).some(Boolean);
@@ -555,7 +563,7 @@ export default function Issuance({ user }) {
         <h2 className="page-title">Выдача</h2>
         <div className="flex flex-wrap items-center gap-1">
           <span className="text-2xs text-zinc-500">
-            {hasActiveFilters ? `${sortedList.length}/${mergedIssuances.length}` : mergedIssuances.length}
+            {hasActiveFilters ? `${sortedList.length}/${scopedIssuances.length}` : scopedIssuances.length}
           </span>
           <button
             type="button"
@@ -793,10 +801,10 @@ export default function Issuance({ user }) {
           </table>
         </div>
         <ListPagination {...pagination} />
-        {mergedIssuances.length === 0 && !loading && (
+        {scopedIssuances.length === 0 && !loading && (
           <p className="p-6 text-center text-zinc-500 text-xs">Выдач пока нет</p>
         )}
-        {mergedIssuances.length > 0 && sortedList.length === 0 && !loading && (
+        {scopedIssuances.length > 0 && sortedList.length === 0 && !loading && (
           <p className="p-6 text-center text-zinc-500 text-xs">Ничего не найдено</p>
         )}
       </div>
