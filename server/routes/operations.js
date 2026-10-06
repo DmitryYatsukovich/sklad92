@@ -129,7 +129,7 @@ router.post('/return', async (req, res) => {
        FROM issuances i
        LEFT JOIN users u ON u.id = i.issued_to_user_id
        WHERE i.id = $1
-       FOR UPDATE`,
+       FOR UPDATE OF i`,
       [issuance_id],
     )).rows[0];
     if (!iss) {
