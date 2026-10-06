@@ -1754,7 +1754,7 @@ export default function Warehouse({ user }) {
           />
         </div>
         <div className="overflow-x-auto max-h-[calc(100vh-7.5rem)] overflow-y-auto">
-          <table className="table-compact table-fixed w-full">
+          <table className="table-compact table-auto md:table-fixed min-w-[96rem] md:min-w-full w-full">
             <thead className="sticky top-0 bg-surface-900 z-10">
               <tr>
                 <th className="w-16 text-center text-zinc-500 text-2xs font-normal">№</th>
