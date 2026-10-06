@@ -103,6 +103,9 @@ export default function RolesTab() {
         next.can_task_notifications = false;
         next.can_tasks_all = false;
       }
+      if (key === 'can_issuance' && !value) {
+        next.can_issuance_all = false;
+      }
       if (key === 'can_actions' && !value) {
         next.can_actions_all = false;
       }
@@ -171,6 +174,11 @@ export default function RolesTab() {
   const setTasksScope = (allUsers) => {
     if (editing?.is_admin_role) return;
     setForm((f) => ({ ...f, can_tasks_all: allUsers }));
+  };
+
+  const setIssuanceScope = (allUsers) => {
+    if (editing?.is_admin_role) return;
+    setForm((f) => ({ ...f, can_issuance_all: allUsers }));
   };
 
   const selectAllPerms = (value) => {
@@ -324,7 +332,7 @@ export default function RolesTab() {
                       <p className="text-slate-500 text-2xs uppercase tracking-wide mb-2">{groupName}</p>
                       <div className="space-y-2">
                         {items
-                          .filter((p) => !p.faceScopeOption && !p.attendanceScopeOption && !p.attendanceEditOption && !p.attendancePayOption && !p.attendanceRatesOption && !p.attendanceToolsOption && !p.attendanceMonthOption && !p.actionsScopeOption && !p.tasksScopeOption)
+                          .filter((p) => !p.faceScopeOption && !p.attendanceScopeOption && !p.attendanceEditOption && !p.attendancePayOption && !p.attendanceRatesOption && !p.attendanceToolsOption && !p.attendanceMonthOption && !p.actionsScopeOption && !p.tasksScopeOption && !p.issuanceScopeOption)
                           .map((p) => {
                             const requiresTasks = p.key === 'can_task_notifications';
                             const requiresTools = p.key === 'can_tools_delete';
@@ -402,6 +410,33 @@ export default function RolesTab() {
                                       className="border-slate-600 text-brand-600"
                                     />
                                     Только свои задачи
+                                  </label>
+                                </div>
+                              )}
+                              {p.key === 'can_issuance' && (editing?.is_admin_role || form.can_issuance) && (
+                                <div className="ml-9 mt-1 mb-2 space-y-1.5 pl-3 border-l border-white/10">
+                                  <p className="text-slate-500 text-2xs">Область выдач</p>
+                                  <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      name="issuance_scope"
+                                      checked={editing?.is_admin_role ? true : !!form.can_issuance_all}
+                                      disabled={!!editing?.is_admin_role}
+                                      onChange={() => setIssuanceScope(true)}
+                                      className="border-slate-600 text-brand-600"
+                                    />
+                                    Все выдачи
+                                  </label>
+                                  <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      name="issuance_scope"
+                                      checked={editing?.is_admin_role ? false : !form.can_issuance_all}
+                                      disabled={!!editing?.is_admin_role}
+                                      onChange={() => setIssuanceScope(false)}
+                                      className="border-slate-600 text-brand-600"
+                                    />
+                                    Только выдачи пользователя
                                   </label>
                                 </div>
                               )}

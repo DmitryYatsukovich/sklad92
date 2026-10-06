@@ -426,6 +426,8 @@ const statements = [
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_settings_tools BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_tasks_all BOOLEAN DEFAULT false`,
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_tasks_all BOOLEAN DEFAULT false`,
+  `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_issuance_all BOOLEAN DEFAULT false`,
+  `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_issuance_all BOOLEAN DEFAULT false`,
 ];
 
 export async function ensureSchema() {

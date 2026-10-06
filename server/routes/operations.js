@@ -176,6 +176,113 @@ router.post('/return', async (req, res) => {
   }
 });
 
+// Передать материал от одного получателя другому (без изменения остатков склада)
+router.post('/transfer', async (req, res) => {
+  const { issuance_id, issued_to_user_id, quantity, note } = req.body || {};
+  const issuanceId = Number(issuance_id);
+  const toUserId = Number(issued_to_user_id);
+  const qty = Number(quantity);
+  if (!issuanceId || !toUserId || !(qty > 0)) {
+    return res.status(400).json({ error: 'Укажите выдачу, нового получателя и количество' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const iss = (await client.query(
+      `SELECT i.id, i.material_id, i.issued_to_user_id, i.quantity, i.returned_quantity, i.updated_at,
+              m.name AS material_name, m.unit
+       FROM issuances i
+       JOIN materials m ON m.id = i.material_id
+       WHERE i.id = $1
+       FOR UPDATE`,
+      [issuanceId],
+    )).rows[0];
+    if (!iss) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Выдача не найдена' });
+    }
+    if (
+      req.user?.role !== 'admin'
+      && !req.user?.can_issuance_all
+      && Number(iss.issued_to_user_id) !== Number(req.user?.id)
+    ) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Нет доступа к этой выдаче' });
+    }
+    if (Number(iss.issued_to_user_id) === toUserId) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Материал уже выдан этому пользователю' });
+    }
+
+    const available = Number(iss.quantity) - Number(iss.returned_quantity || 0);
+    if (!(available > 0)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Для передачи нет доступного количества' });
+    }
+    if (qty > available + 1e-9) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Можно передать не больше ${available}` });
+    }
+
+    const fromUser = (await client.query(
+      'SELECT login, display_name FROM users WHERE id = $1',
+      [iss.issued_to_user_id],
+    )).rows[0];
+    const toUser = (await client.query(
+      'SELECT id, login, display_name FROM users WHERE id = $1',
+      [toUserId],
+    )).rows[0];
+    if (!toUser) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Пользователь-получатель не найден' });
+    }
+
+    const nextReturned = Number(iss.returned_quantity || 0) + qty;
+    const sourceUpd = await client.query(
+      `UPDATE issuances
+       SET returned_quantity = $1::numeric,
+           returned_at = COALESCE(returned_at, NOW()),
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING returned_quantity, updated_at`,
+      [nextReturned, issuanceId],
+    );
+
+    const fromName = fromUser?.display_name || fromUser?.login || `#${iss.issued_to_user_id}`;
+    const transferNoteParts = [`Передача от ${fromName}`];
+    const customNote = String(note || '').trim();
+    if (customNote) transferNoteParts.push(customNote);
+    const ins = await client.query(
+      `INSERT INTO issuances (material_id, issued_by_user_id, issued_to_user_id, quantity, note)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, material_id, issued_to_user_id, quantity, issued_at, note, updated_at`,
+      [iss.material_id, req.session.userId, toUserId, qty, transferNoteParts.join('. ')],
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json({
+      transfer: {
+        ...ins.rows[0],
+        material_name: iss.material_name,
+        unit: iss.unit,
+        issued_to_name: toUser.display_name,
+        issued_to_login: toUser.login,
+      },
+      source: {
+        issuance_id: issuanceId,
+        returned_quantity: sourceUpd.rows[0]?.returned_quantity ?? nextReturned,
+        updated_at: sourceUpd.rows[0]?.updated_at || null,
+      },
+    });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+});
+
 // Установить итоговое возвращённое количество (редактирование возврата)
 router.patch('/issuances/:id/returned', async (req, res) => {
   const issuanceId = parseInt(req.params.id, 10);
@@ -394,6 +501,9 @@ router.delete('/issuances/all', requireAdmin, async (req, res) => {
 
 // Список выдач (для вкладки выдачи и возвратов)
 router.get('/issuances', async (req, res) => {
+  const canViewAll = req.user?.role === 'admin' || !!req.user?.can_issuance_all;
+  const whereSql = canViewAll ? '' : 'WHERE i.issued_to_user_id = $1';
+  const params = canViewAll ? [] : [req.user.id];
   const r = await pool.query(
     `SELECT i.id, i.material_id, i.issued_to_user_id, i.quantity, i.issued_at, i.returned_at, i.returned_quantity, i.note, i.updated_at,
             m.code AS material_code, m.name AS material_name, m.unit, m.price, m.production_price,
@@ -401,8 +511,10 @@ router.get('/issuances', async (req, res) => {
      FROM issuances i
      JOIN materials m ON m.id = i.material_id
      JOIN users u ON u.id = i.issued_to_user_id
+     ${whereSql}
      ORDER BY i.issued_at DESC
      LIMIT 1000`,
+    params,
   );
   res.json(r.rows);
 });

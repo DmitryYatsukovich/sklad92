@@ -26,6 +26,14 @@ export function buildActionFromRequest(path, method, bodyText) {
       payload: body,
     };
   }
+  if (path === '/api/operations/transfer' && m === 'POST') {
+    return {
+      kind: 'transfer',
+      title: 'Передача материала',
+      description: describeTransfer(body),
+      payload: body,
+    };
+  }
   const returnedMatch = path.match(/^\/api\/operations\/issuances\/(\d+)\/returned$/);
   if (returnedMatch && m === 'PATCH') {
     return {
@@ -204,6 +212,14 @@ function describeReturn(body) {
   const parts = [];
   if (body.issuance_id) parts.push(`выдача #${body.issuance_id}`);
   if (body.quantity != null) parts.push(`кол-во ${body.quantity}`);
+  return parts.length ? parts.join(', ') : null;
+}
+
+function describeTransfer(body) {
+  const parts = [];
+  if (body.issuance_id) parts.push(`из выдачи #${body.issuance_id}`);
+  if (body.quantity != null) parts.push(`кол-во ${body.quantity}`);
+  if (body.issued_to_user_id) parts.push(`кому #${body.issued_to_user_id}`);
   return parts.length ? parts.join(', ') : null;
 }
 

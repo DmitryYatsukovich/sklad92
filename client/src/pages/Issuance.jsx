@@ -138,6 +138,10 @@ export default function Issuance({ user }) {
   const [error, setError] = useState('');
   const [returnRow, setReturnRow] = useState(null);
   const [returnQuantity, setReturnQuantity] = useState('');
+  const [transferRow, setTransferRow] = useState(null);
+  const [transferQuantity, setTransferQuantity] = useState('');
+  const [transferUserId, setTransferUserId] = useState('');
+  const [transferSubmitting, setTransferSubmitting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -377,10 +381,30 @@ export default function Issuance({ user }) {
     setError('');
   };
 
+  const openTransfer = (row) => {
+    const available = Math.max(remainingQty(row), 0);
+    setTransferRow(row);
+    setTransferQuantity(available > 0 ? String(available) : '');
+    setTransferUserId('');
+    setError('');
+  };
+
   const closeReturn = () => {
     setReturnRow(null);
     setReturnQuantity('');
   };
+
+  const closeTransfer = () => {
+    setTransferRow(null);
+    setTransferQuantity('');
+    setTransferUserId('');
+  };
+
+  const transferCandidates = useMemo(() => {
+    if (!transferRow) return issueUsers;
+    const currentRecipientId = Number(transferRow.issued_to_user_id);
+    return issueUsers.filter((u) => Number(u.id) !== currentRecipientId);
+  }, [issueUsers, transferRow]);
 
   const handleDeleteIssuance = async () => {
     if (!returnRow || user?.role !== 'admin') return;
@@ -461,6 +485,39 @@ export default function Issuance({ user }) {
       setError(err.message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleTransfer = async (e) => {
+    e.preventDefault();
+    if (!transferRow) return;
+    const toUserId = Number(transferUserId);
+    const qty = Number(transferQuantity);
+    const available = Math.max(remainingQty(transferRow), 0);
+    if (!toUserId) return setError('Выберите пользователя, которому передаётся материал');
+    if (!Number.isFinite(qty) || qty <= 0) return setError('Укажите корректное количество для передачи');
+    if (qty > available + 1e-9) {
+      return setError(`Можно передать не больше ${available} ${transferRow.unit}`);
+    }
+
+    setTransferSubmitting(true);
+    setError('');
+    try {
+      await operationsApi.transfer({
+        issuance_id: transferRow.id,
+        issued_to_user_id: toUserId,
+        quantity: qty,
+      });
+      closeTransfer();
+      load();
+    } catch (err) {
+      if (isOfflineQueuedError(err)) {
+        closeTransfer();
+        return;
+      }
+      setError(err.message);
+    } finally {
+      setTransferSubmitting(false);
     }
   };
 
@@ -660,9 +717,16 @@ export default function Issuance({ user }) {
                     <td className="text-right text-zinc-400 tabular-nums">{i._smr.toFixed(2)}</td>
                     <td className="text-right">
                       {canReturn || i._returned > 0 ? (
-                        <button type="button" onClick={() => openReturn(i)} className="btn-ghost px-1 text-xs">
-                          {i._returned > 0 ? 'Изменить' : 'Возврат'}
-                        </button>
+                        <div className="inline-flex items-center gap-1">
+                          <button type="button" onClick={() => openReturn(i)} className="btn-ghost px-1 text-xs">
+                            {i._returned > 0 ? 'Изменить' : 'Возврат'}
+                          </button>
+                          {canReturn && (
+                            <button type="button" onClick={() => openTransfer(i)} className="btn-ghost px-1 text-xs">
+                              Передать
+                            </button>
+                          )}
+                        </div>
                       ) : (
                         <span className="text-2xs text-zinc-600">закрыто</span>
                       )}
@@ -732,6 +796,67 @@ export default function Issuance({ user }) {
                 </button>
                 <button type="submit" className="btn-primary" disabled={submitting}>
                   {submitting ? '…' : 'Сохранить'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {transferRow && (
+        <div className="modal-backdrop z-50" onClick={closeTransfer}>
+          <div className="card p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-white mb-1">Передать материал</h3>
+            <p className="text-zinc-400 text-xs mb-3">
+              {transferRow.material_name} · сейчас у: {transferRow.issued_to_name || transferRow.issued_to_login}
+            </p>
+            <p className="text-zinc-500 text-xs mb-4">
+              Доступно для передачи: <span className="text-white">{Math.max(remainingQty(transferRow), 0)} {transferRow.unit}</span>
+            </p>
+            {error && <p className="alert-error mb-3">{error}</p>}
+            <form onSubmit={handleTransfer} className="space-y-3">
+              <div>
+                <label className="label">Кому передать</label>
+                <select
+                  value={transferUserId}
+                  onChange={(e) => setTransferUserId(e.target.value)}
+                  className="input"
+                  required
+                >
+                  <option value="">Выберите пользователя</option>
+                  {transferCandidates.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.display_name || u.login}
+                    </option>
+                  ))}
+                </select>
+                {transferCandidates.length === 0 && (
+                  <p className="text-2xs text-zinc-500 mt-1">Нет доступных пользователей для передачи</p>
+                )}
+              </div>
+              <div>
+                <label className="label">Количество</label>
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  max={Math.max(remainingQty(transferRow), 0)}
+                  value={transferQuantity}
+                  onChange={(e) => setTransferQuantity(e.target.value)}
+                  className="input"
+                  required
+                />
+              </div>
+              <div className="flex gap-2 justify-end flex-wrap">
+                <button type="button" onClick={closeTransfer} className="btn-ghost" disabled={transferSubmitting}>
+                  Отмена
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={transferSubmitting || transferCandidates.length === 0}
+                >
+                  {transferSubmitting ? '…' : 'Передать'}
                 </button>
               </div>
             </form>

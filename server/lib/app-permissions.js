@@ -13,6 +13,13 @@ export const APP_PERMISSIONS = [
     group: 'Основные разделы',
   },
   {
+    key: 'can_issuance_all',
+    label: 'Выдачи всех пользователей',
+    description: 'Просмотр всех выдач (иначе — только выдач пользователя)',
+    group: 'Основные разделы',
+    issuanceScopeOption: true,
+  },
+  {
     key: 'can_production',
     label: 'Выработка',
     description: 'Подтверждение выработки, отчёты по выдачам',
@@ -229,6 +236,9 @@ export function permissionsFromBody(body = {}) {
   if (!perms.can_tasks) {
     perms.can_task_notifications = false;
     perms.can_tasks_all = false;
+  }
+  if (!perms.can_issuance) {
+    perms.can_issuance_all = false;
   }
   if (!perms.can_tools) {
     perms.can_tools_delete = false;

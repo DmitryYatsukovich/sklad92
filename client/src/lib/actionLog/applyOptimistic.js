@@ -255,6 +255,31 @@ function buildIssuanceFromIssue(entry, body, ctx) {
   });
 }
 
+function buildIssuanceFromTransfer(entry, sourceRow, body, ctx) {
+  if (!sourceRow) return null;
+  const { issueUsers = [] } = ctx;
+  const recipientId = Number(body.issued_to_user_id);
+  const recipient = findUser(issueUsers, recipientId);
+  const qty = Number(body.quantity) || 0;
+  if (!(qty > 0)) return null;
+  return markPending({
+    id: tempIssuanceId(entry.id),
+    material_id: sourceRow.material_id,
+    issued_to_user_id: recipientId,
+    quantity: qty,
+    returned_quantity: 0,
+    issued_at: entry.createdAt || new Date().toISOString(),
+    note: body.note || sourceRow.note || null,
+    material_code: sourceRow.material_code || null,
+    material_name: sourceRow.material_name || '',
+    unit: sourceRow.unit || 'шт',
+    price: sourceRow.price ?? 0,
+    production_price: sourceRow.production_price ?? 0,
+    issued_to_login: recipient?.login || '',
+    issued_to_name: recipient?.display_name || recipient?.login || '',
+  });
+}
+
 export function applyPendingToIssuances(issuances, entries, ctx = {}) {
   let list = prepareIssuancesBase(issuances);
   const pending = Array.isArray(entries) ? entries : [];
@@ -271,6 +296,20 @@ export function applyPendingToIssuances(issuances, entries, ctx = {}) {
 
     if (kind === 'issue' && path === '/api/operations/issue') {
       list.unshift(buildIssuanceFromIssue(entry, body, ctx));
+      continue;
+    }
+
+    if (kind === 'transfer' && path === '/api/operations/transfer') {
+      const source = findIssuance(list, Number(body.issuance_id));
+      const transferQty = Number(body.quantity) || 0;
+      if (source && transferQty > 0) {
+        const oldReturned = Number(source.returned_quantity || 0);
+        const issued = Number(source.quantity || 0);
+        source.returned_quantity = Math.min(oldReturned + transferQty, issued);
+        source._pending = true;
+        const issuedTo = buildIssuanceFromTransfer(entry, source, body, ctx);
+        if (issuedTo) list.unshift(issuedTo);
+      }
       continue;
     }
 
