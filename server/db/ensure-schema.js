@@ -428,6 +428,16 @@ const statements = [
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_tasks_all BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_issuance_all BOOLEAN DEFAULT false`,
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_issuance_all BOOLEAN DEFAULT false`,
+  `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_issuance_all_issued BOOLEAN DEFAULT false`,
+  `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_issuance_all_issued BOOLEAN DEFAULT false`,
+  `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_issuance_all_received BOOLEAN DEFAULT false`,
+  `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_issuance_all_received BOOLEAN DEFAULT false`,
+  `UPDATE roles
+   SET can_issuance_all_issued = true, can_issuance_all_received = true
+   WHERE COALESCE(can_issuance_all, false) = true`,
+  `UPDATE user_permissions
+   SET can_issuance_all_issued = true, can_issuance_all_received = true
+   WHERE COALESCE(can_issuance_all, false) = true`,
 ];
 
 export async function ensureSchema() {

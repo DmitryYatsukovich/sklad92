@@ -20,6 +20,20 @@ export const APP_PERMISSIONS = [
     issuanceScopeOption: true,
   },
   {
+    key: 'can_issuance_all_issued',
+    label: 'Выдачи: все по выдавшему',
+    description: 'Показывать выдачи, оформленные любыми пользователями',
+    group: 'Основные разделы',
+    issuanceScopeOption: true,
+  },
+  {
+    key: 'can_issuance_all_received',
+    label: 'Выдачи: все по получателю',
+    description: 'Показывать выдачи, принятые любыми пользователями',
+    group: 'Основные разделы',
+    issuanceScopeOption: true,
+  },
+  {
     key: 'can_production',
     label: 'Выработка',
     description: 'Подтверждение выработки, отчёты по выдачам',
@@ -239,6 +253,14 @@ export function permissionsFromBody(body = {}) {
   }
   if (!perms.can_issuance) {
     perms.can_issuance_all = false;
+    perms.can_issuance_all_issued = false;
+    perms.can_issuance_all_received = false;
+  }
+  if (perms.can_issuance_all) {
+    perms.can_issuance_all_issued = true;
+    perms.can_issuance_all_received = true;
+  } else if (perms.can_issuance_all_issued && perms.can_issuance_all_received) {
+    perms.can_issuance_all = true;
   }
   if (!perms.can_tools) {
     perms.can_tools_delete = false;

@@ -501,10 +501,18 @@ router.delete('/issuances/all', requireAdmin, async (req, res) => {
 
 // Список выдач (для вкладки выдачи и возвратов)
 router.get('/issuances', async (req, res) => {
-  const canViewAll = req.user?.role === 'admin' || !!req.user?.can_issuance_all;
+  const canViewAllByIssued = req.user?.role === 'admin'
+    || !!req.user?.can_issuance_all
+    || !!req.user?.can_issuance_all_issued;
+  const canViewAllByReceived = req.user?.role === 'admin'
+    || !!req.user?.can_issuance_all
+    || !!req.user?.can_issuance_all_received;
   const viewerUserId = Number(req.user?.id || req.session?.userId || 0);
-  const whereSql = canViewAll ? '' : 'WHERE i.issued_to_user_id = $1';
-  const params = canViewAll ? [] : [viewerUserId];
+  const restrictToOwnByBoth = !canViewAllByIssued && !canViewAllByReceived;
+  const whereSql = restrictToOwnByBoth
+    ? 'WHERE (i.issued_by_user_id = $1 OR i.issued_to_user_id = $1)'
+    : '';
+  const params = restrictToOwnByBoth ? [viewerUserId] : [];
   const r = await pool.query(
     `SELECT i.id, i.material_id, i.issued_to_user_id, i.issued_by_user_id,
             i.quantity, i.issued_at, i.returned_at, i.returned_quantity, i.note, i.updated_at,

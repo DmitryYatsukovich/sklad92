@@ -79,6 +79,8 @@ export default function RolesTab() {
       ...base,
       can_warehouse: true,
       can_issuance: true,
+      can_issuance_all_issued: false,
+      can_issuance_all_received: false,
       can_production: true,
       can_objects: true,
       can_tools: true,
@@ -105,6 +107,8 @@ export default function RolesTab() {
       }
       if (key === 'can_issuance' && !value) {
         next.can_issuance_all = false;
+        next.can_issuance_all_issued = false;
+        next.can_issuance_all_received = false;
       }
       if (key === 'can_actions' && !value) {
         next.can_actions_all = false;
@@ -178,7 +182,12 @@ export default function RolesTab() {
 
   const setIssuanceScope = (allUsers) => {
     if (editing?.is_admin_role) return;
-    setForm((f) => ({ ...f, can_issuance_all: allUsers }));
+    setForm((f) => ({ ...f, can_issuance_all_issued: allUsers }));
+  };
+
+  const setIssuanceReceiveScope = (allUsers) => {
+    if (editing?.is_admin_role) return;
+    setForm((f) => ({ ...f, can_issuance_all_received: allUsers }));
   };
 
   const selectAllPerms = (value) => {
@@ -415,28 +424,51 @@ export default function RolesTab() {
                               )}
                               {p.key === 'can_issuance' && (editing?.is_admin_role || form.can_issuance) && (
                                 <div className="ml-9 mt-1 mb-2 space-y-1.5 pl-3 border-l border-white/10">
-                                  <p className="text-slate-500 text-2xs">Область выдач</p>
+                                  <p className="text-slate-500 text-2xs">Область выдач (по выдавшему)</p>
                                   <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
                                     <input
                                       type="radio"
-                                      name="issuance_scope"
-                                      checked={editing?.is_admin_role ? true : !!form.can_issuance_all}
+                                      name="issuance_scope_issued"
+                                      checked={editing?.is_admin_role ? true : !!form.can_issuance_all_issued}
                                       disabled={!!editing?.is_admin_role}
                                       onChange={() => setIssuanceScope(true)}
                                       className="border-slate-600 text-brand-600"
                                     />
-                                    Все выдачи
+                                    Все данные
                                   </label>
                                   <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
                                     <input
                                       type="radio"
-                                      name="issuance_scope"
-                                      checked={editing?.is_admin_role ? false : !form.can_issuance_all}
+                                      name="issuance_scope_issued"
+                                      checked={editing?.is_admin_role ? false : !form.can_issuance_all_issued}
                                       disabled={!!editing?.is_admin_role}
                                       onChange={() => setIssuanceScope(false)}
                                       className="border-slate-600 text-brand-600"
                                     />
-                                    Только выдачи пользователя
+                                    Только то, что выдал пользователь
+                                  </label>
+                                  <p className="text-slate-500 text-2xs pt-2">Область выдач (по получателю)</p>
+                                  <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      name="issuance_scope_received"
+                                      checked={editing?.is_admin_role ? true : !!form.can_issuance_all_received}
+                                      disabled={!!editing?.is_admin_role}
+                                      onChange={() => setIssuanceReceiveScope(true)}
+                                      className="border-slate-600 text-brand-600"
+                                    />
+                                    Все данные
+                                  </label>
+                                  <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      name="issuance_scope_received"
+                                      checked={editing?.is_admin_role ? false : !form.can_issuance_all_received}
+                                      disabled={!!editing?.is_admin_role}
+                                      onChange={() => setIssuanceReceiveScope(false)}
+                                      className="border-slate-600 text-brand-600"
+                                    />
+                                    Только то, что принял пользователь
                                   </label>
                                 </div>
                               )}

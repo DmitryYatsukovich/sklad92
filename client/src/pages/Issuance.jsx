@@ -16,6 +16,7 @@ import { isQuickDeviceEnabled } from '../lib/offlineCache';
 const EMPTY_FILTERS = {
   date_from: '',
   date_to: '',
+  issuer: '',
   material: '',
   recipient: '',
   status: '',
@@ -102,6 +103,7 @@ function enrichRow(i, materialPrices) {
     _netQty: netQty,
     _cost: netQty * unitPrice,
     _smr: netQty * unitSmr,
+    _issuer: (issuedByName || issuedByLogin).toLowerCase(),
     _recipient: (issuedToName || issuedToLogin).toLowerCase(),
     _materialSearch: `${materialName} ${materialCode}`.toLowerCase(),
   };
@@ -263,12 +265,22 @@ export default function Issuance({ user }) {
   );
 
   const canViewAllIssuances = user?.role === 'admin' || !!user?.can_issuance_all;
+  const canViewAllIssued = user?.role === 'admin'
+    || !!user?.can_issuance_all
+    || !!user?.can_issuance_all_issued;
+  const canViewAllReceived = user?.role === 'admin'
+    || !!user?.can_issuance_all
+    || !!user?.can_issuance_all_received;
   const scopedIssuances = useMemo(() => {
-    if (canViewAllIssuances) return mergedIssuances;
+    if (canViewAllIssuances || canViewAllIssued || canViewAllReceived) return mergedIssuances;
     const uid = Number(user?.id || 0);
     if (!uid) return [];
-    return mergedIssuances.filter((row) => Number(row?.issued_to_user_id || 0) === uid);
-  }, [mergedIssuances, canViewAllIssuances, user?.id]);
+    return mergedIssuances.filter((row) => {
+      const byUser = Number(row?.issued_by_user_id || 0) === uid;
+      const toUser = Number(row?.issued_to_user_id || 0) === uid;
+      return byUser || toUser;
+    });
+  }, [mergedIssuances, canViewAllIssuances, canViewAllIssued, canViewAllReceived, user?.id]);
 
   const enriched = useMemo(
     () => scopedIssuances.map((i) => enrichRow(i, materialPrices)),
@@ -286,6 +298,10 @@ export default function Issuance({ user }) {
     if (filters.material) {
       const q = filters.material.toLowerCase();
       if (!i._materialSearch.includes(q)) return false;
+    }
+    if (filters.issuer) {
+      const q = filters.issuer.toLowerCase();
+      if (!i._issuer.includes(q)) return false;
     }
     if (filters.recipient) {
       const q = filters.recipient.toLowerCase();
@@ -310,6 +326,9 @@ export default function Issuance({ user }) {
       } else if (sortBy === 'recipient') {
         va = a._recipient;
         vb = b._recipient;
+      } else if (sortBy === 'issuer') {
+        va = a._issuer;
+        vb = b._issuer;
       } else if (sortBy === 'quantity') {
         va = a._qty;
         vb = b._qty;
@@ -648,6 +667,15 @@ export default function Issuance({ user }) {
             />
           </div>
           <div className="filter-field flex-1 min-w-[5rem]">
+            <span className="filter-label">Кем выдан</span>
+            <input
+              type="text"
+              value={filters.issuer}
+              onChange={(e) => setFilters((f) => ({ ...f, issuer: e.target.value }))}
+              className="filter-input"
+            />
+          </div>
+          <div className="filter-field flex-1 min-w-[5rem]">
             <span className="filter-label">Кому выдан</span>
             <input
               type="text"
@@ -688,6 +716,11 @@ export default function Issuance({ user }) {
                 <th>
                   <button type="button" onClick={() => toggleSort('material')} className="sort-btn">
                     Материал <SortIcon column="material" />
+                  </button>
+                </th>
+                <th>
+                  <button type="button" onClick={() => toggleSort('issuer')} className="sort-btn">
+                    Кем выдан <SortIcon column="issuer" />
                   </button>
                 </th>
                 <th>
@@ -760,6 +793,9 @@ export default function Issuance({ user }) {
                     </td>
                     <td className="text-white max-w-[10rem] truncate font-medium" title={i.material_name}>
                       {i.material_name}
+                    </td>
+                    <td className="text-zinc-300 max-w-[8rem] truncate" title={i.issued_by_name || i.issued_by_login}>
+                      {i.issued_by_name || i.issued_by_login || '—'}
                     </td>
                     <td className="text-zinc-300 max-w-[8rem] truncate" title={i.issued_to_name || i.issued_to_login}>
                       {i.issued_to_name || i.issued_to_login}
