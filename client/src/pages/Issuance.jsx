@@ -82,6 +82,8 @@ function enrichRow(i, materialPrices) {
   const unitSmr = mp?.production_price ?? Number(row.production_price ?? 0);
   const issuedToName = asText(row.issued_to_name);
   const issuedToLogin = asText(row.issued_to_login);
+  const issuedByName = asText(row.issued_by_name);
+  const issuedByLogin = asText(row.issued_by_login);
   const materialName = asText(row.material_name);
   const materialCode = asText(row.material_code);
   const unit = asText(row.unit) || 'шт';
@@ -92,6 +94,8 @@ function enrichRow(i, materialPrices) {
     material_code: materialCode,
     issued_to_name: issuedToName,
     issued_to_login: issuedToLogin,
+    issued_by_name: issuedByName,
+    issued_by_login: issuedByLogin,
     unit,
     _qty: qty,
     _returned: returned,
@@ -101,6 +105,18 @@ function enrichRow(i, materialPrices) {
     _recipient: (issuedToName || issuedToLogin).toLowerCase(),
     _materialSearch: `${materialName} ${materialCode}`.toLowerCase(),
   };
+}
+
+function issuanceHistoryLines(row) {
+  const issuer = row.issued_by_name || row.issued_by_login || '—';
+  const recipient = row.issued_to_name || row.issued_to_login || '—';
+  const lines = [`Выдал: ${issuer} → ${recipient}`];
+  if ((Number(row.returned_quantity) || 0) > 0) {
+    lines.push(`Вернул: ${recipient} → склад (${formatSumQty(row.returned_quantity)} ${row.unit || 'шт'})`);
+  }
+  const note = asText(row.note).trim();
+  if (note) lines.push(`Прим.: ${note}`);
+  return lines;
 }
 
 function ThWithSum({ label, column, sortBy, sortDir, onSort, sum, sumClassName = 'text-zinc-500' }) {
@@ -281,6 +297,9 @@ export default function Issuance({ user }) {
       } else if (sortBy === 'quantity') {
         va = a._qty;
         vb = b._qty;
+      } else if (sortBy === 'net_qty') {
+        va = a._netQty;
+        vb = b._netQty;
       } else if (sortBy === 'cost') {
         va = a._cost;
         vb = b._cost;
@@ -299,14 +318,16 @@ export default function Issuance({ user }) {
 
   const totals = useMemo(() => {
     let quantity = 0;
+    let netQty = 0;
     let cost = 0;
     let smr = 0;
     for (const i of sortedList) {
       quantity += i._qty;
+      netQty += i._netQty;
       cost += i._cost;
       smr += i._smr;
     }
-    return { quantity, cost, smr };
+    return { quantity, netQty, cost, smr };
   }, [sortedList]);
 
   const paginationResetKey = useMemo(() => JSON.stringify(filters), [filters]);
@@ -405,6 +426,13 @@ export default function Issuance({ user }) {
     const currentRecipientId = Number(transferRow.issued_to_user_id);
     return issueUsers.filter((u) => Number(u.id) !== currentRecipientId);
   }, [issueUsers, transferRow]);
+  const transferRemainingPreview = useMemo(() => {
+    if (!transferRow) return 0;
+    const available = Math.max(remainingQty(transferRow), 0);
+    const transferAmount = Number(transferQuantity);
+    if (!Number.isFinite(transferAmount) || transferAmount < 0) return available;
+    return Math.max(available - transferAmount, 0);
+  }, [transferRow, transferQuantity]);
 
   const handleDeleteIssuance = async () => {
     if (!returnRow || user?.role !== 'admin') return;
@@ -649,13 +677,25 @@ export default function Issuance({ user }) {
                     Кому выдан <SortIcon column="recipient" />
                   </button>
                 </th>
+                <th className="min-w-[18rem]">
+                  История изменений
+                </th>
                 <ThWithSum
-                  label="Кол-во"
+                  label="Выдано"
                   column="quantity"
                   sortBy={sortBy}
                   sortDir={sortDir}
                   onSort={toggleSort}
                   sum={formatSumQty(totals.quantity)}
+                />
+                <ThWithSum
+                  label="На руках"
+                  column="net_qty"
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  onSort={toggleSort}
+                  sum={formatSumQty(totals.netQty)}
+                  sumClassName="text-emerald-300"
                 />
                 <ThWithSum
                   label="Стоимость"
@@ -673,7 +713,7 @@ export default function Issuance({ user }) {
                   onSort={toggleSort}
                   sum={formatSumMoney(totals.smr)}
                 />
-                <th className="w-24 text-right" />
+                <th className="w-36 text-right" />
               </tr>
             </thead>
             <tbody>
@@ -706,12 +746,27 @@ export default function Issuance({ user }) {
                     <td className="text-zinc-300 max-w-[8rem] truncate" title={i.issued_to_name || i.issued_to_login}>
                       {i.issued_to_name || i.issued_to_login}
                     </td>
+                    <td className="text-zinc-400 text-2xs leading-snug max-w-[18rem]">
+                      {issuanceHistoryLines(i).map((line, idx) => (
+                        <div
+                          key={`${i.id}-history-${idx}`}
+                          className={idx === 0 ? 'text-zinc-300 truncate' : 'truncate'}
+                          title={line}
+                        >
+                          {line}
+                        </div>
+                      ))}
+                    </td>
                     <td className="text-right tabular-nums">
                       <span className="text-white">{i._qty}</span>
                       <span className="text-zinc-500 text-2xs"> {i.unit}</span>
                       {i._returned > 0 && (
                         <div className="text-2xs text-zinc-500">верн. {i._returned}</div>
                       )}
+                    </td>
+                    <td className="text-right tabular-nums">
+                      <span className="text-emerald-300">{formatSumQty(i._netQty)}</span>
+                      <span className="text-zinc-500 text-2xs"> {i.unit}</span>
                     </td>
                     <td className="text-right text-zinc-400 tabular-nums">{i._cost.toFixed(2)}</td>
                     <td className="text-right text-zinc-400 tabular-nums">{i._smr.toFixed(2)}</td>
@@ -812,6 +867,10 @@ export default function Issuance({ user }) {
             </p>
             <p className="text-zinc-500 text-xs mb-4">
               Доступно для передачи: <span className="text-white">{Math.max(remainingQty(transferRow), 0)} {transferRow.unit}</span>
+            </p>
+            <p className="text-zinc-500 text-xs mb-4">
+              После передачи останется у текущего получателя:{' '}
+              <span className="text-emerald-300">{formatSumQty(transferRemainingPreview)} {transferRow.unit}</span>
             </p>
             {error && <p className="alert-error mb-3">{error}</p>}
             <form onSubmit={handleTransfer} className="space-y-3">

@@ -252,6 +252,9 @@ function buildIssuanceFromIssue(entry, body, ctx) {
     production_price: mat?.production_price ?? 0,
     issued_to_login: recipient?.login || currentUser?.login || '',
     issued_to_name: recipient?.display_name || recipient?.login || currentUser?.display_name || '',
+    issued_by_user_id: currentUser?.id ?? null,
+    issued_by_login: currentUser?.login || '',
+    issued_by_name: currentUser?.display_name || currentUser?.login || '',
   });
 }
 
@@ -277,6 +280,9 @@ function buildIssuanceFromTransfer(entry, sourceRow, body, ctx) {
     production_price: sourceRow.production_price ?? 0,
     issued_to_login: recipient?.login || '',
     issued_to_name: recipient?.display_name || recipient?.login || '',
+    issued_by_user_id: currentUser?.id ?? null,
+    issued_by_login: currentUser?.login || '',
+    issued_by_name: currentUser?.display_name || currentUser?.login || '',
   });
 }
 

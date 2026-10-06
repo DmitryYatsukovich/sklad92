@@ -505,12 +505,15 @@ router.get('/issuances', async (req, res) => {
   const whereSql = canViewAll ? '' : 'WHERE i.issued_to_user_id = $1';
   const params = canViewAll ? [] : [req.user.id];
   const r = await pool.query(
-    `SELECT i.id, i.material_id, i.issued_to_user_id, i.quantity, i.issued_at, i.returned_at, i.returned_quantity, i.note, i.updated_at,
+    `SELECT i.id, i.material_id, i.issued_to_user_id, i.issued_by_user_id,
+            i.quantity, i.issued_at, i.returned_at, i.returned_quantity, i.note, i.updated_at,
             m.code AS material_code, m.name AS material_name, m.unit, m.price, m.production_price,
-            u.login AS issued_to_login, u.display_name AS issued_to_name
+            u.login AS issued_to_login, u.display_name AS issued_to_name,
+            ub.login AS issued_by_login, ub.display_name AS issued_by_name
      FROM issuances i
      JOIN materials m ON m.id = i.material_id
      JOIN users u ON u.id = i.issued_to_user_id
+     LEFT JOIN users ub ON ub.id = i.issued_by_user_id
      ${whereSql}
      ORDER BY i.issued_at DESC
      LIMIT 1000`,
