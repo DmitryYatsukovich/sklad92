@@ -480,7 +480,8 @@ router.get('/production', async (req, res) => {
 
   const isAdmin = req.user.role === 'admin';
   const params = [from, to];
-  let where = `WHERE i.issued_at::date >= $1::date AND i.issued_at::date <= $2::date`;
+  let where = `WHERE i.issued_at::date >= $1::date AND i.issued_at::date <= $2::date
+               AND COALESCE(pa.produced_qty, 0) > 0`;
 
   if (!isAdmin) {
     params.push(req.session.userId);

@@ -510,6 +510,13 @@ export const operations = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  productionDistribution: (issuanceId) =>
+    request(`/api/operations/issuances/${issuanceId}/production-distribution`),
+  cancelProductionDistribution: (issuanceId, locationSystemId) =>
+    request(`/api/operations/issuances/${issuanceId}/production-distribution`, {
+      method: 'DELETE',
+      body: JSON.stringify({ location_system_id: locationSystemId }),
+    }),
   setReturnedQuantity: (issuanceId, returned_quantity) =>
     request(`/api/operations/issuances/${issuanceId}/returned`, {
       method: 'PATCH',

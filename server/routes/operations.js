@@ -666,6 +666,53 @@ router.get('/issuances', async (req, res) => {
   res.json(r.rows);
 });
 
+router.get('/issuances/:id/production-distribution', async (req, res) => {
+  const issuanceId = parseId(req.params.id);
+  if (!issuanceId) return res.status(400).json({ error: 'Неверный id выдачи' });
+
+  const issuance = (await pool.query(
+    `SELECT id, issued_to_user_id
+     FROM issuances
+     WHERE id = $1`,
+    [issuanceId],
+  )).rows[0];
+  if (!issuance) return res.status(404).json({ error: 'Выдача не найдена' });
+  if (
+    req.user?.role !== 'admin'
+    && !req.user?.can_issuance_all
+    && Number(issuance.issued_to_user_id) !== Number(req.user?.id)
+  ) {
+    return res.status(403).json({ error: 'Нет доступа к этой выдаче' });
+  }
+
+  const rows = (await pool.query(
+    `SELECT ipa.location_system_id,
+            ipa.status_id,
+            bs.name AS status_name,
+            bs.color AS status_color,
+            ARRAY_AGG(DISTINCT ipa.worker_user_id) AS worker_user_ids,
+            ARRAY_AGG(DISTINCT COALESCE(NULLIF(TRIM(u.display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.login)) AS worker_names,
+            COALESCE(SUM(ipa.quantity), 0)::numeric AS quantity
+     FROM issuance_production_allocations ipa
+     LEFT JOIN work_block_statuses bs ON bs.id = ipa.status_id
+     LEFT JOIN users u ON u.id = ipa.worker_user_id
+     WHERE ipa.issuance_id = $1
+     GROUP BY ipa.location_system_id, ipa.status_id, bs.name, bs.color
+     ORDER BY ipa.location_system_id`,
+    [issuanceId],
+  )).rows.map((row) => ({
+    location_system_id: Number(row.location_system_id),
+    status_id: row.status_id == null ? null : Number(row.status_id),
+    status_name: row.status_name || null,
+    status_color: row.status_color || null,
+    worker_user_ids: Array.isArray(row.worker_user_ids) ? row.worker_user_ids.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0) : [],
+    worker_names: Array.isArray(row.worker_names) ? row.worker_names.filter(Boolean) : [],
+    quantity: Number(row.quantity || 0),
+  }));
+
+  res.json(rows);
+});
+
 router.post('/issuances/:id/production-distribution', async (req, res) => {
   const issuanceId = parseId(req.params.id);
   if (!issuanceId) return res.status(400).json({ error: 'Неверный id выдачи' });
@@ -674,12 +721,17 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
   const assignmentsMap = new Map();
   for (const row of rawAssignments) {
     const locationSystemId = parseId(row?.location_system_id);
-    const workerUserId = parseId(row?.worker_user_id);
+    const workerUserIdsRaw = Array.isArray(row?.worker_user_ids)
+      ? row.worker_user_ids
+      : [row?.worker_user_id];
+    const workerUserIds = [...new Set(
+      workerUserIdsRaw.map((value) => parseId(value)).filter(Boolean),
+    )];
     const statusId = parseId(row?.status_id);
-    if (!locationSystemId || !workerUserId || !statusId) {
-      return res.status(400).json({ error: 'В каждом блоке нужно выбрать сотрудника и статус выработки' });
+    if (!locationSystemId || !workerUserIds.length || !statusId) {
+      return res.status(400).json({ error: 'В каждом блоке нужно выбрать статус и хотя бы одного сотрудника' });
     }
-    assignmentsMap.set(locationSystemId, { locationSystemId, workerUserId, statusId });
+    assignmentsMap.set(locationSystemId, { locationSystemId, workerUserIds, statusId });
   }
   const assignments = [...assignmentsMap.values()];
   if (!assignments.length) {
@@ -745,7 +797,9 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
       return res.status(400).json({ error: 'Выбран статус, который не отмечен как статус для выработки' });
     }
 
-    const workerIds = [...new Set(assignments.map((row) => row.workerUserId))];
+    const workerIds = [...new Set(
+      assignments.flatMap((row) => row.workerUserIds),
+    )];
     const workers = await client.query(
       `SELECT id,
               COALESCE(NULLIF(TRIM(display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', first_name, last_name)), ''), login) AS worker_name
@@ -754,7 +808,7 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
       [workerIds],
     );
     const workerMap = new Map(workers.rows.map((row) => [Number(row.id), row.worker_name]));
-    const missingWorker = assignments.find((row) => !workerMap.has(row.workerUserId));
+    const missingWorker = assignments.find((row) => row.workerUserIds.some((userId) => !workerMap.has(userId)));
     if (missingWorker) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Сотрудник для выработки не найден' });
@@ -862,33 +916,46 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
       });
     }
 
+    let totalAllocations = 0;
     for (const assignment of assignments) {
       const slotQty = Number(slotQuantityMap.get(assignment.locationSystemId) || 0);
-      await client.query(
-        `INSERT INTO issuance_production_allocations
-          (issuance_id, location_system_id, worker_user_id, status_id, quantity, created_by_user_id)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          issuanceId,
-          assignment.locationSystemId,
-          assignment.workerUserId,
-          assignment.statusId,
-          slotQty,
-          req.session.userId,
-        ],
-      );
-
+      const workersCount = assignment.workerUserIds.length;
+      const perWorkerQty = workersCount > 0 ? (slotQty / workersCount) : slotQty;
+      let distributedQty = 0;
+      for (let idx = 0; idx < assignment.workerUserIds.length; idx += 1) {
+        const workerUserId = assignment.workerUserIds[idx];
+        const isLast = idx === assignment.workerUserIds.length - 1;
+        const qtyForWorker = isLast ? Math.max(slotQty - distributedQty, 0) : perWorkerQty;
+        distributedQty += qtyForWorker;
+        if (!(qtyForWorker > 0)) continue;
+        await client.query(
+          `INSERT INTO issuance_production_allocations
+            (issuance_id, location_system_id, worker_user_id, status_id, quantity, created_by_user_id)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            issuanceId,
+            assignment.locationSystemId,
+            workerUserId,
+            assignment.statusId,
+            qtyForWorker,
+            req.session.userId,
+          ],
+        );
+        totalAllocations += 1;
+      }
       await client.query(
         `UPDATE work_location_systems
          SET status_id = $1,
              assigned_user_id = $2,
              updated_at = NOW()
          WHERE id = $3`,
-        [assignment.statusId, assignment.workerUserId, assignment.locationSystemId],
+        [assignment.statusId, assignment.workerUserIds[0], assignment.locationSystemId],
       );
     }
 
-    const workersSummary = [...new Set(assignments.map((assignment) => workerMap.get(assignment.workerUserId) || `#${assignment.workerUserId}`))]
+    const workersSummary = [...new Set(
+      assignments.flatMap((assignment) => assignment.workerUserIds.map((userId) => workerMap.get(userId) || `#${userId}`)),
+    )]
       .join(', ');
     const productionEventTag = makeIssuanceEventTag('production', {
       qty: totalProducedNow,
@@ -910,6 +977,7 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
       ok: true,
       issuance_id: issuanceId,
       allocations_count: assignments.length,
+      workers_allocations_count: totalAllocations,
       produced_quantity: totalProducedNow,
       remaining_on_hands: Math.max(availableOnHands - totalProducedNow, 0),
     });
@@ -917,6 +985,100 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
     await client.query('ROLLBACK').catch(() => {});
     console.error('POST /operations/issuances/:id/production-distribution:', e.message);
     res.status(500).json({ error: e.message || 'Ошибка сохранения выработки' });
+  } finally {
+    client.release();
+  }
+});
+
+router.delete('/issuances/:id/production-distribution', async (req, res) => {
+  const issuanceId = parseId(req.params.id);
+  const locationSystemId = parseId(req.body?.location_system_id);
+  if (!issuanceId || !locationSystemId) {
+    return res.status(400).json({ error: 'Нужно указать выдачу и блок для отмены выработки' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const issuance = (await client.query(
+      `SELECT id, issued_to_user_id, note
+       FROM issuances
+       WHERE id = $1
+       FOR UPDATE`,
+      [issuanceId],
+    )).rows[0];
+    if (!issuance) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Выдача не найдена' });
+    }
+    if (
+      req.user?.role !== 'admin'
+      && !req.user?.can_issuance_all
+      && Number(issuance.issued_to_user_id) !== Number(req.user?.id)
+    ) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Нет доступа к этой выдаче' });
+    }
+
+    const deleted = await client.query(
+      `DELETE FROM issuance_production_allocations
+       WHERE issuance_id = $1
+         AND location_system_id = $2
+       RETURNING id, quantity`,
+      [issuanceId, locationSystemId],
+    );
+    if (!deleted.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'По этому блоку нет выработки для отмены' });
+    }
+    const restoredQty = deleted.rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+
+    const latestSlotAllocation = (await client.query(
+      `SELECT status_id, worker_user_id
+       FROM issuance_production_allocations
+       WHERE location_system_id = $1
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+      [locationSystemId],
+    )).rows[0] || null;
+    await client.query(
+      `UPDATE work_location_systems
+       SET status_id = $1,
+           assigned_user_id = $2,
+           updated_at = NOW()
+       WHERE id = $3`,
+      [
+        latestSlotAllocation?.status_id ?? null,
+        latestSlotAllocation?.worker_user_id ?? null,
+        locationSystemId,
+      ],
+    );
+
+    const cancelTag = makeIssuanceEventTag('production_cancel', {
+      qty: restoredQty,
+      blocks: 1,
+      at: new Date().toISOString(),
+    });
+    const nextNote = appendIssuanceEventTag(issuance.note, cancelTag);
+    await client.query(
+      `UPDATE issuances
+       SET note = $2,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [issuanceId, nextNote],
+    );
+
+    await client.query('COMMIT');
+    res.json({
+      ok: true,
+      issuance_id: issuanceId,
+      location_system_id: locationSystemId,
+      restored_quantity: restoredQty,
+    });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('DELETE /operations/issuances/:id/production-distribution:', e.message);
+    res.status(500).json({ error: e.message || 'Ошибка отмены выработки' });
   } finally {
     client.release();
   }

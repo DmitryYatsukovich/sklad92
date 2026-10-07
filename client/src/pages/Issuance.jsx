@@ -160,6 +160,9 @@ function issuanceHistoryLines(row) {
       const workers = evt.payload.workers || '—';
       const blocks = evt.payload.blocks || '—';
       lines.push(`Выработал (${qty || '—'}) · блоков: ${blocks} · сотрудники: ${workers} · ${at}`);
+    } else if (evt.type === 'production_cancel') {
+      const blocks = evt.payload.blocks || '—';
+      lines.push(`Отменил выработку (${qty || '—'}) · блоков: ${blocks} · ${at}`);
     }
   }
   if (events.length === 0 && (Number(row.returned_quantity) || 0) > 0) {

@@ -62,6 +62,17 @@ function normalizeNameKey(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function normalizeIdList(values) {
+  return [...new Set((values || []).map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))];
+}
+
+function areSameIdLists(a, b) {
+  const left = normalizeIdList(a).sort((x, y) => x - y);
+  const right = normalizeIdList(b).sort((x, y) => x - y);
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+}
+
 function getTextColorForHex(hex) {
   if (!/^#[0-9a-fA-F]{6}$/.test(String(hex || ''))) return '#E5E7EB';
   const cleanHex = hex.slice(1);
@@ -226,6 +237,7 @@ export default function ObjectsOverview() {
   const [editorBusy, setEditorBusy] = useState(false);
   const [editorError, setEditorError] = useState('');
   const [productionMode, setProductionMode] = useState(null);
+  const [productionCommitted, setProductionCommitted] = useState({});
   const [productionDrafts, setProductionDrafts] = useState({});
   const [productionBusy, setProductionBusy] = useState(false);
   const [productionError, setProductionError] = useState('');
@@ -241,6 +253,46 @@ export default function ObjectsOverview() {
       .finally(() => {
         if (!silent) setLoading(false);
       });
+  }, []);
+
+  const loadProductionCommitted = useCallback(async (issuanceId) => {
+    const id = Number(issuanceId || 0);
+    if (!id) {
+      setProductionCommitted({});
+      return;
+    }
+    try {
+      const rows = await operationsApi.productionDistribution(id);
+      const grouped = {};
+      (Array.isArray(rows) ? rows : []).forEach((row) => {
+        const slotId = Number(row?.location_system_id || 0);
+        if (!slotId) return;
+        if (!grouped[slotId]) {
+          grouped[slotId] = {
+            locationSystemId: slotId,
+            statusId: row?.status_id == null ? null : Number(row.status_id),
+            statusName: row?.status_name || '',
+            statusColor: row?.status_color || '',
+            workerUserIds: normalizeIdList(row?.worker_user_ids),
+            workerNames: Array.isArray(row?.worker_names) ? row.worker_names.filter(Boolean) : [],
+            quantity: Number(row?.quantity || 0),
+          };
+          return;
+        }
+        const current = grouped[slotId];
+        current.quantity += Number(row?.quantity || 0);
+        current.workerUserIds = normalizeIdList([...current.workerUserIds, ...(row?.worker_user_ids || [])]);
+        current.workerNames = [...new Set([...current.workerNames, ...((Array.isArray(row?.worker_names) ? row.worker_names : []).filter(Boolean))])];
+        if (current.statusId == null && row?.status_id != null) {
+          current.statusId = Number(row.status_id);
+          current.statusName = row?.status_name || current.statusName;
+          current.statusColor = row?.status_color || current.statusColor;
+        }
+      });
+      setProductionCommitted(grouped);
+    } catch {
+      setProductionCommitted({});
+    }
   }, []);
 
   useEffect(() => {
@@ -274,6 +326,7 @@ export default function ObjectsOverview() {
       availableQty: Math.max(Number(payload.availableQty || 0), 0),
       selectedWorkers,
     });
+    setProductionCommitted({});
     setProductionDrafts({});
     setProductionBusy(false);
     setProductionError('');
@@ -281,6 +334,14 @@ export default function ObjectsOverview() {
     setProductionPicker(null);
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.pathname, location.state, navigate]);
+
+  useEffect(() => {
+    if (!productionMode?.issuanceId) {
+      setProductionCommitted({});
+      return;
+    }
+    void loadProductionCommitted(productionMode.issuanceId);
+  }, [productionMode?.issuanceId, loadProductionCommitted]);
 
   const objects = useMemo(
     () => [...data.objects].sort((a, b) => naturalCompare(a.name, b.name)),
@@ -607,6 +668,14 @@ export default function ObjectsOverview() {
   };
 
   const isProductionMode = !!productionMode;
+  const productionCommittedRows = useMemo(
+    () => Object.values(productionCommitted),
+    [productionCommitted],
+  );
+  const productionCommittedQty = useMemo(
+    () => productionCommittedRows.reduce((sum, row) => sum + Number(row.quantity || 0), 0),
+    [productionCommittedRows],
+  );
   const productionDraftRows = useMemo(
     () => Object.values(productionDrafts),
     [productionDrafts],
@@ -622,6 +691,7 @@ export default function ObjectsOverview() {
 
   const clearProductionMode = ({ keepMessage = false } = {}) => {
     setProductionMode(null);
+    setProductionCommitted({});
     setProductionDrafts({});
     setProductionBusy(false);
     setProductionError('');
@@ -629,15 +699,17 @@ export default function ObjectsOverview() {
     setProductionPicker(null);
   };
 
-  const applyProductionDraft = ({ slotId, statusId, workerUserId }) => {
+  const applyProductionDraft = ({ slotId, statusId, workerUserIds }) => {
     const materialEntry = productionMaterialEntryBySlot.get(Number(slotId));
     if (!materialEntry) return;
+    const normalizedWorkerIds = normalizeIdList(workerUserIds);
+    if (!normalizedWorkerIds.length) return;
     setProductionDrafts((prev) => ({
       ...prev,
       [slotId]: {
         locationSystemId: Number(slotId),
         statusId: Number(statusId),
-        workerUserId: Number(workerUserId),
+        workerUserIds: normalizedWorkerIds,
         quantity: Number(materialEntry.quantity || 0),
       },
     }));
@@ -652,13 +724,22 @@ export default function ObjectsOverview() {
   };
 
   const openProductionPickerForSlot = (slot) => {
-    const existing = productionDrafts[slot.id];
+    const slotId = Number(slot.id);
+    const draft = productionDrafts[slotId] || null;
+    const committed = productionCommitted[slotId] || null;
     const fallbackStatus = productionStatuses[0]?.id || '';
-    const fallbackWorker = productionMode?.selectedWorkers?.[0]?.id || '';
+    const fallbackWorkers = normalizeIdList((productionMode?.selectedWorkers || []).map((row) => row.id));
+    const pickerWorkerIds = draft
+      ? normalizeIdList(draft.workerUserIds)
+      : committed
+        ? normalizeIdList(committed.workerUserIds)
+        : fallbackWorkers;
     setProductionPicker({
-      slotId: Number(slot.id),
-      statusId: existing?.statusId || fallbackStatus,
-      workerUserId: existing?.workerUserId || fallbackWorker,
+      slotId,
+      statusId: draft?.statusId || committed?.statusId || fallbackStatus,
+      workerUserIds: pickerWorkerIds,
+      canCancelCommitted: !!committed,
+      committedQuantity: Number(committed?.quantity || 0),
     });
   };
 
@@ -669,8 +750,10 @@ export default function ObjectsOverview() {
     }
     setProductionError('');
     setProductionMessage('');
-    const materialEntry = productionMaterialEntryBySlot.get(Number(slot.id));
-    if (!materialEntry) {
+    const slotId = Number(slot.id);
+    const committed = productionCommitted[slotId] || null;
+    const materialEntry = productionMaterialEntryBySlot.get(slotId);
+    if (!materialEntry && !committed) {
       setProductionError('Для этого блока не найдено количество выбранного материала.');
       return;
     }
@@ -683,32 +766,81 @@ export default function ObjectsOverview() {
       setProductionError('Нет выбранных сотрудников для выработки.');
       return;
     }
-    if (productionStatuses.length === 1 && workers.length === 1) {
+    if (!committed && productionStatuses.length === 1) {
       const statusId = Number(productionStatuses[0].id);
-      const workerUserId = Number(workers[0].id);
-      const existing = productionDrafts[slot.id];
-      if (existing && existing.statusId === statusId && existing.workerUserId === workerUserId) {
-        removeProductionDraft(slot.id);
+      const workerUserIds = normalizeIdList(workers.map((row) => row.id));
+      const existing = productionDrafts[slotId];
+      if (
+        existing
+        && Number(existing.statusId) === statusId
+        && areSameIdLists(existing.workerUserIds, workerUserIds)
+      ) {
+        removeProductionDraft(slotId);
       } else {
-        applyProductionDraft({ slotId: slot.id, statusId, workerUserId });
+        applyProductionDraft({ slotId, statusId, workerUserIds });
       }
       return;
     }
     openProductionPickerForSlot(slot);
   };
 
+  const togglePickerWorker = (workerId) => {
+    const id = Number(workerId);
+    if (!productionPicker || !id) return;
+    setProductionPicker((prev) => {
+      const currentIds = normalizeIdList(prev?.workerUserIds);
+      const exists = currentIds.includes(id);
+      return {
+        ...prev,
+        workerUserIds: exists
+          ? currentIds.filter((value) => value !== id)
+          : [...currentIds, id],
+      };
+    });
+  };
+
   const saveProductionPicker = () => {
     if (!productionPicker) return;
-    if (!Number(productionPicker.statusId) || !Number(productionPicker.workerUserId)) {
-      setProductionError('Выберите статус и сотрудника');
+    if (!Number(productionPicker.statusId) || !normalizeIdList(productionPicker.workerUserIds).length) {
+      setProductionError('Выберите статус и хотя бы одного сотрудника');
       return;
     }
     applyProductionDraft({
       slotId: productionPicker.slotId,
       statusId: Number(productionPicker.statusId),
-      workerUserId: Number(productionPicker.workerUserId),
+      workerUserIds: normalizeIdList(productionPicker.workerUserIds),
     });
     setProductionPicker(null);
+  };
+
+  const cancelProductionForSlot = async (slotId) => {
+    if (!productionMode?.issuanceId) return;
+    setProductionBusy(true);
+    setProductionError('');
+    setProductionMessage('');
+    try {
+      const response = await operationsApi.cancelProductionDistribution(productionMode.issuanceId, slotId);
+      const restoredQty = Number(response?.restored_quantity || 0);
+      setProductionMode((prev) => (
+        prev
+          ? {
+            ...prev,
+            availableQty: Number(prev.availableQty || 0) + restoredQty,
+          }
+          : prev
+      ));
+      await Promise.all([
+        load({ silent: true }),
+        loadProductionCommitted(productionMode.issuanceId),
+      ]);
+      removeProductionDraft(slotId);
+      setProductionMessage('Выработка по блоку отменена. Количество возвращено во вкладку «Выдача».');
+      setProductionPicker(null);
+    } catch (e) {
+      setProductionError(e.message || 'Не удалось отменить выработку по блоку');
+    } finally {
+      setProductionBusy(false);
+    }
   };
 
   const saveProductionDistribution = async () => {
@@ -725,16 +857,27 @@ export default function ObjectsOverview() {
     setProductionError('');
     setProductionMessage('');
     try {
-      await operationsApi.distributeProduction(productionMode.issuanceId, {
+      const response = await operationsApi.distributeProduction(productionMode.issuanceId, {
         assignments: productionDraftRows.map((row) => ({
           location_system_id: row.locationSystemId,
-          worker_user_id: row.workerUserId,
+          worker_user_ids: normalizeIdList(row.workerUserIds),
           status_id: row.statusId,
         })),
       });
-      setProductionMessage('Выработка сохранена. Статусы блоков обновлены.');
-      await load({ silent: true });
-      clearProductionMode({ keepMessage: true });
+      setProductionDrafts({});
+      setProductionMode((prev) => (
+        prev
+          ? {
+            ...prev,
+            availableQty: Number(response?.remaining_on_hands ?? prev.availableQty ?? 0),
+          }
+          : prev
+      ));
+      await Promise.all([
+        load({ silent: true }),
+        loadProductionCommitted(productionMode.issuanceId),
+      ]);
+      setProductionMessage('Выработка сохранена и добавлена в блоки.');
     } catch (e) {
       setProductionError(e.message || 'Не удалось сохранить выработку');
     } finally {
@@ -796,22 +939,29 @@ export default function ObjectsOverview() {
                   {categoryRow.slots.map((slot) => {
                     const entries = entriesBySlot.get(slot.id) || [];
                     const draft = productionDrafts[slot.id] || null;
-                    const draftStatus = draft ? productionStatusById.get(Number(draft.statusId)) : null;
-                    const draftWorker = draft ? productionWorkersById.get(Number(draft.workerUserId)) : '';
+                    const committed = productionCommitted[slot.id] || null;
+                    const activeStatusId = draft?.statusId ?? committed?.statusId ?? null;
+                    const activeStatus = activeStatusId == null ? null : productionStatusById.get(Number(activeStatusId));
+                    const activeWorkerNames = draft
+                      ? normalizeIdList(draft.workerUserIds).map((id) => productionWorkersById.get(id) || `#${id}`).filter(Boolean)
+                      : (committed?.workerNames || []);
+                    const activeStatusName = activeStatus?.name || committed?.statusName || '';
                     const hasMaterialQty = productionMaterialEntryBySlot.has(Number(slot.id));
                     const selectionCaption = draft
-                      ? [draftWorker, draftStatus?.name].filter(Boolean).join(' · ')
-                      : (isProductionMode && !hasMaterialQty ? 'Нет количества материала' : '');
+                      ? [...activeWorkerNames, activeStatusName, 'черновик'].filter(Boolean).join(' · ')
+                      : committed
+                        ? [...activeWorkerNames, activeStatusName, 'выполнено'].filter(Boolean).join(' · ')
+                        : (isProductionMode && !hasMaterialQty ? 'Нет количества материала' : '');
                     return (
                     <LocationSlotChip
                       key={slot.id}
                       slot={slot}
                       entries={entries}
                       onOpen={handleProductionSlotClick}
-                      selected={!!draft}
+                      selected={!!draft || !!committed}
                       selectionCaption={selectionCaption}
-                      selectionColor={draftStatus?.color || ''}
-                      disabled={isProductionMode && !hasMaterialQty}
+                      selectionColor={activeStatus?.color || ''}
+                      disabled={isProductionMode && !hasMaterialQty && !committed}
                     />
                     );
                   })}
@@ -1168,6 +1318,7 @@ export default function ObjectsOverview() {
           <p className="text-zinc-300 text-xs">
             На руках: {Number(productionMode.availableQty || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {productionMode.unit}
             {' · '}Запланировано: {plannedProductionQty.toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {productionMode.unit}
+            {' · '}Проведено: {productionCommittedQty.toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {productionMode.unit}
             {' · '}Останется: {productionRemainingPreview.toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {productionMode.unit}
           </p>
           <p className="text-zinc-400 text-2xs">
@@ -1294,6 +1445,11 @@ export default function ObjectsOverview() {
             <p className="text-zinc-400 text-xs mt-1">
               Блок #{productionPicker.slotId}
             </p>
+            {productionPicker.canCancelCommitted && (
+              <p className="text-amber-300 text-2xs mt-1">
+                В блоке уже проведена выработка: {Number(productionPicker.committedQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {productionMode?.unit || 'шт'}
+              </p>
+            )}
             <div className="space-y-3 mt-4">
               <div>
                 <label className="label">Статус выработки</label>
@@ -1311,28 +1467,44 @@ export default function ObjectsOverview() {
                 </select>
               </div>
               <div>
-                <label className="label">Сотрудник</label>
-                <select
-                  className="input"
-                  value={productionPicker.workerUserId}
-                  onChange={(e) => setProductionPicker((prev) => ({ ...prev, workerUserId: Number(e.target.value || 0) }))}
-                >
-                  <option value="">Выберите сотрудника</option>
-                  {(productionMode?.selectedWorkers || []).map((row) => (
-                    <option key={row.id} value={row.id}>{row.label}</option>
-                  ))}
-                </select>
+                <label className="label">Исполнители</label>
+                <div className="max-h-44 overflow-y-auto rounded-lg border border-white/10 bg-black/20 p-2 space-y-1">
+                  {(productionMode?.selectedWorkers || []).map((row) => {
+                    const selected = normalizeIdList(productionPicker.workerUserIds).includes(Number(row.id));
+                    return (
+                      <label
+                        key={row.id}
+                        className="flex items-start gap-2 text-sm text-zinc-200 cursor-pointer hover:bg-white/5 rounded px-1 py-0.5"
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={selected}
+                          onChange={() => togglePickerWorker(row.id)}
+                        />
+                        <span>{row.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-zinc-500 text-2xs mt-1">
+                  Выбрано: {normalizeIdList(productionPicker.workerUserIds).length}
+                </p>
               </div>
               <div className="flex justify-between gap-2">
                 <button
                   type="button"
                   className="btn-ghost text-rose-300"
                   onClick={() => {
+                    if (productionPicker.canCancelCommitted) {
+                      void cancelProductionForSlot(productionPicker.slotId);
+                      return;
+                    }
                     removeProductionDraft(productionPicker.slotId);
                     setProductionPicker(null);
                   }}
                 >
-                  Снять выбор
+                  {productionPicker.canCancelCommitted ? 'Отменить выработку' : 'Снять выбор'}
                 </button>
                 <div className="flex gap-2">
                   <button type="button" className="btn-secondary text-sm" onClick={() => setProductionPicker(null)}>
