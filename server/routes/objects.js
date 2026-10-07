@@ -37,6 +37,7 @@ async function ensureObjectStatusSchema() {
           name VARCHAR(200) NOT NULL UNIQUE,
           color VARCHAR(16) NOT NULL,
           is_for_production BOOLEAN NOT NULL DEFAULT false,
+          counts_as_produced BOOLEAN NOT NULL DEFAULT false,
           sort_order INTEGER NOT NULL DEFAULT 0,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -44,6 +45,9 @@ async function ensureObjectStatusSchema() {
       );
       await pool.query(
         'ALTER TABLE work_block_statuses ADD COLUMN IF NOT EXISTS is_for_production BOOLEAN NOT NULL DEFAULT false',
+      );
+      await pool.query(
+        'ALTER TABLE work_block_statuses ADD COLUMN IF NOT EXISTS counts_as_produced BOOLEAN NOT NULL DEFAULT false',
       );
       await pool.query(
         'ALTER TABLE work_location_systems ADD COLUMN IF NOT EXISTS status_id INTEGER REFERENCES work_block_statuses(id) ON DELETE SET NULL',
@@ -205,7 +209,7 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
          ORDER BY ms.name NULLS LAST, mc.name NULLS LAST, m.name`,
       ),
       pool.query(
-        `SELECT id, name, color, is_for_production, sort_order, created_at, updated_at
+        `SELECT id, name, color, is_for_production, counts_as_produced, sort_order, created_at, updated_at
          FROM work_block_statuses
          ORDER BY sort_order, name`,
       ),

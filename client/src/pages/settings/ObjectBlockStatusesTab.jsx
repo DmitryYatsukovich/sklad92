@@ -27,6 +27,7 @@ export default function ObjectBlockStatusesTab() {
   const [name, setName] = useState('');
   const [color, setColor] = useState(COLOR_PALETTE[0]);
   const [isForProduction, setIsForProduction] = useState(false);
+  const [countsAsProduced, setCountsAsProduced] = useState(false);
   const [sortOrder, setSortOrder] = useState('0');
   const [busy, setBusy] = useState(false);
 
@@ -53,6 +54,7 @@ export default function ObjectBlockStatusesTab() {
     setName('');
     setColor(COLOR_PALETTE[0]);
     setIsForProduction(false);
+    setCountsAsProduced(false);
     setSortOrder('0');
     setBusy(false);
   };
@@ -62,6 +64,7 @@ export default function ObjectBlockStatusesTab() {
     setName('');
     setColor(COLOR_PALETTE[0]);
     setIsForProduction(false);
+    setCountsAsProduced(false);
     setSortOrder(String(rows.length));
     setModalOpen(true);
     setError('');
@@ -72,6 +75,7 @@ export default function ObjectBlockStatusesTab() {
     setName(row.name || '');
     setColor(row.color || COLOR_PALETTE[0]);
     setIsForProduction(!!row.is_for_production);
+    setCountsAsProduced(!!row.counts_as_produced);
     setSortOrder(String(row.sort_order ?? 0));
     setModalOpen(true);
     setError('');
@@ -92,6 +96,7 @@ export default function ObjectBlockStatusesTab() {
         name: nextName,
         color,
         is_for_production: !!isForProduction,
+        counts_as_produced: !!countsAsProduced,
         sort_order: parsedSortOrder,
       };
       if (editing?.id) {
@@ -141,6 +146,7 @@ export default function ObjectBlockStatusesTab() {
                 <th className="p-3 font-medium">Статус</th>
                 <th className="p-3 font-medium">Цвет</th>
                 <th className="p-3 font-medium">Для выработки</th>
+                <th className="p-3 font-medium">В «Выработано»</th>
                 <th className="p-3 font-medium">Порядок</th>
                 <th className="p-3 w-28" />
               </tr>
@@ -157,6 +163,9 @@ export default function ObjectBlockStatusesTab() {
                   </td>
                   <td className="p-3 text-zinc-300">
                     {row.is_for_production ? 'Да' : 'Нет'}
+                  </td>
+                  <td className="p-3 text-zinc-300">
+                    {row.counts_as_produced ? 'Да' : 'Нет'}
                   </td>
                   <td className="p-3 text-zinc-300">{row.sort_order ?? 0}</td>
                   <td className="p-3 text-right space-x-2 whitespace-nowrap">
@@ -246,6 +255,14 @@ export default function ObjectBlockStatusesTab() {
                   onChange={(e) => setIsForProduction(e.target.checked)}
                 />
                 Статус для выработки
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm text-zinc-200">
+                <input
+                  type="checkbox"
+                  checked={countsAsProduced}
+                  onChange={(e) => setCountsAsProduced(e.target.checked)}
+                />
+                Учитывать блок в столбце «Выработано»
               </label>
 
               <div className="flex justify-end gap-2 pt-1">

@@ -19,6 +19,9 @@ async function ensureProductionAllocationSchema() {
         'ALTER TABLE work_block_statuses ADD COLUMN IF NOT EXISTS is_for_production BOOLEAN NOT NULL DEFAULT false',
       );
       await pool.query(
+        'ALTER TABLE work_block_statuses ADD COLUMN IF NOT EXISTS counts_as_produced BOOLEAN NOT NULL DEFAULT false',
+      );
+      await pool.query(
         `CREATE TABLE IF NOT EXISTS issuance_production_allocations (
           id SERIAL PRIMARY KEY,
           issuance_id INTEGER NOT NULL REFERENCES issuances(id) ON DELETE CASCADE,

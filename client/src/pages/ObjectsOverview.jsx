@@ -881,6 +881,15 @@ export default function ObjectsOverview() {
     });
     return map;
   }, [data.material_balances]);
+  const producedStatusIdSet = useMemo(() => {
+    const set = new Set();
+    blockStatuses.forEach((status) => {
+      if (status?.counts_as_produced) {
+        set.add(Number(status.id));
+      }
+    });
+    return set;
+  }, [blockStatuses]);
 
   const visibleSlotIds = useMemo(() => {
     const ids = new Set();
@@ -907,8 +916,14 @@ export default function ObjectsOverview() {
         systemName: row?.material_system_name || 'Без системы',
         categoryName: row?.material_category_name || 'Без категории',
         requiredQuantity: 0,
+        producedQuantity: 0,
       };
-      existing.requiredQuantity += Number(row?.quantity || 0);
+      const quantity = Number(row?.quantity || 0);
+      existing.requiredQuantity += quantity;
+      const slotStatusId = Number(slotById.get(slotId)?.status_id || 0);
+      if (producedStatusIdSet.has(slotStatusId)) {
+        existing.producedQuantity += quantity;
+      }
       grouped.set(key, existing);
     });
     return [...grouped.values()]
@@ -917,10 +932,12 @@ export default function ObjectsOverview() {
           warehouseQuantity: 0,
           onHandsQuantity: 0,
         };
+        const neededQuantity = Math.max(Number(row.requiredQuantity || 0) - Number(row.producedQuantity || 0), 0);
         const availableTotal = Number(balances.warehouseQuantity || 0) + Number(balances.onHandsQuantity || 0);
-        const needToOrder = Math.max(Number(row.requiredQuantity || 0) - availableTotal, 0);
+        const needToOrder = Math.max(neededQuantity - availableTotal, 0);
         return {
           ...row,
+          neededQuantity,
           warehouseQuantity: Number(balances.warehouseQuantity || 0),
           onHandsQuantity: Number(balances.onHandsQuantity || 0),
           needToOrder,
@@ -931,7 +948,7 @@ export default function ObjectsOverview() {
         || naturalCompare(a.categoryName, b.categoryName)
         || naturalCompare(a.materialName, b.materialName)
       ));
-  }, [data.location_system_materials, visibleSlotIds, materialBalanceById]);
+  }, [data.location_system_materials, visibleSlotIds, materialBalanceById, producedStatusIdSet, slotById]);
 
   const needSummaryBySystemCategory = useMemo(() => {
     const map = new Map();
@@ -1868,16 +1885,18 @@ export default function ObjectsOverview() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs table-fixed">
                     <colgroup>
-                      <col style={{ width: '38%' }} />
-                      <col style={{ width: '15.5%' }} />
-                      <col style={{ width: '15.5%' }} />
-                      <col style={{ width: '15.5%' }} />
-                      <col style={{ width: '15.5%' }} />
+                      <col style={{ width: '30%' }} />
+                      <col style={{ width: '14%' }} />
+                      <col style={{ width: '14%' }} />
+                      <col style={{ width: '14%' }} />
+                      <col style={{ width: '14%' }} />
+                      <col style={{ width: '14%' }} />
                     </colgroup>
                     <thead>
                       <tr className="text-zinc-500 border-b border-white/10">
                         <th className="text-left py-1 pr-2">Наименование</th>
                         <th className="text-right py-1 px-1 whitespace-nowrap">Нужно</th>
+                        <th className="text-right py-1 px-1 whitespace-nowrap">Выработано</th>
                         <th className="text-right py-1 px-1 whitespace-nowrap">На складе</th>
                         <th className="text-right py-1 px-1 whitespace-nowrap">На руках</th>
                         <th className="text-right py-1 pl-1 whitespace-nowrap">Заказать</th>
@@ -1894,8 +1913,14 @@ export default function ObjectsOverview() {
                             <td className="py-1.5 pr-2 text-zinc-200 truncate" title={nameWithUnit}>
                               {nameWithUnit}
                             </td>
-                            <td className="py-1.5 px-1 text-right tabular-nums text-zinc-200 whitespace-nowrap">
-                              {Number(row.requiredQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
+                            <td
+                              className="py-1.5 px-1 text-right tabular-nums text-zinc-200 whitespace-nowrap"
+                              title={`Всего по настройкам: ${Number(row.requiredQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}`}
+                            >
+                              {Number(row.neededQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
+                            </td>
+                            <td className="py-1.5 px-1 text-right tabular-nums text-violet-300 whitespace-nowrap">
+                              {Number(row.producedQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
                             </td>
                             <td className="py-1.5 px-1 text-right tabular-nums text-zinc-300 whitespace-nowrap">
                               {Number(row.warehouseQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}

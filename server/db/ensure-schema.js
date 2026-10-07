@@ -171,11 +171,13 @@ const statements = [
     name VARCHAR(200) NOT NULL UNIQUE,
     color VARCHAR(16) NOT NULL,
     is_for_production BOOLEAN NOT NULL DEFAULT false,
+    counts_as_produced BOOLEAN NOT NULL DEFAULT false,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
   )`,
   `ALTER TABLE work_block_statuses ADD COLUMN IF NOT EXISTS is_for_production BOOLEAN NOT NULL DEFAULT false`,
+  `ALTER TABLE work_block_statuses ADD COLUMN IF NOT EXISTS counts_as_produced BOOLEAN NOT NULL DEFAULT false`,
   `CREATE TABLE IF NOT EXISTS work_location_systems (
     id SERIAL PRIMARY KEY,
     location_kind VARCHAR(16) NOT NULL,
