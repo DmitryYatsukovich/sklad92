@@ -5,6 +5,7 @@ import Users from './Users';
 import RolesTab from '../settings/RolesTab';
 import OrganizationsTab from './settings/OrganizationsTab';
 import ObjectSettingsTab from './settings/ObjectSettingsTabRefactored';
+import ObjectBlockStatusesTab from './settings/ObjectBlockStatusesTab';
 import {
   canAccessSettingsTab,
   getFirstSettingsTab,
@@ -19,6 +20,7 @@ const MAIN_TABS = [
   { id: 'systems', label: 'Система', perm: SETTINGS_TAB_PERMISSIONS.systems },
   { id: 'work', label: 'Место проведения работ', perm: SETTINGS_TAB_PERMISSIONS.work },
   { id: 'object_settings', label: 'Настройки объектов', perm: SETTINGS_TAB_PERMISSIONS.object_settings },
+  { id: 'block_statuses', label: 'Статусы', perm: SETTINGS_TAB_PERMISSIONS.block_statuses },
   { id: 'tools', label: 'Виды инструмента', perm: SETTINGS_TAB_PERMISSIONS.tools },
 ];
 
@@ -1177,6 +1179,8 @@ export default function Settings({ user }) {
 
       {tab === 'object_settings' ? (
         <ObjectSettingsTab />
+      ) : tab === 'block_statuses' ? (
+        <ObjectBlockStatusesTab />
       ) : effectiveWorkTab === 'floors' ? (
         floorsByEntrance.length ? (
           <div className="space-y-4">

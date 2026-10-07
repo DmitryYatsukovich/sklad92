@@ -8,6 +8,7 @@ export const SETTINGS_TAB_PERMISSIONS = {
   systems: 'can_settings_categories',
   work: 'can_settings_work',
   object_settings: 'can_settings_work',
+  block_statuses: 'can_settings_work',
   tools: 'can_settings_tools',
 };
 
@@ -35,6 +36,7 @@ export function getFirstSettingsTab(user) {
   if (canAccessSettingsTab(user, SETTINGS_TAB_PERMISSIONS.systems)) return 'systems';
   if (canAccessSettingsTab(user, SETTINGS_TAB_PERMISSIONS.work)) return 'work';
   if (canAccessSettingsTab(user, SETTINGS_TAB_PERMISSIONS.object_settings)) return 'object_settings';
+  if (canAccessSettingsTab(user, SETTINGS_TAB_PERMISSIONS.block_statuses)) return 'block_statuses';
   if (canAccessSettingsTab(user, SETTINGS_TAB_PERMISSIONS.tools)) return 'tools';
   return null;
 }

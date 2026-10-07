@@ -11,9 +11,12 @@ const EMPTY_DATA = {
   location_system_materials: [],
   location_system_equipment: [],
   location_system_works: [],
+  block_statuses: [],
+  assignable_users: [],
 };
 const FLOOR_ROOMS_BUCKET_NAME = 'Помещения этажа';
 const FLOOR_ROOMS_DISPLAY_TITLE = 'Помещения на этаже';
+const DEFAULT_STATUS_COLOR = '#475569';
 
 function naturalCompare(a, b) {
   return String(a || '').localeCompare(String(b || ''), 'ru', { numeric: true, sensitivity: 'base' });
@@ -35,6 +38,8 @@ function normalizeHierarchy(value) {
     location_system_materials: normalizeList(safe.location_system_materials),
     location_system_equipment: normalizeList(safe.location_system_equipment),
     location_system_works: normalizeList(safe.location_system_works),
+    block_statuses: normalizeList(safe.block_statuses),
+    assignable_users: normalizeList(safe.assignable_users),
   };
 }
 
@@ -47,18 +52,14 @@ function toggleSelection(list, id) {
   return list.includes(key) ? list.filter((x) => x !== key) : [...list, key];
 }
 
-function slotCompleteness(slot, entryNames = []) {
-  const hasSystem = Boolean(String(slot?.system_name || '').trim());
-  const hasCategory = Boolean(String(slot?.category_name || '').trim());
-  const hasEntryName = entryNames.some((name) => Boolean(String(name || '').trim()));
-  const missing = [];
-  if (!hasSystem) missing.push('система');
-  if (!hasCategory) missing.push('категория');
-  if (!hasEntryName) missing.push('название');
-  return {
-    isIncomplete: missing.length > 0,
-    missing,
-  };
+function getTextColorForHex(hex) {
+  if (!/^#[0-9a-fA-F]{6}$/.test(String(hex || ''))) return '#E5E7EB';
+  const cleanHex = hex.slice(1);
+  const r = Number.parseInt(cleanHex.slice(0, 2), 16);
+  const g = Number.parseInt(cleanHex.slice(2, 4), 16);
+  const b = Number.parseInt(cleanHex.slice(4, 6), 16);
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq >= 150 ? '#111827' : '#F9FAFB';
 }
 
 function blockSizeClass(level, score) {
@@ -76,26 +77,31 @@ function blockSizeClass(level, score) {
   return '';
 }
 
-function LocationSlotChip({ slot, entries }) {
+function LocationSlotChip({ slot, entries, onOpen }) {
   const entryNames = entries.map((row) => row.name).filter(Boolean);
-  const completeness = slotCompleteness(slot, entryNames);
-  const previewText = entryNames.length ? entryNames.slice(0, 2).join(', ') : 'Позиции не добавлены';
+  const statusName = slot.status_name || 'Без статуса';
+  const statusColor = slot.status_color || DEFAULT_STATUS_COLOR;
   const title = [
     `Система: ${slot.system_name || '—'}`,
     `Категория: ${slot.category_name || '—'}`,
-    `Позиций: ${entries.length}`,
+    `Статус: ${statusName}`,
+    `Исполнитель: ${slot.assigned_user_name || slot.assigned_user_login || '—'}`,
+    `Позиций: ${entryNames.length}`,
     `Список: ${entryNames.length ? entryNames.join(', ') : '—'}`,
-    completeness.isIncomplete ? `Не заполнено: ${completeness.missing.join(', ')}` : '',
-  ].filter(Boolean).join('\n');
+  ].join('\n');
   return (
-    <div
-      className={`w-[3.8rem] h-[3.8rem] rounded border p-1 text-left ${completeness.isIncomplete ? 'border-rose-500/70 bg-rose-950/35 text-rose-100' : 'border-white/15 bg-zinc-900/70 text-zinc-100'}`}
+    <button
+      type="button"
+      onClick={() => onOpen?.(slot)}
       title={title}
+      className="h-8 w-8 md:h-9 md:w-9 rounded border border-black/20 shadow-sm flex items-center justify-center text-[10px] font-semibold transition-transform hover:scale-105"
+      style={{
+        backgroundColor: statusColor,
+        color: getTextColorForHex(statusColor),
+      }}
     >
-      <p className="text-[9px] font-semibold leading-tight truncate">{slot.system_name || 'Без системы'}</p>
-      <p className="text-[8px] text-zinc-400 leading-tight truncate">{slot.category_name || 'Без категории'}</p>
-      <p className="mt-0.5 text-[8px] leading-tight truncate">{previewText}</p>
-    </div>
+      {entryNames.length || '•'}
+    </button>
   );
 }
 
@@ -160,18 +166,28 @@ export default function ObjectsOverview() {
   const [selectedEntrances, setSelectedEntrances] = useState([]);
   const [collapsedFloors, setCollapsedFloors] = useState([]);
   const [expandedEntrance, setExpandedEntrance] = useState(null);
+  const [editor, setEditor] = useState({
+    open: false,
+    slotId: null,
+    statusId: '',
+    assigneeId: '',
+  });
+  const [editorBusy, setEditorBusy] = useState(false);
+  const [editorError, setEditorError] = useState('');
 
-  const load = useCallback(() => {
-    setLoading(true);
+  const load = useCallback(({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setError('');
-    objectsApi.hierarchy()
+    return objectsApi.hierarchy()
       .then((payload) => setData(normalizeHierarchy(payload)))
       .catch((e) => setError(e.message || 'Ошибка загрузки схемы объектов'))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!silent) setLoading(false);
+      });
   }, []);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   const objects = useMemo(
@@ -197,10 +213,34 @@ export default function ObjectsOverview() {
     () => [...data.rooms].sort((a, b) => naturalCompare(a.name, b.name)),
     [data.rooms],
   );
+  const blockStatuses = useMemo(
+    () => [...data.block_statuses].sort((a, b) => (
+      Number(a.sort_order || 0) - Number(b.sort_order || 0)
+      || naturalCompare(a.name, b.name)
+    )),
+    [data.block_statuses],
+  );
+  const assignableUsers = useMemo(
+    () => [...data.assignable_users].sort((a, b) => (
+      naturalCompare(a.full_name || a.login, b.full_name || b.login)
+      || naturalCompare(a.login, b.login)
+    )),
+    [data.assignable_users],
+  );
+  const slotById = useMemo(() => {
+    const map = new Map();
+    data.location_systems.forEach((slot) => map.set(slot.id, slot));
+    return map;
+  }, [data.location_systems]);
 
   const objectIdSet = useMemo(() => asIntSet(selectedObjects), [selectedObjects]);
   const entranceIdSet = useMemo(() => asIntSet(selectedEntrances), [selectedEntrances]);
   const collapsedFloorSet = useMemo(() => asIntSet(collapsedFloors), [collapsedFloors]);
+  const statusesById = useMemo(() => {
+    const map = new Map();
+    blockStatuses.forEach((status) => map.set(String(status.id), status));
+    return map;
+  }, [blockStatuses]);
 
   const entrancesByObject = useMemo(() => {
     const map = new Map();
@@ -322,20 +362,138 @@ export default function ObjectsOverview() {
     setCollapsedFloors((prev) => toggleSelection(prev, floorId));
   };
 
+  const openSlotEditor = (slot) => {
+    setEditor({
+      open: true,
+      slotId: slot.id,
+      statusId: slot.status_id == null ? '' : String(slot.status_id),
+      assigneeId: slot.assigned_user_id == null ? '' : String(slot.assigned_user_id),
+    });
+    setEditorError('');
+  };
+
+  const closeSlotEditor = () => {
+    setEditor({ open: false, slotId: null, statusId: '', assigneeId: '' });
+    setEditorBusy(false);
+    setEditorError('');
+  };
+
+  const saveSlotEditor = async (event) => {
+    event.preventDefault();
+    if (!editor.slotId) return;
+    setEditorBusy(true);
+    setEditorError('');
+    try {
+      await objectsApi.updateLocationSystemStatusAssignment(editor.slotId, {
+        status_id: editor.statusId ? Number(editor.statusId) : null,
+        assigned_user_id: editor.assigneeId ? Number(editor.assigneeId) : null,
+      });
+      closeSlotEditor();
+      await load({ silent: true });
+    } catch (e) {
+      setEditorError(e.message || 'Не удалось сохранить блок');
+      setEditorBusy(false);
+    }
+  };
+
   const renderLocationBlocks = (locationKind, locationId) => {
     const slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
     if (!slots.length) return null;
+    const groupedBySystem = slots.reduce((acc, slot) => {
+      const systemName = String(slot.system_name || '').trim() || 'Без системы';
+      const systemKey = `${String(slot.system_id || 'none')}::${systemName.toLowerCase()}`;
+      if (!acc.has(systemKey)) {
+        acc.set(systemKey, {
+          key: systemKey,
+          systemName,
+          categories: new Map(),
+        });
+      }
+      const systemBucket = acc.get(systemKey);
+      const categoryName = String(slot.category_name || '').trim() || 'Без категории';
+      const categoryKey = `${String(slot.category_id || 'none')}::${categoryName.toLowerCase()}`;
+      if (!systemBucket.categories.has(categoryKey)) {
+        systemBucket.categories.set(categoryKey, {
+          key: categoryKey,
+          categoryName,
+          slots: [],
+        });
+      }
+      systemBucket.categories.get(categoryKey).slots.push(slot);
+      return acc;
+    }, new Map());
+
+    const groupedRows = [...groupedBySystem.values()]
+      .map((systemRow) => ({
+        ...systemRow,
+        categories: [...systemRow.categories.values()]
+          .map((categoryRow) => ({
+            ...categoryRow,
+            slots: [...categoryRow.slots].sort((a, b) => Number(a.id || 0) - Number(b.id || 0)),
+          }))
+          .sort((a, b) => naturalCompare(a.categoryName, b.categoryName)),
+      }))
+      .sort((a, b) => naturalCompare(a.systemName, b.systemName));
+
     return (
-      <div className="mt-1 flex flex-wrap gap-1">
-        {slots.map((slot) => (
-          <LocationSlotChip
-            key={slot.id}
-            slot={slot}
-            entries={entriesBySlot.get(slot.id) || []}
-          />
+      <div className="mt-1.5 space-y-1.5">
+        {groupedRows.map((systemRow) => (
+          <div key={systemRow.key} className="rounded-md border border-white/10 bg-white/[0.02] p-1.5 space-y-1">
+            <p className="text-[10px] text-zinc-200 font-semibold">{systemRow.systemName}</p>
+            {systemRow.categories.map((categoryRow) => (
+              <div key={categoryRow.key} className="space-y-1">
+                <p className="text-[9px] text-zinc-400">{categoryRow.categoryName}</p>
+                <div className="flex flex-wrap gap-1">
+                  {categoryRow.slots.map((slot) => (
+                    <LocationSlotChip
+                      key={slot.id}
+                      slot={slot}
+                      entries={entriesBySlot.get(slot.id) || []}
+                      onOpen={openSlotEditor}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         ))}
       </div>
     );
+  };
+
+  const getFloorStatusStats = (floorApartmentsRaw, floorOnlyRooms) => {
+    const regularApartments = floorApartmentsRaw.filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME);
+    const statusCounts = new Map();
+    const appendSlots = (locationKind, locationId) => {
+      const slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
+      slots.forEach((slot) => {
+        const key = slot.status_id == null ? 'none' : String(slot.status_id);
+        const knownStatus = slot.status_id == null ? null : statusesById.get(key);
+        const row = statusCounts.get(key) || {
+          key,
+          name: knownStatus?.name || slot.status_name || 'Без статуса',
+          color: knownStatus?.color || slot.status_color || DEFAULT_STATUS_COLOR,
+          count: 0,
+        };
+        row.count += 1;
+        statusCounts.set(key, row);
+      });
+    };
+
+    floorOnlyRooms.forEach((room) => appendSlots('room', room.id));
+    regularApartments.forEach((apartment) => {
+      appendSlots('apartment', apartment.id);
+      (roomsByApartment.get(apartment.id) || []).forEach((room) => appendSlots('room', room.id));
+    });
+
+    const rows = [];
+    blockStatuses.forEach((status) => {
+      const key = String(status.id);
+      const row = statusCounts.get(key);
+      if (row?.count) rows.push(row);
+    });
+    if (statusCounts.get('none')?.count) rows.push(statusCounts.get('none'));
+    return rows;
   };
 
   const renderFloorCard = (floor, floorApartments, floorRooms, compact = false) => {
@@ -343,12 +501,13 @@ export default function ObjectsOverview() {
     const floorRoomsBucket = floorApartments.find((apartment) => apartment.name === FLOOR_ROOMS_BUCKET_NAME);
     const regularApartments = floorApartments.filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME);
     const floorOnlyRooms = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
+    const floorStatusStats = getFloorStatusStats(floorApartments, floorOnlyRooms);
     return (
       <div
         key={floor.id}
         className={`rounded-lg border border-white/10 bg-black/20 ${compact ? 'p-2.5' : 'p-2'} space-y-1.5`}
       >
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
             onClick={() => toggleFloorCollapse(floor.id)}
@@ -357,9 +516,24 @@ export default function ObjectsOverview() {
           >
             Этаж {floor.name}
           </button>
-          <span className="text-2xs text-zinc-500">
-            {regularApartments.length} / {floorRooms}
-          </span>
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <span className="text-2xs text-zinc-400">
+              Квартир: {regularApartments.length} · Помещений: {floorRooms}
+            </span>
+            {floorStatusStats.map((row) => (
+              <span
+                key={`${floor.id}:${row.key}`}
+                className="inline-flex items-center gap-1 rounded-full border border-black/30 px-1.5 py-0.5 text-[10px]"
+                style={{
+                  backgroundColor: row.color || DEFAULT_STATUS_COLOR,
+                  color: getTextColorForHex(row.color || DEFAULT_STATUS_COLOR),
+                }}
+                title={`${row.name}: ${row.count}`}
+              >
+                {row.name}: {row.count}
+              </span>
+            ))}
+          </div>
         </div>
         {!isCollapsed && (
           (regularApartments.length || floorOnlyRooms.length) ? (
@@ -436,7 +610,7 @@ export default function ObjectsOverview() {
             floorCount += entranceFloors.length;
             entranceFloors.forEach((floor) => {
               const floorApartments = apartmentsByFloor.get(floor.id) || [];
-              apartmentCount += floorApartments.length;
+              apartmentCount += floorApartments.filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME).length;
               floorApartments.forEach((apartment) => {
                 roomCount += (roomsByApartment.get(apartment.id) || []).length;
               });
@@ -476,7 +650,7 @@ export default function ObjectsOverview() {
                     let entranceRooms = 0;
                     entranceFloors.forEach((floor) => {
                       const floorApartments = apartmentsByFloor.get(floor.id) || [];
-                      entranceApartments += floorApartments.length;
+                      entranceApartments += floorApartments.filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME).length;
                       floorApartments.forEach((apartment) => {
                         entranceRooms += (roomsByApartment.get(apartment.id) || []).length;
                       });
@@ -530,12 +704,14 @@ export default function ObjectsOverview() {
     );
   };
 
+  const activeSlot = editor.slotId ? slotById.get(editor.slotId) : null;
+
   return (
     <div className="space-y-5">
       <div>
         <h2 className="page-title">Объекты</h2>
         <p className="text-zinc-400 text-sm mt-1">
-          Схема размещения по объектам: подъезды, этажи, квартиры и помещения. Блоки автоматически меняют размер по насыщенности структуры.
+          Мини-блоки сгруппированы как в настройках объектов (Система → Категория). Клик по блоку открывает выбор статуса и исполнителя.
         </p>
       </div>
 
@@ -625,6 +801,75 @@ export default function ObjectsOverview() {
                 <p className="text-zinc-500 text-sm">Для этого подъезда этажи ещё не добавлены</p>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {editor.open && activeSlot && (
+        <div className="modal-backdrop z-50" onClick={closeSlotEditor} role="dialog" aria-modal="true">
+          <div className="card p-5 max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-white font-medium text-lg">Статус блока</h3>
+            <p className="text-zinc-400 text-sm mt-1">
+              {activeSlot.system_name || 'Без системы'}
+              {activeSlot.category_name ? ` · ${activeSlot.category_name}` : ''}
+            </p>
+            {editorError && <p className="text-rose-400 text-sm mt-3">{editorError}</p>}
+            <form className="space-y-3 mt-4" onSubmit={saveSlotEditor}>
+              <div>
+                <label className="label">Статус</label>
+                <select
+                  className="input"
+                  value={editor.statusId}
+                  onChange={(e) => setEditor((prev) => ({ ...prev, statusId: e.target.value }))}
+                >
+                  <option value="">Без статуса</option>
+                  {blockStatuses.map((status) => (
+                    <option key={status.id} value={status.id}>
+                      {status.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Исполнитель</label>
+                <select
+                  className="input"
+                  value={editor.assigneeId}
+                  onChange={(e) => setEditor((prev) => ({ ...prev, assigneeId: e.target.value }))}
+                >
+                  <option value="">Не назначен</option>
+                  {assignableUsers.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.full_name || user.login}
+                      {user.full_name && user.login ? ` (${user.login})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {!!editor.statusId && (
+                <div className="text-xs text-zinc-300">
+                  {(() => {
+                    const status = statusesById.get(editor.statusId);
+                    if (!status) return null;
+                    const statusColor = status.color || DEFAULT_STATUS_COLOR;
+                    return (
+                      <span className="inline-flex items-center gap-2">
+                        <span className="h-3.5 w-3.5 rounded-full border border-white/20" style={{ backgroundColor: statusColor }} />
+                        Цвет блока: {statusColor}
+                      </span>
+                    );
+                  })()}
+                </div>
+              )}
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" className="btn-secondary text-sm" onClick={closeSlotEditor} disabled={editorBusy}>
+                  Отмена
+                </button>
+                <button type="submit" className="btn-primary text-sm" disabled={editorBusy}>
+                  {editorBusy ? 'Сохранение…' : 'Сохранить'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

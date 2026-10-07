@@ -386,6 +386,12 @@ export const settings = {
     update: (id, body) => request(`/api/settings/systems/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
     delete: (id) => request(`/api/settings/systems/${id}`, { method: 'DELETE' }),
   },
+  blockStatuses: {
+    list: () => request('/api/settings/object-block-statuses'),
+    create: (body) => request('/api/settings/object-block-statuses', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => request(`/api/settings/object-block-statuses/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    delete: (id) => request(`/api/settings/object-block-statuses/${id}`, { method: 'DELETE' }),
+  },
   workEntrances: {
     list: (objectId) => request(`/api/settings/work-entrances${objectId ? `?object_id=${objectId}` : ''}`),
     create: (body) => request('/api/settings/work-entrances', { method: 'POST', body: JSON.stringify(body) }),
@@ -488,6 +494,11 @@ export const settings = {
 
 export const objectsView = {
   hierarchy: () => request('/api/objects/hierarchy'),
+  updateLocationSystemStatusAssignment: (id, body) =>
+    request(`/api/objects/location-systems/${id}/status-assignment`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
 };
 
 export const operations = {

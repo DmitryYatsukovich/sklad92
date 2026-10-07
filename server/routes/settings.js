@@ -34,6 +34,13 @@ function parseCategoryIconKey(value) {
   return raw.slice(0, 64);
 }
 
+function parseStatusColor(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  if (!/^#[0-9a-fA-F]{6}$/.test(raw)) return null;
+  return raw.toUpperCase();
+}
+
 function parseRequiredName(value, max = 300) {
   const name = String(value ?? '').trim();
   if (!name) return null;
@@ -160,7 +167,7 @@ router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req,
   try {
     const [
       objects, warehouses, racks, categories, systems, organizations,
-      workEntrances, workFloors, workApartments, workRooms, toolTypes,
+      workEntrances, workFloors, workApartments, workRooms, toolTypes, blockStatuses,
     ] = await Promise.all([
       pool.query('SELECT id, name FROM warehouse_objects ORDER BY name'),
       pool.query(
@@ -208,6 +215,7 @@ router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req,
          ORDER BY o.name NULLS LAST, e.name, COALESCE(f.sort_order, 2147483647), f.name, a.name, r.name`
       ),
       pool.query('SELECT id, name FROM tool_types ORDER BY name'),
+      pool.query('SELECT id, name, color, sort_order, created_at, updated_at FROM work_block_statuses ORDER BY sort_order, name'),
     ]);
     res.json({
       objects: objects.rows,
@@ -221,6 +229,7 @@ router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req,
       work_apartments: workApartments.rows,
       work_rooms: workRooms.rows,
       tool_types: toolTypes.rows,
+      block_statuses: blockStatuses.rows,
     });
   } catch (e) {
     console.error('GET /settings/catalog:', e.message);
@@ -555,6 +564,92 @@ router.delete('/systems/:id', requirePermission('can_settings_categories'), asyn
   const usedInLocations = await pool.query('SELECT 1 FROM work_location_systems WHERE system_id = $1 LIMIT 1', [id]);
   if (usedInLocations.rowCount) return res.status(400).json({ error: 'Система используется в настройках объектов' });
   const r = await pool.query('DELETE FROM material_systems WHERE id = $1 RETURNING id', [id]);
+  if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
+  res.json({ ok: true });
+});
+
+// ——— Статусы блоков объектов ———
+router.get('/object-block-statuses', requirePermission('can_settings_work'), async (_req, res) => {
+  const r = await pool.query(
+    `SELECT id, name, color, sort_order, created_at, updated_at
+     FROM work_block_statuses
+     ORDER BY sort_order, name`,
+  );
+  res.json(r.rows);
+});
+
+router.post('/object-block-statuses', requirePermission('can_settings_work'), async (req, res) => {
+  const name = (req.body?.name || '').trim();
+  const color = parseStatusColor(req.body?.color);
+  if (!name) return res.status(400).json({ error: 'Укажите название статуса' });
+  if (!color) return res.status(400).json({ error: 'Цвет должен быть в формате #RRGGBB' });
+  const rawSortOrder = req.body?.sort_order;
+  const sortOrder = rawSortOrder == null || rawSortOrder === ''
+    ? 0
+    : Number.parseInt(rawSortOrder, 10);
+  if (!Number.isInteger(sortOrder) || sortOrder < 0) {
+    return res.status(400).json({ error: 'Порядок должен быть целым числом 0 или больше' });
+  }
+  try {
+    const r = await pool.query(
+      `INSERT INTO work_block_statuses (name, color, sort_order)
+       VALUES ($1, $2, $3)
+       RETURNING id, name, color, sort_order, created_at, updated_at`,
+      [name, color, sortOrder],
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'Статус с таким названием уже существует' });
+    throw e;
+  }
+});
+
+router.put('/object-block-statuses/:id', requirePermission('can_settings_work'), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Неверный id' });
+  const current = (await pool.query(
+    'SELECT id, name, color, sort_order FROM work_block_statuses WHERE id = $1',
+    [id],
+  )).rows[0];
+  if (!current) return res.status(404).json({ error: 'Не найдено' });
+
+  const nextName = req.body?.name !== undefined ? String(req.body?.name || '').trim() : current.name;
+  if (!nextName) return res.status(400).json({ error: 'Укажите название статуса' });
+  const nextColor = req.body?.color !== undefined ? parseStatusColor(req.body?.color) : current.color;
+  if (!nextColor) return res.status(400).json({ error: 'Цвет должен быть в формате #RRGGBB' });
+
+  let nextSortOrder = current.sort_order ?? 0;
+  if (req.body?.sort_order !== undefined) {
+    const parsedSortOrder = Number.parseInt(req.body?.sort_order, 10);
+    if (!Number.isInteger(parsedSortOrder) || parsedSortOrder < 0) {
+      return res.status(400).json({ error: 'Порядок должен быть целым числом 0 или больше' });
+    }
+    nextSortOrder = parsedSortOrder;
+  }
+
+  try {
+    const r = await pool.query(
+      `UPDATE work_block_statuses
+       SET name = $1, color = $2, sort_order = $3, updated_at = NOW()
+       WHERE id = $4
+       RETURNING id, name, color, sort_order, created_at, updated_at`,
+      [nextName, nextColor, nextSortOrder, id],
+    );
+    res.json(r.rows[0]);
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'Статус с таким названием уже существует' });
+    throw e;
+  }
+});
+
+router.delete('/object-block-statuses/:id', requirePermission('can_settings_work'), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Неверный id' });
+  const used = await pool.query('SELECT 1 FROM work_location_systems WHERE status_id = $1 LIMIT 1', [id]);
+  if (used.rowCount) {
+    return res.status(400).json({ error: 'Статус используется в блоках объектов и не может быть удалён' });
+  }
+  const r = await pool.query('DELETE FROM work_block_statuses WHERE id = $1 RETURNING id', [id]);
   if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
   res.json({ ok: true });
 });
@@ -1059,6 +1154,7 @@ router.get('/object-settings/layout', requirePermission('can_settings_work'), as
       rooms,
       systems,
       categories,
+      blockStatuses,
       locationSystems,
       locationSystemMaterials,
       locationSystemEquipment,
@@ -1102,13 +1198,18 @@ router.get('/object-settings/layout', requirePermission('can_settings_work'), as
       ),
       pool.query('SELECT id, name FROM material_systems ORDER BY name'),
       pool.query('SELECT id, name, icon_key FROM material_categories ORDER BY name'),
+      pool.query('SELECT id, name, color, sort_order, created_at, updated_at FROM work_block_statuses ORDER BY sort_order, name'),
       pool.query(
-        `SELECT ls.id, ls.location_kind, ls.location_id, ls.system_id, ls.category_id, ls.created_at, ls.updated_at,
+        `SELECT ls.id, ls.location_kind, ls.location_id, ls.system_id, ls.category_id, ls.status_id, ls.assigned_user_id, ls.created_at, ls.updated_at,
                 s.name AS system_name,
-                c.name AS category_name, c.icon_key AS category_icon_key
+                c.name AS category_name, c.icon_key AS category_icon_key,
+                bs.name AS status_name, bs.color AS status_color,
+                u.full_name AS assigned_user_name, u.login AS assigned_user_login
          FROM work_location_systems ls
          JOIN material_systems s ON s.id = ls.system_id
          LEFT JOIN material_categories c ON c.id = ls.category_id
+         LEFT JOIN work_block_statuses bs ON bs.id = ls.status_id
+         LEFT JOIN users u ON u.id = ls.assigned_user_id
          ORDER BY ls.location_kind, ls.location_id, s.name`,
       ),
       pool.query(
@@ -1137,6 +1238,7 @@ router.get('/object-settings/layout', requirePermission('can_settings_work'), as
       rooms: rooms.rows,
       systems: systems.rows,
       categories: categories.rows,
+      block_statuses: blockStatuses.rows,
       location_systems: locationSystems.rows,
       location_system_materials: locationSystemMaterials.rows,
       location_system_equipment: locationSystemEquipment.rows,
@@ -1176,12 +1278,16 @@ router.post('/object-settings/location-systems', requirePermission('can_settings
     [locationKind, locationId, systemId, categoryId],
   )).rows[0];
   const withMeta = (await pool.query(
-    `SELECT ls.id, ls.location_kind, ls.location_id, ls.system_id, ls.category_id, ls.created_at, ls.updated_at,
+    `SELECT ls.id, ls.location_kind, ls.location_id, ls.system_id, ls.category_id, ls.status_id, ls.assigned_user_id, ls.created_at, ls.updated_at,
             s.name AS system_name,
-            c.name AS category_name, c.icon_key AS category_icon_key
+            c.name AS category_name, c.icon_key AS category_icon_key,
+            bs.name AS status_name, bs.color AS status_color,
+            u.full_name AS assigned_user_name, u.login AS assigned_user_login
      FROM work_location_systems ls
      JOIN material_systems s ON s.id = ls.system_id
      LEFT JOIN material_categories c ON c.id = ls.category_id
+     LEFT JOIN work_block_statuses bs ON bs.id = ls.status_id
+     LEFT JOIN users u ON u.id = ls.assigned_user_id
      WHERE ls.id = $1`,
     [created.id],
   )).rows[0];
@@ -1221,12 +1327,16 @@ router.put('/object-settings/location-systems/:id', requirePermission('can_setti
   )).rows[0];
   if (!updated) return res.status(404).json({ error: 'Не найдено' });
   const row = (await pool.query(
-    `SELECT ls.id, ls.location_kind, ls.location_id, ls.system_id, ls.category_id, ls.created_at, ls.updated_at,
+    `SELECT ls.id, ls.location_kind, ls.location_id, ls.system_id, ls.category_id, ls.status_id, ls.assigned_user_id, ls.created_at, ls.updated_at,
             s.name AS system_name,
-            c.name AS category_name, c.icon_key AS category_icon_key
+            c.name AS category_name, c.icon_key AS category_icon_key,
+            bs.name AS status_name, bs.color AS status_color,
+            u.full_name AS assigned_user_name, u.login AS assigned_user_login
      FROM work_location_systems ls
      JOIN material_systems s ON s.id = ls.system_id
      LEFT JOIN material_categories c ON c.id = ls.category_id
+     LEFT JOIN work_block_statuses bs ON bs.id = ls.status_id
+     LEFT JOIN users u ON u.id = ls.assigned_user_id
      WHERE ls.id = $1`,
     [id],
   )).rows[0];
