@@ -562,6 +562,7 @@ export default function Issuance({ user }) {
       setError('Выберите хотя бы одного сотрудника для выработки');
       return;
     }
+    const materialMeta = materials.find((m) => Number(m.id) === Number(productionRow.material_id)) || null;
     const selectedWorkersPayload = selectedProductionUsers.map((row) => ({
       id: Number(row.id),
       label: row.display_name || row.login || `#${row.id}`,
@@ -574,6 +575,10 @@ export default function Issuance({ user }) {
           materialName: productionRow.material_name || '',
           materialCode: productionRow.material_code || '',
           unit: productionRow.unit || 'шт',
+          materialSystemId: materialMeta?.system_id ?? null,
+          materialSystemName: materialMeta?.system_name || '',
+          materialCategoryId: materialMeta?.category_id ?? null,
+          materialCategoryName: materialMeta?.category_name || '',
           availableQty: Math.max(remainingQty(productionRow), 0),
           selectedWorkers: selectedWorkersPayload,
         },

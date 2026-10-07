@@ -719,6 +719,17 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
       return res.status(400).json({ error: 'На руках нет доступного материала для выработки' });
     }
 
+    const materialMeta = (await client.query(
+      `SELECT id, name, system_id, category_id
+       FROM materials
+       WHERE id = $1`,
+      [issuance.material_id],
+    )).rows[0];
+    if (!materialMeta) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Материал выдачи не найден' });
+    }
+
     const statusIds = [...new Set(assignments.map((row) => row.statusId))];
     const validStatuses = await client.query(
       `SELECT id, name
@@ -750,29 +761,76 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
     }
 
     const slotIds = assignments.map((row) => row.locationSystemId);
-    const slots = await client.query(
+    const slotsResult = await client.query(
       `SELECT ls.id AS location_system_id,
               ls.location_kind,
               ls.location_id,
-              lm.quantity AS material_quantity
+              ls.system_id,
+              ls.category_id
        FROM work_location_systems ls
-       JOIN work_location_system_materials lm ON lm.location_system_id = ls.id
        WHERE ls.id = ANY($1::int[])
-         AND lm.material_id = $2
        FOR UPDATE OF ls`,
-      [slotIds, issuance.material_id],
+      [slotIds],
     );
-    const slotMap = new Map(slots.rows.map((row) => [Number(row.location_system_id), row]));
+    const slotMap = new Map(slotsResult.rows.map((row) => [Number(row.location_system_id), row]));
     const missingSlot = assignments.find((row) => !slotMap.has(row.locationSystemId));
     if (missingSlot) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Часть блоков не содержит выбранный материал' });
+      return res.status(400).json({ error: 'Часть выбранных блоков не найдена' });
+    }
+
+    const slotWithWrongSystemOrCategory = assignments.find((row) => {
+      const slot = slotMap.get(row.locationSystemId);
+      if (!slot) return true;
+      const sameSystem = Number(slot.system_id || 0) === Number(materialMeta.system_id || 0);
+      const sameCategory = (
+        (slot.category_id == null && materialMeta.category_id == null)
+        || Number(slot.category_id || 0) === Number(materialMeta.category_id || 0)
+      );
+      return !sameSystem || !sameCategory;
+    });
+    if (slotWithWrongSystemOrCategory) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Блок не соответствует системе или категории выбранного материала' });
+    }
+
+    const slotQuantitiesRows = await client.query(
+      `SELECT lm.location_system_id,
+              COALESCE(SUM(CASE WHEN lm.material_id = $2 THEN lm.quantity ELSE 0 END), 0)::numeric AS exact_material_quantity,
+              COALESCE(SUM(CASE
+                WHEN LOWER(TRIM(m.name)) = LOWER(TRIM($3))
+                  AND (($4::int IS NULL AND m.system_id IS NULL) OR m.system_id = $4)
+                  AND (($5::int IS NULL AND m.category_id IS NULL) OR m.category_id = $5)
+                THEN lm.quantity
+                ELSE 0
+              END), 0)::numeric AS fallback_material_quantity
+       FROM work_location_system_materials lm
+       JOIN materials m ON m.id = lm.material_id
+       WHERE lm.location_system_id = ANY($1::int[])
+       GROUP BY lm.location_system_id`,
+      [slotIds, issuance.material_id, materialMeta.name || '', materialMeta.system_id, materialMeta.category_id],
+    );
+    const slotQuantityMap = new Map(
+      slotQuantitiesRows.rows.map((row) => {
+        const exactQty = Number(row.exact_material_quantity || 0);
+        const fallbackQty = Number(row.fallback_material_quantity || 0);
+        const qty = exactQty > 0 ? exactQty : fallbackQty;
+        return [Number(row.location_system_id), qty];
+      }),
+    );
+
+    const slotWithoutMaterialQuantity = assignments.find((row) => {
+      const qty = slotQuantityMap.get(row.locationSystemId) || 0;
+      return !(qty > 0);
+    });
+    if (slotWithoutMaterialQuantity) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'В одном из блоков не найдено количество этого материала' });
     }
 
     let totalProducedNow = 0;
     for (const assignment of assignments) {
-      const slot = slotMap.get(assignment.locationSystemId);
-      totalProducedNow += Number(slot.material_quantity || 0);
+      totalProducedNow += Number(slotQuantityMap.get(assignment.locationSystemId) || 0);
     }
     if (totalProducedNow <= 0) {
       await client.query('ROLLBACK');
@@ -786,7 +844,7 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
     }
 
     for (const assignment of assignments) {
-      const slot = slotMap.get(assignment.locationSystemId);
+      const slotQty = Number(slotQuantityMap.get(assignment.locationSystemId) || 0);
       await client.query(
         `INSERT INTO issuance_production_allocations
           (issuance_id, location_system_id, worker_user_id, status_id, quantity, created_by_user_id)
@@ -796,7 +854,7 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
           assignment.locationSystemId,
           assignment.workerUserId,
           assignment.statusId,
-          Number(slot.material_quantity || 0),
+          slotQty,
           req.session.userId,
         ],
       );

@@ -53,6 +53,15 @@ function toggleSelection(list, id) {
   return list.includes(key) ? list.filter((x) => x !== key) : [...list, key];
 }
 
+function idsEqualNullable(a, b) {
+  if (a == null && b == null) return true;
+  return Number(a || 0) === Number(b || 0);
+}
+
+function normalizeNameKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
 function getTextColorForHex(hex) {
   if (!/^#[0-9a-fA-F]{6}$/.test(String(hex || ''))) return '#E5E7EB';
   const cleanHex = hex.slice(1);
@@ -94,6 +103,7 @@ function LocationSlotChip({
   selected = false,
   selectionCaption = '',
   selectionColor = '',
+  disabled = false,
 }) {
   const entryLines = entries.map(formatEntryLabel).filter(Boolean);
   const statusName = slot.status_name || 'Без статуса';
@@ -111,7 +121,10 @@ function LocationSlotChip({
       type="button"
       onClick={() => onOpen?.(slot)}
       title={title}
-      className={`rounded border shadow-sm p-1.5 text-left transition-transform hover:scale-[1.01] min-h-[5.5rem] min-w-[12rem] max-w-[12rem] ${
+      disabled={disabled}
+      className={`rounded border shadow-sm p-1.5 text-left transition-transform min-h-[5.5rem] min-w-[12rem] max-w-[12rem] ${
+        disabled ? 'opacity-55 cursor-not-allowed' : 'hover:scale-[1.01]'
+      } ${
         selected ? 'ring-2 ring-emerald-300/70 border-emerald-200/70' : 'border-black/20'
       }`}
       style={{
@@ -254,6 +267,10 @@ export default function ObjectsOverview() {
       materialName: String(payload.materialName || ''),
       materialCode: String(payload.materialCode || ''),
       unit: String(payload.unit || 'шт'),
+      materialSystemId: payload.materialSystemId == null ? null : Number(payload.materialSystemId),
+      materialSystemName: String(payload.materialSystemName || ''),
+      materialCategoryId: payload.materialCategoryId == null ? null : Number(payload.materialCategoryId),
+      materialCategoryName: String(payload.materialCategoryName || ''),
       availableQty: Math.max(Number(payload.availableQty || 0), 0),
       selectedWorkers,
     });
@@ -428,22 +445,64 @@ export default function ObjectsOverview() {
     data.location_system_equipment,
     data.location_system_works,
   ]);
+  const productionEligibleSlotIds = useMemo(() => {
+    const set = new Set();
+    if (!productionMode) return set;
+    const targetSystemId = productionMode.materialSystemId;
+    const targetCategoryId = productionMode.materialCategoryId;
+    data.location_systems.forEach((slot) => {
+      if (!idsEqualNullable(slot.system_id, targetSystemId)) return;
+      if (!idsEqualNullable(slot.category_id, targetCategoryId)) return;
+      set.add(Number(slot.id));
+    });
+    return set;
+  }, [data.location_systems, productionMode]);
+
   const productionMaterialEntryBySlot = useMemo(() => {
-    const materialId = Number(productionMode?.materialId || 0);
     const map = new Map();
-    if (!materialId) return map;
+    if (!productionMode) return map;
+    const materialId = Number(productionMode.materialId || 0);
+    const materialNameKey = normalizeNameKey(productionMode.materialName);
+    const targetSystemId = productionMode.materialSystemId;
+    const targetCategoryId = productionMode.materialCategoryId;
+
+    const acc = new Map();
     data.location_system_materials.forEach((row) => {
-      if (Number(row.material_id) !== materialId) return;
-      map.set(Number(row.location_system_id), {
-        materialId,
-        name: row.material_name || '',
-        quantity: Number(row.quantity || 0),
+      const slotId = Number(row.location_system_id || 0);
+      if (!productionEligibleSlotIds.has(slotId)) return;
+      const current = acc.get(slotId) || {
+        exactQty: 0,
+        fallbackQty: 0,
         unit: row.material_unit || '',
+      };
+      const qty = Number(row.quantity || 0);
+      if (Number(row.material_id) === materialId) {
+        current.exactQty += qty;
+      } else if (
+        materialNameKey
+        && normalizeNameKey(row.material_name) === materialNameKey
+        && idsEqualNullable(row.material_system_id, targetSystemId)
+        && idsEqualNullable(row.material_category_id, targetCategoryId)
+      ) {
+        current.fallbackQty += qty;
+      }
+      if (!current.unit && row.material_unit) current.unit = row.material_unit;
+      acc.set(slotId, current);
+    });
+
+    acc.forEach((value, slotId) => {
+      const quantity = value.exactQty > 0 ? value.exactQty : value.fallbackQty;
+      if (!(quantity > 0)) return;
+      map.set(slotId, {
+        materialId,
+        name: productionMode.materialName || '',
+        quantity,
+        unit: value.unit || productionMode.unit || '',
       });
     });
     return map;
-  }, [data.location_system_materials, productionMode]);
-  const productionAvailableSlotsCount = productionMaterialEntryBySlot.size;
+  }, [data.location_system_materials, productionMode, productionEligibleSlotIds]);
+  const productionEligibleSlotsCount = productionEligibleSlotIds.size;
 
   const objectOptions = objects;
   const entranceOptions = useMemo(() => {
@@ -567,7 +626,10 @@ export default function ObjectsOverview() {
     setProductionError('');
     setProductionMessage('');
     const materialEntry = productionMaterialEntryBySlot.get(Number(slot.id));
-    if (!materialEntry) return;
+    if (!materialEntry) {
+      setProductionError('Для этого блока не найдено количество выбранного материала.');
+      return;
+    }
     if (!productionStatuses.length) {
       setProductionError('В настройках статусов нет ни одного статуса, отмеченного как «для выработки».');
       return;
@@ -639,7 +701,7 @@ export default function ObjectsOverview() {
   const renderLocationBlocks = (locationKind, locationId) => {
     let slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
     if (isProductionMode) {
-      slots = slots.filter((slot) => productionMaterialEntryBySlot.has(Number(slot.id)));
+      slots = slots.filter((slot) => productionEligibleSlotIds.has(Number(slot.id)));
     }
     if (!slots.length) return null;
     const groupedBySystem = slots.reduce((acc, slot) => {
@@ -692,9 +754,10 @@ export default function ObjectsOverview() {
                     const draft = productionDrafts[slot.id] || null;
                     const draftStatus = draft ? productionStatusById.get(Number(draft.statusId)) : null;
                     const draftWorker = draft ? productionWorkersById.get(Number(draft.workerUserId)) : '';
+                    const hasMaterialQty = productionMaterialEntryBySlot.has(Number(slot.id));
                     const selectionCaption = draft
                       ? [draftWorker, draftStatus?.name].filter(Boolean).join(' · ')
-                      : '';
+                      : (isProductionMode && !hasMaterialQty ? 'Нет количества материала' : '');
                     return (
                     <LocationSlotChip
                       key={slot.id}
@@ -704,6 +767,7 @@ export default function ObjectsOverview() {
                       selected={!!draft}
                       selectionCaption={selectionCaption}
                       selectionColor={draftStatus?.color || ''}
+                      disabled={isProductionMode && !hasMaterialQty}
                     />
                     );
                   })}
@@ -781,8 +845,8 @@ export default function ObjectsOverview() {
     const slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
     if (!slots.length) return false;
     if (!isProductionMode) return true;
-    return slots.some((slot) => productionMaterialEntryBySlot.has(Number(slot.id)));
-  }, [slotsByLocation, isProductionMode, productionMaterialEntryBySlot]);
+    return slots.some((slot) => productionEligibleSlotIds.has(Number(slot.id)));
+  }, [slotsByLocation, isProductionMode, productionEligibleSlotIds]);
 
   const renderFloorCard = (floor, floorApartments, floorRooms, compact = false) => {
     const isCollapsed = collapsedFloorSet.has(floor.id);
@@ -889,10 +953,10 @@ export default function ObjectsOverview() {
   };
 
   const renderObjectCards = () => {
-    if (isProductionMode && productionAvailableSlotsCount === 0) {
+    if (isProductionMode && productionEligibleSlotsCount === 0) {
       return (
         <p className="text-zinc-500 text-sm py-4">
-          Для выбранного материала не найдено доступных блоков в текущей схеме объектов.
+          Для выбранного материала не найдено блоков с такой системой и категорией.
         </p>
       );
     }
@@ -1051,6 +1115,11 @@ export default function ObjectsOverview() {
         <div className="rounded-xl border border-sky-500/30 bg-sky-950/20 p-3 space-y-2">
           <p className="text-sky-200 text-sm font-medium">
             {productionMode.materialName || 'Материал'}{productionMode.materialCode ? ` (${productionMode.materialCode})` : ''}
+          </p>
+          <p className="text-zinc-400 text-2xs">
+            Система: {productionMode.materialSystemName || '—'}
+            {' · '}
+            Категория: {productionMode.materialCategoryName || '—'}
           </p>
           <p className="text-zinc-300 text-xs">
             На руках: {Number(productionMode.availableQty || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {productionMode.unit}

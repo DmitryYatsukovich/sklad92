@@ -123,9 +123,13 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
       ),
       pool.query(
         `SELECT lm.id, lm.location_system_id, lm.material_id, lm.quantity, lm.created_at, lm.updated_at,
-                m.name AS material_name, m.unit AS material_unit
+                m.name AS material_name, m.unit AS material_unit,
+                m.system_id AS material_system_id, m.category_id AS material_category_id,
+                ms.name AS material_system_name, mc.name AS material_category_name
          FROM work_location_system_materials lm
          LEFT JOIN materials m ON m.id = lm.material_id
+         LEFT JOIN material_systems ms ON ms.id = m.system_id
+         LEFT JOIN material_categories mc ON mc.id = m.category_id
          ORDER BY lm.location_system_id, m.name NULLS LAST, lm.id`,
       ),
       pool.query(
