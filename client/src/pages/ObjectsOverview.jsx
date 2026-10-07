@@ -62,6 +62,13 @@ function normalizeNameKey(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function toNullableFilterKey(value) {
+  if (value == null || value === '') return 'none';
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return String(value);
+  return String(parsed);
+}
+
 function normalizeIdList(values) {
   return [...new Set((values || []).map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))];
 }
@@ -226,6 +233,10 @@ export default function ObjectsOverview() {
   const [error, setError] = useState('');
   const [selectedObjects, setSelectedObjects] = useState([]);
   const [selectedEntrances, setSelectedEntrances] = useState([]);
+  const [selectedFloors, setSelectedFloors] = useState([]);
+  const [selectedSystems, setSelectedSystems] = useState([]);
+  const [selectedCategories, setSelectedCategories] = useState([]);
+  const [selectedStatuses, setSelectedStatuses] = useState([]);
   const [collapsedFloors, setCollapsedFloors] = useState([]);
   const [expandedEntrance, setExpandedEntrance] = useState(null);
   const [editor, setEditor] = useState({
@@ -236,6 +247,11 @@ export default function ObjectsOverview() {
   });
   const [editorBusy, setEditorBusy] = useState(false);
   const [editorError, setEditorError] = useState('');
+  const [editorProductionRows, setEditorProductionRows] = useState([]);
+  const [editorProductionBusyIssuanceId, setEditorProductionBusyIssuanceId] = useState(null);
+  const [editorProductionLoading, setEditorProductionLoading] = useState(false);
+  const [editorProductionError, setEditorProductionError] = useState('');
+  const [editorProductionMessage, setEditorProductionMessage] = useState('');
   const [productionMode, setProductionMode] = useState(null);
   const [productionCommitted, setProductionCommitted] = useState({});
   const [productionDrafts, setProductionDrafts] = useState({});
@@ -366,6 +382,16 @@ export default function ObjectsOverview() {
     () => [...data.rooms].sort((a, b) => naturalCompare(a.name, b.name)),
     [data.rooms],
   );
+  const apartmentsById = useMemo(() => {
+    const map = new Map();
+    apartments.forEach((row) => map.set(Number(row.id), row));
+    return map;
+  }, [apartments]);
+  const roomsById = useMemo(() => {
+    const map = new Map();
+    rooms.forEach((row) => map.set(Number(row.id), row));
+    return map;
+  }, [rooms]);
   const blockStatuses = useMemo(
     () => [...data.block_statuses].sort((a, b) => (
       Number(a.sort_order || 0) - Number(b.sort_order || 0)
@@ -388,6 +414,10 @@ export default function ObjectsOverview() {
 
   const objectIdSet = useMemo(() => asIntSet(selectedObjects), [selectedObjects]);
   const entranceIdSet = useMemo(() => asIntSet(selectedEntrances), [selectedEntrances]);
+  const floorIdSet = useMemo(() => asIntSet(selectedFloors), [selectedFloors]);
+  const systemFilterSet = useMemo(() => new Set(selectedSystems.map((value) => String(value))), [selectedSystems]);
+  const categoryFilterSet = useMemo(() => new Set(selectedCategories.map((value) => String(value))), [selectedCategories]);
+  const statusFilterSet = useMemo(() => new Set(selectedStatuses.map((value) => String(value))), [selectedStatuses]);
   const collapsedFloorSet = useMemo(() => asIntSet(collapsedFloors), [collapsedFloors]);
   const statusesById = useMemo(() => {
     const map = new Map();
@@ -608,6 +638,7 @@ export default function ObjectsOverview() {
     productionEligibleSlotIds,
   ]);
   const productionEligibleSlotsCount = productionEligibleSlotIds.size;
+  const isProductionMode = !!productionMode;
 
   const objectOptions = objects;
   const entranceOptions = useMemo(() => {
@@ -619,19 +650,191 @@ export default function ObjectsOverview() {
       _objectName: objects.find((o) => o.id === row.object_id)?.name || '',
     }));
   }, [entrances, objects, objectIdSet]);
+  const floorOptions = useMemo(() => {
+    const visibleEntrances = entranceIdSet.size
+      ? new Set([...entranceIdSet])
+      : null;
+    const visibleObjects = objectIdSet.size
+      ? new Set([...objectIdSet])
+      : null;
+    return floors
+      .filter((floor) => {
+        const entrance = entrances.find((entry) => entry.id === floor.entrance_id);
+        if (!entrance) return false;
+        if (visibleEntrances && !visibleEntrances.has(entrance.id)) return false;
+        if (visibleObjects && !visibleObjects.has(entrance.object_id)) return false;
+        return true;
+      })
+      .map((floor) => {
+      const entrance = entrances.find((entry) => entry.id === floor.entrance_id);
+      const objectName = objects.find((objectRow) => objectRow.id === entrance?.object_id)?.name || '';
+      return {
+        id: String(floor.id),
+        name: floor.name,
+        entranceName: entrance?.name || '',
+        objectName,
+      };
+    })
+      .sort((a, b) => (
+        naturalCompare(a.objectName, b.objectName)
+        || naturalCompare(a.entranceName, b.entranceName)
+        || naturalCompare(a.name, b.name)
+      ));
+  }, [floors, entrances, objects, entranceIdSet, objectIdSet]);
+  const systemOptions = useMemo(() => {
+    const map = new Map();
+    data.location_systems.forEach((slot) => {
+      const key = toNullableFilterKey(slot.system_id);
+      if (!map.has(key)) {
+        map.set(key, {
+          id: key,
+          name: String(slot.system_name || '').trim() || 'Без системы',
+        });
+      }
+    });
+    return [...map.values()].sort((a, b) => naturalCompare(a.name, b.name));
+  }, [data.location_systems]);
+  const categoryOptions = useMemo(() => {
+    const map = new Map();
+    data.location_systems.forEach((slot) => {
+      const key = toNullableFilterKey(slot.category_id);
+      if (!map.has(key)) {
+        map.set(key, {
+          id: key,
+          name: String(slot.category_name || '').trim() || 'Без категории',
+        });
+      }
+    });
+    return [...map.values()].sort((a, b) => naturalCompare(a.name, b.name));
+  }, [data.location_systems]);
+  const statusOptions = useMemo(() => {
+    const options = blockStatuses.map((status) => ({
+      id: String(status.id),
+      name: status.name,
+      color: status.color || DEFAULT_STATUS_COLOR,
+    }));
+    const hasNone = data.location_systems.some((slot) => slot.status_id == null);
+    if (hasNone) {
+      options.push({
+        id: 'none',
+        name: 'Без статуса',
+        color: DEFAULT_STATUS_COLOR,
+      });
+    }
+    return options;
+  }, [blockStatuses, data.location_systems]);
+
+  const slotFiltersActive = isProductionMode
+    || !!selectedSystems.length
+    || !!selectedCategories.length
+    || !!selectedStatuses.length;
+
+  const slotMatchesFilters = useCallback((slot) => {
+    if (isProductionMode && !productionEligibleSlotIds.has(Number(slot.id))) return false;
+    if (systemFilterSet.size && !systemFilterSet.has(toNullableFilterKey(slot.system_id))) return false;
+    if (categoryFilterSet.size && !categoryFilterSet.has(toNullableFilterKey(slot.category_id))) return false;
+    if (statusFilterSet.size && !statusFilterSet.has(toNullableFilterKey(slot.status_id))) return false;
+    return true;
+  }, [
+    isProductionMode,
+    productionEligibleSlotIds,
+    systemFilterSet,
+    categoryFilterSet,
+    statusFilterSet,
+  ]);
+
+  const locationMatchesFloorFilter = useCallback((locationKind, locationId) => {
+    if (!floorIdSet.size) return true;
+    const id = Number(locationId || 0);
+    if (!id) return false;
+    if (locationKind === 'apartment') {
+      const apartment = apartmentsById.get(id);
+      return apartment ? floorIdSet.has(Number(apartment.floor_id)) : false;
+    }
+    if (locationKind === 'room') {
+      const room = roomsById.get(id);
+      if (!room) return false;
+      const apartment = apartmentsById.get(Number(room.apartment_id));
+      return apartment ? floorIdSet.has(Number(apartment.floor_id)) : false;
+    }
+    return false;
+  }, [apartmentsById, roomsById, floorIdSet]);
+
+  const hasVisibleLocationSlots = useCallback((locationKind, locationId) => {
+    if (!locationMatchesFloorFilter(locationKind, locationId)) return false;
+    const slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
+    if (!slots.length) return false;
+    return slots.some((slot) => slotMatchesFilters(slot));
+  }, [locationMatchesFloorFilter, slotsByLocation, slotMatchesFilters]);
+
+  const isFloorVisible = useCallback((floorId) => {
+    if (floorIdSet.size && !floorIdSet.has(Number(floorId))) return false;
+    if (!slotFiltersActive) return true;
+    const floorApartments = apartmentsByFloor.get(Number(floorId)) || [];
+    const floorRoomsBucket = floorApartments.find((apartment) => apartment.name === FLOOR_ROOMS_BUCKET_NAME);
+    const floorOnlyRooms = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
+    if (floorOnlyRooms.some((room) => hasVisibleLocationSlots('room', room.id))) return true;
+    return floorApartments
+      .filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME)
+      .some((apartment) => (
+        hasVisibleLocationSlots('apartment', apartment.id)
+        || (roomsByApartment.get(apartment.id) || []).some((room) => hasVisibleLocationSlots('room', room.id))
+      ));
+  }, [floorIdSet, slotFiltersActive, apartmentsByFloor, roomsByApartment, hasVisibleLocationSlots]);
 
   const filteredObjects = useMemo(() => {
     return objects.filter((objectRow) => {
       if (objectIdSet.size && !objectIdSet.has(objectRow.id)) return false;
-      if (!entranceIdSet.size) return true;
       const objectEntrances = entrancesByObject.get(objectRow.id) || [];
-      return objectEntrances.some((entry) => entranceIdSet.has(entry.id));
+      const filteredEntrances = objectEntrances.filter((entry) => !entranceIdSet.size || entranceIdSet.has(entry.id));
+      if (!filteredEntrances.length) return false;
+      return filteredEntrances.some((entry) => {
+        const entranceFloors = floorsByEntrance.get(entry.id) || [];
+        return entranceFloors.some((floor) => isFloorVisible(floor.id));
+      });
     });
-  }, [objects, objectIdSet, entranceIdSet, entrancesByObject]);
+  }, [
+    objects,
+    objectIdSet,
+    entranceIdSet,
+    entrancesByObject,
+    floorsByEntrance,
+    isFloorVisible,
+  ]);
 
   const toggleFloorCollapse = (floorId) => {
     setCollapsedFloors((prev) => toggleSelection(prev, floorId));
   };
+  const visibleFloorIds = useMemo(() => {
+    const ids = [];
+    filteredObjects.forEach((objectRow) => {
+      const objectEntrances = (entrancesByObject.get(objectRow.id) || [])
+        .filter((entry) => !entranceIdSet.size || entranceIdSet.has(entry.id));
+      objectEntrances.forEach((entry) => {
+        (floorsByEntrance.get(entry.id) || []).forEach((floor) => {
+          if (isFloorVisible(floor.id)) ids.push(Number(floor.id));
+        });
+      });
+    });
+    return [...new Set(ids)];
+  }, [filteredObjects, entrancesByObject, entranceIdSet, floorsByEntrance, isFloorVisible]);
+  const allVisibleFloorsCollapsed = useMemo(() => {
+    if (!visibleFloorIds.length) return false;
+    return visibleFloorIds.every((floorId) => collapsedFloorSet.has(Number(floorId)));
+  }, [visibleFloorIds, collapsedFloorSet]);
+
+  const toggleAllFloors = useCallback(() => {
+    if (!visibleFloorIds.length) return;
+    if (allVisibleFloorsCollapsed) {
+      setCollapsedFloors((prev) => prev.filter((id) => !visibleFloorIds.includes(Number(id))));
+      return;
+    }
+    setCollapsedFloors((prev) => {
+      const next = new Set(prev.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0));
+      visibleFloorIds.forEach((floorId) => next.add(Number(floorId)));
+      return [...next].map((id) => String(id));
+    });
+  }, [visibleFloorIds, allVisibleFloorsCollapsed]);
 
   const openSlotEditor = (slot) => {
     setEditor({
@@ -641,12 +844,18 @@ export default function ObjectsOverview() {
       assigneeId: slot.assigned_user_id == null ? '' : String(slot.assigned_user_id),
     });
     setEditorError('');
+    setEditorProductionMessage('');
   };
 
   const closeSlotEditor = () => {
     setEditor({ open: false, slotId: null, statusId: '', assigneeId: '' });
     setEditorBusy(false);
     setEditorError('');
+    setEditorProductionRows([]);
+    setEditorProductionBusyIssuanceId(null);
+    setEditorProductionLoading(false);
+    setEditorProductionError('');
+    setEditorProductionMessage('');
   };
 
   const saveSlotEditor = async (event) => {
@@ -667,7 +876,53 @@ export default function ObjectsOverview() {
     }
   };
 
-  const isProductionMode = !!productionMode;
+  const loadEditorProduction = useCallback(async (slotId) => {
+    const id = Number(slotId || 0);
+    if (!id) {
+      setEditorProductionRows([]);
+      return;
+    }
+    setEditorProductionLoading(true);
+    setEditorProductionError('');
+    try {
+      const rows = await objectsApi.locationSystemProduction(id);
+      setEditorProductionRows(Array.isArray(rows) ? rows : []);
+    } catch (e) {
+      setEditorProductionRows([]);
+      setEditorProductionError(e.message || 'Не удалось загрузить историю выработки по блоку');
+    } finally {
+      setEditorProductionLoading(false);
+    }
+  }, []);
+
+  const cancelEditorProduction = useCallback(async (issuanceId) => {
+    const slotId = Number(editor.slotId || 0);
+    if (!slotId) return;
+    setEditorProductionBusyIssuanceId(Number(issuanceId) || null);
+    setEditorProductionError('');
+    setEditorProductionMessage('');
+    try {
+      const response = await objectsApi.cancelLocationSystemProduction(slotId, issuanceId);
+      const restoredQty = Number(response?.restored_quantity || 0);
+      await Promise.all([
+        load({ silent: true }),
+        loadEditorProduction(slotId),
+      ]);
+      setEditorProductionMessage(
+        `Выработка отменена. Возвращено: ${restoredQty.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}`,
+      );
+    } catch (e) {
+      setEditorProductionError(e.message || 'Не удалось отменить выработку');
+    } finally {
+      setEditorProductionBusyIssuanceId(null);
+    }
+  }, [editor.slotId, load, loadEditorProduction]);
+
+  useEffect(() => {
+    if (!editor.open || !editor.slotId) return;
+    void loadEditorProduction(editor.slotId);
+  }, [editor.open, editor.slotId, loadEditorProduction]);
+
   const productionCommittedRows = useMemo(
     () => Object.values(productionCommitted),
     [productionCommitted],
@@ -887,9 +1142,7 @@ export default function ObjectsOverview() {
 
   const renderLocationBlocks = (locationKind, locationId) => {
     let slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
-    if (isProductionMode) {
-      slots = slots.filter((slot) => productionEligibleSlotIds.has(Number(slot.id)));
-    }
+    slots = slots.filter((slot) => slotMatchesFilters(slot));
     if (!slots.length) return null;
     const groupedBySystem = slots.reduce((acc, slot) => {
       const systemName = String(slot.system_name || '').trim() || 'Без системы';
@@ -980,6 +1233,7 @@ export default function ObjectsOverview() {
     const appendSlots = (locationKind, locationId) => {
       const slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
       slots.forEach((slot) => {
+        if (!slotMatchesFilters(slot)) return;
         const key = slot.status_id == null ? 'none' : String(slot.status_id);
         const knownStatus = slot.status_id == null ? null : statusesById.get(key);
         const row = statusCounts.get(key) || {
@@ -1019,38 +1273,15 @@ export default function ObjectsOverview() {
     return { apartmentsCount, roomsCount };
   }, [apartmentsByFloor, roomsByApartment]);
 
-  const getEntranceCounts = useCallback((entranceId) => {
-    const entranceFloors = floorsByEntrance.get(entranceId) || [];
-    let apartmentsCount = 0;
-    let roomsCount = 0;
-    entranceFloors.forEach((floor) => {
-      const floorCounts = getFloorCounts(floor.id);
-      apartmentsCount += floorCounts.apartmentsCount;
-      roomsCount += floorCounts.roomsCount;
-    });
-    return {
-      floorsCount: entranceFloors.length,
-      apartmentsCount,
-      roomsCount,
-    };
-  }, [floorsByEntrance, getFloorCounts]);
-
-  const hasVisibleLocationSlots = useCallback((locationKind, locationId) => {
-    const slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
-    if (!slots.length) return false;
-    if (!isProductionMode) return true;
-    return slots.some((slot) => productionEligibleSlotIds.has(Number(slot.id)));
-  }, [slotsByLocation, isProductionMode, productionEligibleSlotIds]);
-
   const renderFloorCard = (floor, floorApartments, floorRooms, compact = false) => {
     const isCollapsed = collapsedFloorSet.has(floor.id);
     const floorRoomsBucket = floorApartments.find((apartment) => apartment.name === FLOOR_ROOMS_BUCKET_NAME);
     const regularApartmentsRaw = floorApartments.filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME);
     const floorOnlyRoomsRaw = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
-    const floorOnlyRooms = isProductionMode
+    const floorOnlyRooms = slotFiltersActive
       ? floorOnlyRoomsRaw.filter((room) => hasVisibleLocationSlots('room', room.id))
       : floorOnlyRoomsRaw;
-    const regularApartments = isProductionMode
+    const regularApartments = slotFiltersActive
       ? regularApartmentsRaw.filter((apartment) => (
         hasVisibleLocationSlots('apartment', apartment.id)
           || (roomsByApartment.get(apartment.id) || []).some((room) => hasVisibleLocationSlots('room', room.id))
@@ -1115,7 +1346,7 @@ export default function ObjectsOverview() {
                   <p className="text-zinc-200 text-2xs font-medium">Квартиры на этаже</p>
                   {regularApartments.map((apartment) => {
                     const apartmentRoomsRaw = roomsByApartment.get(apartment.id) || [];
-                    const apartmentRooms = isProductionMode
+                    const apartmentRooms = slotFiltersActive
                       ? apartmentRoomsRaw.filter((room) => hasVisibleLocationSlots('room', room.id))
                       : apartmentRoomsRaw;
                     return (
@@ -1167,27 +1398,28 @@ export default function ObjectsOverview() {
         {filteredObjects.map((objectRow) => {
           const objectEntrancesRaw = (entrancesByObject.get(objectRow.id) || [])
             .filter((entry) => !entranceIdSet.size || entranceIdSet.has(entry.id));
-          const objectEntrances = isProductionMode
-            ? objectEntrancesRaw.filter((entry) => {
-              const entranceFloors = floorsByEntrance.get(entry.id) || [];
-              return entranceFloors.some((floor) => {
-                const floorApartments = apartmentsByFloor.get(floor.id) || [];
-                return floorApartments.some((apartment) => {
-                  if (apartment.name === FLOOR_ROOMS_BUCKET_NAME) {
-                    return (roomsByApartment.get(apartment.id) || []).some((room) => hasVisibleLocationSlots('room', room.id));
-                  }
-                  if (hasVisibleLocationSlots('apartment', apartment.id)) return true;
-                  return (roomsByApartment.get(apartment.id) || []).some((room) => hasVisibleLocationSlots('room', room.id));
-                });
-              });
+          const objectEntrances = objectEntrancesRaw
+            .map((entry) => {
+              const entranceFloors = (floorsByEntrance.get(entry.id) || []).filter((floor) => isFloorVisible(floor.id));
+              return { ...entry, _visibleFloors: entranceFloors };
             })
-            : objectEntrancesRaw;
+            .filter((entry) => entry._visibleFloors.length > 0);
           let floorCount = 0;
           let apartmentCount = 0;
           let roomCount = 0;
           const entranceCountRows = [];
           objectEntrances.forEach((entry) => {
-            const entranceCounts = getEntranceCounts(entry.id);
+            const entranceCounts = entry._visibleFloors.reduce((acc, floor) => {
+              const floorCounts = getFloorCounts(floor.id);
+              acc.floorsCount += 1;
+              acc.apartmentsCount += floorCounts.apartmentsCount;
+              acc.roomsCount += floorCounts.roomsCount;
+              return acc;
+            }, {
+              floorsCount: 0,
+              apartmentsCount: 0,
+              roomsCount: 0,
+            });
             floorCount += entranceCounts.floorsCount;
             apartmentCount += entranceCounts.apartmentsCount;
             roomCount += entranceCounts.roomsCount;
@@ -1235,8 +1467,13 @@ export default function ObjectsOverview() {
               {objectEntrances.length ? (
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {objectEntrances.map((entry) => {
-                    const entranceFloors = floorsByEntrance.get(entry.id) || [];
-                    const entranceCounts = getEntranceCounts(entry.id);
+                    const entranceFloors = entry._visibleFloors || [];
+                    const entranceCounts = entranceFloors.reduce((acc, floor) => {
+                      const floorCounts = getFloorCounts(floor.id);
+                      acc.apartmentsCount += floorCounts.apartmentsCount;
+                      acc.roomsCount += floorCounts.roomsCount;
+                      return acc;
+                    }, { apartmentsCount: 0, roomsCount: 0 });
                     const entranceApartments = entranceCounts.apartmentsCount;
                     const entranceRooms = entranceCounts.roomsCount;
                     const entranceScore = entranceFloors.length + (entranceApartments * 0.6) + (entranceRooms * 0.3);
@@ -1350,7 +1587,21 @@ export default function ObjectsOverview() {
         <p className="text-emerald-300 text-xs">{productionMessage}</p>
       )}
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-zinc-400 text-xs">
+          Фильтры по объектам, этажам и блокам
+        </p>
+        <button
+          type="button"
+          className="btn-secondary text-xs"
+          onClick={toggleAllFloors}
+          disabled={!visibleFloorIds.length}
+        >
+          {allVisibleFloorsCollapsed ? 'Развернуть все этажи' : 'Свернуть все этажи'}
+        </button>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
         <MultiSelectFilter
           title="Фильтр объектов"
           options={objectOptions}
@@ -1367,9 +1618,52 @@ export default function ObjectsOverview() {
           onClear={() => setSelectedEntrances([])}
           getOptionLabel={(option) => (option._objectName ? `${option._objectName} → ${option.name}` : option.name)}
         />
+        <MultiSelectFilter
+          title="Фильтр этажей"
+          options={floorOptions}
+          selected={selectedFloors}
+          onToggle={(id) => setSelectedFloors((prev) => toggleSelection(prev, id))}
+          onClear={() => setSelectedFloors([])}
+          getOptionLabel={(option) => (
+            option.objectName
+              ? `${option.objectName} → Подъезд ${option.entranceName || '—'} → Этаж ${option.name}`
+              : `Этаж ${option.name}`
+          )}
+        />
+        <MultiSelectFilter
+          title="Фильтр систем"
+          options={systemOptions}
+          selected={selectedSystems}
+          onToggle={(id) => setSelectedSystems((prev) => toggleSelection(prev, id))}
+          onClear={() => setSelectedSystems([])}
+          getOptionLabel={(option) => option.name}
+        />
+        <MultiSelectFilter
+          title="Фильтр категорий"
+          options={categoryOptions}
+          selected={selectedCategories}
+          onToggle={(id) => setSelectedCategories((prev) => toggleSelection(prev, id))}
+          onClear={() => setSelectedCategories([])}
+          getOptionLabel={(option) => option.name}
+        />
+        <MultiSelectFilter
+          title="Фильтр статусов"
+          options={statusOptions}
+          selected={selectedStatuses}
+          onToggle={(id) => setSelectedStatuses((prev) => toggleSelection(prev, id))}
+          onClear={() => setSelectedStatuses([])}
+          getOptionLabel={(option) => option.name}
+        />
       </div>
 
-      {!!(selectedObjects.length || selectedEntrances.length) && (
+      {!!(
+        selectedObjects.length
+        || selectedEntrances.length
+        || selectedFloors.length
+        || selectedSystems.length
+        || selectedCategories.length
+        || selectedStatuses.length
+      ) && (
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-zinc-400 text-xs">Активные фильтры:</p>
           {selectedObjects.map((id) => {
@@ -1389,12 +1683,51 @@ export default function ObjectsOverview() {
               </span>
             );
           })}
+          {selectedFloors.map((id) => {
+            const floor = floorOptions.find((o) => String(o.id) === id);
+            const title = floor
+              ? `${floor.objectName ? `${floor.objectName} → ` : ''}Подъезд ${floor.entranceName || '—'} → Этаж ${floor.name}`
+              : id;
+            return (
+              <span key={`floor-${id}`} className="px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-300 text-2xs">
+                Этаж: {title}
+              </span>
+            );
+          })}
+          {selectedSystems.map((id) => {
+            const systemName = systemOptions.find((o) => String(o.id) === id)?.name || id;
+            return (
+              <span key={`system-${id}`} className="px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 text-2xs">
+                Система: {systemName}
+              </span>
+            );
+          })}
+          {selectedCategories.map((id) => {
+            const categoryName = categoryOptions.find((o) => String(o.id) === id)?.name || id;
+            return (
+              <span key={`category-${id}`} className="px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 text-2xs">
+                Категория: {categoryName}
+              </span>
+            );
+          })}
+          {selectedStatuses.map((id) => {
+            const statusName = statusOptions.find((o) => String(o.id) === id)?.name || id;
+            return (
+              <span key={`status-${id}`} className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-2xs">
+                Статус: {statusName}
+              </span>
+            );
+          })}
           <button
             type="button"
             className="text-2xs text-zinc-400 hover:text-white"
             onClick={() => {
               setSelectedObjects([]);
               setSelectedEntrances([]);
+              setSelectedFloors([]);
+              setSelectedSystems([]);
+              setSelectedCategories([]);
+              setSelectedStatuses([]);
             }}
           >
             Сбросить всё
@@ -1424,13 +1757,13 @@ export default function ObjectsOverview() {
               </button>
             </div>
             <div className="space-y-2">
-              {(floorsByEntrance.get(expandedEntrance.id) || []).map((floor) => {
+              {(floorsByEntrance.get(expandedEntrance.id) || []).filter((floor) => isFloorVisible(floor.id)).map((floor) => {
                 const floorApartments = apartmentsByFloor.get(floor.id) || [];
                 const floorCounts = getFloorCounts(floor.id);
                 const floorRooms = floorCounts.roomsCount;
                 return renderFloorCard(floor, floorApartments, floorRooms, true);
               })}
-              {!((floorsByEntrance.get(expandedEntrance.id) || []).length) && (
+              {!((floorsByEntrance.get(expandedEntrance.id) || []).filter((floor) => isFloorVisible(floor.id)).length) && (
                 <p className="text-zinc-500 text-sm">Для этого подъезда этажи ещё не добавлены</p>
               )}
             </div>
@@ -1522,13 +1855,53 @@ export default function ObjectsOverview() {
 
       {editor.open && activeSlot && (
         <div className="modal-backdrop z-50" onClick={closeSlotEditor} role="dialog" aria-modal="true">
-          <div className="card p-5 max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+          <div className="card p-5 max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-white font-medium text-lg">Статус блока</h3>
             <p className="text-zinc-400 text-sm mt-1">
               {activeSlot.system_name || 'Без системы'}
               {activeSlot.category_name ? ` · ${activeSlot.category_name}` : ''}
             </p>
             {editorError && <p className="text-rose-400 text-sm mt-3">{editorError}</p>}
+            <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3 space-y-2">
+              <p className="text-zinc-200 text-xs font-semibold">Проведенная выработка по блоку</p>
+              {editorProductionLoading ? (
+                <p className="text-zinc-500 text-2xs">Загрузка…</p>
+              ) : editorProductionRows.length ? (
+                <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                  {editorProductionRows.map((row) => (
+                    <div key={`${row.issuance_id}-${row.last_created_at}`} className="rounded border border-white/10 bg-black/20 px-2 py-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-zinc-200 text-2xs">
+                          Выдача #{row.issuance_id} · {row.material_name || 'Материал'}
+                          {row.material_code ? ` (${row.material_code})` : ''}
+                        </p>
+                        <button
+                          type="button"
+                          className="btn-ghost text-rose-300 text-2xs"
+                          disabled={editorProductionBusyIssuanceId === Number(row.issuance_id)}
+                          onClick={() => void cancelEditorProduction(Number(row.issuance_id))}
+                        >
+                          {editorProductionBusyIssuanceId === Number(row.issuance_id) ? 'Отмена…' : 'Отменить выработку'}
+                        </button>
+                      </div>
+                      <p className="text-zinc-400 text-2xs mt-1">
+                        Кол-во: {Number(row.quantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {row.material_unit || ''}
+                      </p>
+                      {!!(row.worker_names || []).length && (
+                        <p className="text-zinc-400 text-2xs mt-0.5">Исполнители: {row.worker_names.join(', ')}</p>
+                      )}
+                      {!!(row.status_names || []).length && (
+                        <p className="text-zinc-400 text-2xs mt-0.5">Статусы: {row.status_names.join(', ')}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-zinc-500 text-2xs">По этому блоку проведенной выработки нет.</p>
+              )}
+              {editorProductionError && <p className="text-rose-400 text-2xs">{editorProductionError}</p>}
+              {editorProductionMessage && <p className="text-emerald-300 text-2xs">{editorProductionMessage}</p>}
+            </div>
             <form className="space-y-3 mt-4" onSubmit={saveSlotEditor}>
               <div>
                 <label className="label">Статус</label>

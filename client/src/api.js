@@ -499,6 +499,12 @@ export const objectsView = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
+  locationSystemProduction: (id) => request(`/api/objects/location-systems/${id}/production`),
+  cancelLocationSystemProduction: (id, issuanceId) =>
+    request(`/api/objects/location-systems/${id}/production`, {
+      method: 'DELETE',
+      body: JSON.stringify(issuanceId ? { issuance_id: issuanceId } : {}),
+    }),
 };
 
 export const operations = {
