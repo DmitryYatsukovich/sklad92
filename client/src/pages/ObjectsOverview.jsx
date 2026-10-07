@@ -81,6 +81,9 @@ function LocationSlotChip({ slot, entries, onOpen }) {
   const entryNames = entries.map((row) => row.name).filter(Boolean);
   const statusName = slot.status_name || 'Без статуса';
   const statusColor = slot.status_color || DEFAULT_STATUS_COLOR;
+  const shortEntry = String(entryNames[0] || slot.category_name || slot.system_name || '—')
+    .trim()
+    .slice(0, 6);
   const title = [
     `Система: ${slot.system_name || '—'}`,
     `Категория: ${slot.category_name || '—'}`,
@@ -100,7 +103,10 @@ function LocationSlotChip({ slot, entries, onOpen }) {
         color: getTextColorForHex(statusColor),
       }}
     >
-      {entryNames.length || '•'}
+      <span className="flex h-full w-full flex-col items-center justify-center leading-none">
+        <span className="text-[8px] font-semibold uppercase">{shortEntry || '—'}</span>
+        <span className="text-[8px] opacity-90">{entryNames.length || 0}</span>
+      </span>
     </button>
   );
 }
@@ -496,6 +502,32 @@ export default function ObjectsOverview() {
     return rows;
   };
 
+  const getFloorCounts = useCallback((floorId) => {
+    const floorApartments = apartmentsByFloor.get(floorId) || [];
+    const apartmentsCount = floorApartments.filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME).length;
+    let roomsCount = 0;
+    floorApartments.forEach((apartment) => {
+      roomsCount += (roomsByApartment.get(apartment.id) || []).length;
+    });
+    return { apartmentsCount, roomsCount };
+  }, [apartmentsByFloor, roomsByApartment]);
+
+  const getEntranceCounts = useCallback((entranceId) => {
+    const entranceFloors = floorsByEntrance.get(entranceId) || [];
+    let apartmentsCount = 0;
+    let roomsCount = 0;
+    entranceFloors.forEach((floor) => {
+      const floorCounts = getFloorCounts(floor.id);
+      apartmentsCount += floorCounts.apartmentsCount;
+      roomsCount += floorCounts.roomsCount;
+    });
+    return {
+      floorsCount: entranceFloors.length,
+      apartmentsCount,
+      roomsCount,
+    };
+  }, [floorsByEntrance, getFloorCounts]);
+
   const renderFloorCard = (floor, floorApartments, floorRooms, compact = false) => {
     const isCollapsed = collapsedFloorSet.has(floor.id);
     const floorRoomsBucket = floorApartments.find((apartment) => apartment.name === FLOOR_ROOMS_BUCKET_NAME);
@@ -605,15 +637,16 @@ export default function ObjectsOverview() {
           let floorCount = 0;
           let apartmentCount = 0;
           let roomCount = 0;
+          const entranceCountRows = [];
           objectEntrances.forEach((entry) => {
-            const entranceFloors = floorsByEntrance.get(entry.id) || [];
-            floorCount += entranceFloors.length;
-            entranceFloors.forEach((floor) => {
-              const floorApartments = apartmentsByFloor.get(floor.id) || [];
-              apartmentCount += floorApartments.filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME).length;
-              floorApartments.forEach((apartment) => {
-                roomCount += (roomsByApartment.get(apartment.id) || []).length;
-              });
+            const entranceCounts = getEntranceCounts(entry.id);
+            floorCount += entranceCounts.floorsCount;
+            apartmentCount += entranceCounts.apartmentsCount;
+            roomCount += entranceCounts.roomsCount;
+            entranceCountRows.push({
+              entranceId: entry.id,
+              entranceName: entry.name,
+              ...entranceCounts,
             });
           });
 
@@ -641,20 +674,23 @@ export default function ObjectsOverview() {
               <p className="text-zinc-400 text-2xs">
                 Подъезды: {objectEntrances.length} · Этажи: {floorCount} · Квартиры: {apartmentCount} · Помещения: {roomCount}
               </p>
+              {!!entranceCountRows.length && (
+                <div className="flex flex-wrap gap-1.5">
+                  {entranceCountRows.map((row) => (
+                    <span key={row.entranceId} className="px-2 py-0.5 rounded-full border border-emerald-500/35 bg-emerald-950/30 text-emerald-200 text-2xs">
+                      Подъезд {row.entranceName}: Кв. {row.apartmentsCount} · Пом. {row.roomsCount}
+                    </span>
+                  ))}
+                </div>
+              )}
 
               {objectEntrances.length ? (
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {objectEntrances.map((entry) => {
                     const entranceFloors = floorsByEntrance.get(entry.id) || [];
-                    let entranceApartments = 0;
-                    let entranceRooms = 0;
-                    entranceFloors.forEach((floor) => {
-                      const floorApartments = apartmentsByFloor.get(floor.id) || [];
-                      entranceApartments += floorApartments.filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME).length;
-                      floorApartments.forEach((apartment) => {
-                        entranceRooms += (roomsByApartment.get(apartment.id) || []).length;
-                      });
-                    });
+                    const entranceCounts = getEntranceCounts(entry.id);
+                    const entranceApartments = entranceCounts.apartmentsCount;
+                    const entranceRooms = entranceCounts.roomsCount;
                     const entranceScore = entranceFloors.length + (entranceApartments * 0.6) + (entranceRooms * 0.3);
                     return (
                       <section
@@ -674,16 +710,16 @@ export default function ObjectsOverview() {
                           >
                             Подъезд {entry.name}
                           </button>
-                          <span className="text-2xs text-zinc-400">Этажей: {entranceFloors.length}</span>
+                          <span className="text-2xs text-zinc-400">
+                            Этажей: {entranceFloors.length} · Кв.: {entranceApartments} · Пом.: {entranceRooms}
+                          </span>
                         </div>
                         {entranceFloors.length ? (
                           <div className="space-y-2">
                             {entranceFloors.map((floor) => {
                               const floorApartments = apartmentsByFloor.get(floor.id) || [];
-                              let floorRooms = 0;
-                              floorApartments.forEach((apartment) => {
-                                floorRooms += (roomsByApartment.get(apartment.id) || []).length;
-                              });
+                              const floorCounts = getFloorCounts(floor.id);
+                              const floorRooms = floorCounts.roomsCount;
                               return renderFloorCard(floor, floorApartments, floorRooms);
                             })}
                           </div>
@@ -791,10 +827,8 @@ export default function ObjectsOverview() {
             <div className="space-y-2">
               {(floorsByEntrance.get(expandedEntrance.id) || []).map((floor) => {
                 const floorApartments = apartmentsByFloor.get(floor.id) || [];
-                let floorRooms = 0;
-                floorApartments.forEach((apartment) => {
-                  floorRooms += (roomsByApartment.get(apartment.id) || []).length;
-                });
+                const floorCounts = getFloorCounts(floor.id);
+                const floorRooms = floorCounts.roomsCount;
                 return renderFloorCard(floor, floorApartments, floorRooms, true);
               })}
               {!((floorsByEntrance.get(expandedEntrance.id) || []).length) && (
