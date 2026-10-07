@@ -1866,34 +1866,45 @@ export default function ObjectsOverview() {
                   {group.systemName} · {group.categoryName}
                 </p>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
+                  <table className="w-full text-xs table-fixed">
+                    <colgroup>
+                      <col style={{ width: '38%' }} />
+                      <col style={{ width: '15.5%' }} />
+                      <col style={{ width: '15.5%' }} />
+                      <col style={{ width: '15.5%' }} />
+                      <col style={{ width: '15.5%' }} />
+                    </colgroup>
                     <thead>
                       <tr className="text-zinc-500 border-b border-white/10">
-                        <th className="text-left py-1">Материал</th>
-                        <th className="text-right py-1">Нужно для завершения</th>
-                        <th className="text-right py-1">На складе</th>
-                        <th className="text-right py-1">На руках</th>
-                        <th className="text-right py-1">Нужно заказать</th>
+                        <th className="text-left py-1 pr-2">Наименование</th>
+                        <th className="text-right py-1 px-1 whitespace-nowrap">Нужно</th>
+                        <th className="text-right py-1 px-1 whitespace-nowrap">На складе</th>
+                        <th className="text-right py-1 px-1 whitespace-nowrap">На руках</th>
+                        <th className="text-right py-1 pl-1 whitespace-nowrap">Заказать</th>
                       </tr>
                     </thead>
                     <tbody>
                       {group.rows.map((row) => {
                         const needDanger = Number(row.needToOrder || 0) > 0;
-                        const unitLabel = row.materialUnit ? ` ${row.materialUnit}` : '';
+                        const nameWithUnit = row.materialUnit
+                          ? `${row.materialName} (${row.materialUnit})`
+                          : row.materialName;
                         return (
                           <tr key={row.materialId} className="border-b border-white/5 last:border-b-0">
-                            <td className="py-1.5 text-zinc-200">{row.materialName}</td>
-                            <td className="py-1.5 text-right tabular-nums text-zinc-200">
-                              {Number(row.requiredQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}{unitLabel}
+                            <td className="py-1.5 pr-2 text-zinc-200 truncate" title={nameWithUnit}>
+                              {nameWithUnit}
                             </td>
-                            <td className="py-1.5 text-right tabular-nums text-zinc-300">
-                              {Number(row.warehouseQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}{unitLabel}
+                            <td className="py-1.5 px-1 text-right tabular-nums text-zinc-200 whitespace-nowrap">
+                              {Number(row.requiredQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
                             </td>
-                            <td className="py-1.5 text-right tabular-nums text-sky-300">
-                              {Number(row.onHandsQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}{unitLabel}
+                            <td className="py-1.5 px-1 text-right tabular-nums text-zinc-300 whitespace-nowrap">
+                              {Number(row.warehouseQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
                             </td>
-                            <td className={`py-1.5 text-right tabular-nums font-semibold ${needDanger ? 'text-rose-400' : 'text-emerald-300'}`}>
-                              {Number(row.needToOrder || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}{unitLabel}
+                            <td className="py-1.5 px-1 text-right tabular-nums text-sky-300 whitespace-nowrap">
+                              {Number(row.onHandsQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
+                            </td>
+                            <td className={`py-1.5 pl-1 text-right tabular-nums font-semibold whitespace-nowrap ${needDanger ? 'text-rose-400' : 'text-emerald-300'}`}>
+                              {Number(row.needToOrder || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
                             </td>
                           </tr>
                         );
