@@ -130,6 +130,7 @@ export default function ProductionHistoryModal({
                       <div className={
                         e.kind === 'confirm' ? 'text-emerald-400'
                           : e.kind === 'unconfirm' ? 'text-amber-400'
+                            : e.kind === 'production' ? 'text-sky-300'
                             : e.kind === 'location' ? 'text-sky-400'
                               : 'text-zinc-300'
                       }

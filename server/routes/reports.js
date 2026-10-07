@@ -16,6 +16,44 @@ import {
 
 const router = Router();
 
+let ensureProductionAllocationSchemaPromise = null;
+
+async function ensureProductionAllocationSchema() {
+  if (!ensureProductionAllocationSchemaPromise) {
+    ensureProductionAllocationSchemaPromise = (async () => {
+      await pool.query(
+        'ALTER TABLE work_block_statuses ADD COLUMN IF NOT EXISTS is_for_production BOOLEAN NOT NULL DEFAULT false',
+      );
+      await pool.query(
+        `CREATE TABLE IF NOT EXISTS issuance_production_allocations (
+          id SERIAL PRIMARY KEY,
+          issuance_id INTEGER NOT NULL REFERENCES issuances(id) ON DELETE CASCADE,
+          location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE RESTRICT,
+          worker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+          status_id INTEGER REFERENCES work_block_statuses(id) ON DELETE SET NULL,
+          quantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+          created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          CHECK (quantity > 0)
+        )`,
+      );
+      await pool.query(
+        'CREATE INDEX IF NOT EXISTS idx_ipa_issuance ON issuance_production_allocations(issuance_id, created_at DESC)',
+      );
+      await pool.query(
+        'CREATE INDEX IF NOT EXISTS idx_ipa_worker ON issuance_production_allocations(worker_user_id, created_at DESC)',
+      );
+      await pool.query(
+        'CREATE INDEX IF NOT EXISTS idx_ipa_location_system ON issuance_production_allocations(location_system_id)',
+      );
+    })().catch((error) => {
+      ensureProductionAllocationSchemaPromise = null;
+      throw error;
+    });
+  }
+  await ensureProductionAllocationSchemaPromise;
+}
+
 function parseId(v) {
   const n = parseInt(v, 10);
   return n > 0 ? n : null;
@@ -93,9 +131,44 @@ async function loadWorkLocationCatalog() {
   };
 }
 
+function findById(list, id) {
+  return (list || []).find((row) => Number(row.id) === Number(id)) || null;
+}
+
+function formatAllocationLocationLabel(catalog, locationKind, locationId) {
+  if (!catalog || !locationKind || !locationId) return '';
+  let apartment = null;
+  let room = null;
+  if (locationKind === 'room') {
+    room = findById(catalog.work_rooms, locationId);
+    apartment = room ? findById(catalog.work_apartments, room.apartment_id) : null;
+  } else if (locationKind === 'apartment') {
+    apartment = findById(catalog.work_apartments, locationId);
+  }
+  if (!apartment) return '';
+  const floor = findById(catalog.work_floors, apartment.floor_id);
+  const entrance = floor ? findById(catalog.work_entrances, floor.entrance_id) : null;
+  const object = entrance ? findById(catalog.objects, entrance.object_id) : null;
+  return [
+    object?.name || null,
+    entrance?.name ? `подъезд ${entrance.name}` : null,
+    floor?.name ? `этаж ${floor.name}` : null,
+    apartment?.name ? `кв. ${apartment.name}` : null,
+    room?.name ? `пом. ${room.name}` : null,
+  ].filter(Boolean).join(' · ');
+}
+
 router.use(requireAuth);
 router.use(loadUser);
 router.use(requirePermission('can_production'));
+router.use(async (_req, _res, next) => {
+  try {
+    await ensureProductionAllocationSchema();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 const PRODUCTION_SELECT = `
   SELECT i.id AS issuance_id,
@@ -114,12 +187,44 @@ const PRODUCTION_SELECT = `
          COALESCE(m.production_price, 0) AS production_price,
          i.quantity AS total_issued,
          COALESCE(i.returned_quantity, 0) AS total_returned,
-         GREATEST(i.quantity - COALESCE(i.returned_quantity, 0), 0) AS produced,
+         COALESCE(pa.produced_qty, 0)::numeric AS produced,
+         COALESCE(pa.workers, '') AS production_workers,
+         COALESCE(pa.locations, '') AS production_locations,
          ${WORK_LOCATION_SELECT}
   FROM issuances i
   JOIN users u ON u.id = i.issued_to_user_id
   JOIN materials m ON m.id = i.material_id
   ${WORK_LOCATION_JOIN}
+  LEFT JOIN LATERAL (
+    SELECT
+      COALESCE(SUM(ipa.quantity), 0)::numeric AS produced_qty,
+      STRING_AGG(
+        DISTINCT COALESCE(NULLIF(TRIM(uw.display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', uw.first_name, uw.last_name)), ''), uw.login),
+        ', '
+      ) AS workers,
+      STRING_AGG(
+        DISTINCT TRIM(BOTH ' ' FROM CONCAT_WS(
+          ' · ',
+          wo.name,
+          CASE WHEN we.name IS NOT NULL THEN CONCAT('подъезд ', we.name) ELSE NULL END,
+          CASE WHEN wf.name IS NOT NULL THEN CONCAT('этаж ', wf.name) ELSE NULL END,
+          CASE WHEN wa.name IS NOT NULL THEN CONCAT('кв. ', wa.name) ELSE NULL END,
+          CASE WHEN wr.name IS NOT NULL THEN CONCAT('пом. ', wr.name) ELSE NULL END
+        )),
+        ' | '
+      ) AS locations
+    FROM issuance_production_allocations ipa
+    LEFT JOIN users uw ON uw.id = ipa.worker_user_id
+    JOIN work_location_systems ls ON ls.id = ipa.location_system_id
+    LEFT JOIN work_rooms wr ON ls.location_kind = 'room' AND wr.id = ls.location_id
+    LEFT JOIN work_apartments wa_room ON wa_room.id = wr.apartment_id
+    LEFT JOIN work_apartments wa_direct ON ls.location_kind = 'apartment' AND wa_direct.id = ls.location_id
+    LEFT JOIN work_apartments wa ON wa.id = COALESCE(wa_direct.id, wa_room.id)
+    LEFT JOIN work_floors wf ON wf.id = wa.floor_id
+    LEFT JOIN work_entrances we ON we.id = wf.entrance_id
+    LEFT JOIN warehouse_objects wo ON wo.id = we.object_id
+    WHERE ipa.issuance_id = i.id
+  ) pa ON true
 `;
 
 // История изменений выработки по пользователю и материалу
@@ -187,8 +292,9 @@ router.get('/production/history', async (req, res) => {
 
   let logRows = [];
   let confirmLogRows = [];
+  let productionRows = [];
   if (issuanceIds.length) {
-    const [log, confirmLog] = await Promise.all([
+    const [log, confirmLog, production] = await Promise.all([
       pool.query(
         `SELECT l.id, l.kind, l.delta, l.note, l.created_at, l.issuance_id,
                 u.login AS user_login, u.display_name AS user_name
@@ -209,9 +315,23 @@ router.get('/production/history', async (req, res) => {
          ORDER BY pcl.created_at ASC`,
         [issuanceIds],
       ),
+      pool.query(
+        `SELECT ipa.id, ipa.issuance_id, ipa.quantity, ipa.created_at,
+                ls.location_kind, ls.location_id,
+                bs.name AS status_name,
+                COALESCE(NULLIF(TRIM(uw.display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', uw.first_name, uw.last_name)), ''), uw.login) AS worker_name
+         FROM issuance_production_allocations ipa
+         JOIN work_location_systems ls ON ls.id = ipa.location_system_id
+         LEFT JOIN work_block_statuses bs ON bs.id = ipa.status_id
+         LEFT JOIN users uw ON uw.id = ipa.worker_user_id
+         WHERE ipa.issuance_id = ANY($1::int[])
+         ORDER BY ipa.created_at ASC`,
+        [issuanceIds],
+      ),
     ]);
     logRows = log.rows;
     confirmLogRows = confirmLog.rows;
+    productionRows = production.rows;
   }
 
   const unitSmr = parseFloat(meta.rows[0].production_price) || 0;
@@ -219,8 +339,6 @@ router.get('/production/history', async (req, res) => {
 
   for (const i of iss.rows) {
     const issued = parseFloat(i.quantity) || 0;
-    const returned = parseFloat(i.returned_quantity) || 0;
-    const produced = Math.max(issued - returned, 0);
 
     entries.push({
       id: `issue-${i.id}`,
@@ -229,8 +347,8 @@ router.get('/production/history', async (req, res) => {
       label: 'Выдача',
       issued,
       returned: 0,
-      produced,
-      smr_total: produced * unitSmr,
+      produced: null,
+      smr_total: null,
       issuance_id: i.id,
       note: null,
     });
@@ -320,13 +438,28 @@ router.get('/production/history', async (req, res) => {
     });
   }
 
+  for (const p of productionRows) {
+    const locationLabel = formatAllocationLocationLabel(historyCatalog, p.location_kind, p.location_id);
+    entries.push({
+      id: `prod-${p.id}`,
+      at: p.created_at,
+      kind: 'production',
+      label: 'Выработка по блоку',
+      issued: null,
+      returned: null,
+      produced: parseFloat(p.quantity) || 0,
+      smr_total: (parseFloat(p.quantity) || 0) * unitSmr,
+      issuance_id: p.issuance_id,
+      note: [p.worker_name, p.status_name, locationLabel].filter(Boolean).join(' · ') || null,
+    });
+  }
+
   entries.sort((a, b) => new Date(a.at) - new Date(b.at));
 
-  const currentProduced = iss.rows.reduce((s, i) => {
-    const issued = parseFloat(i.quantity) || 0;
-    const returned = parseFloat(i.returned_quantity) || 0;
-    return s + Math.max(issued - returned, 0);
-  }, 0);
+  const currentProduced = productionRows.reduce(
+    (sum, row) => sum + (parseFloat(row.quantity) || 0),
+    0,
+  );
 
   res.json({
     ...meta.rows[0],
@@ -376,13 +509,15 @@ router.get('/production', async (req, res) => {
   const rows = r.rows.map((row) => {
     const produced = parseFloat(row.produced) || 0;
     const unitSmr = parseFloat(row.production_price) || 0;
+    const fallbackLocation = formatWorkLocationLabel(row, catalog);
+    const locationLabel = String(row.production_locations || '').trim() || fallbackLocation;
     return {
       ...row,
       production_price: unitSmr,
       produced,
       smr_total: produced * unitSmr,
       production_confirmed: !!row.production_confirmed,
-      work_location_label: formatWorkLocationLabel(row, catalog),
+      work_location_label: locationLabel,
     };
   });
 
@@ -416,9 +551,26 @@ router.delete('/production', requireAdmin, async (req, res) => {
     const issuanceIds = [];
     for (const iss of issuances) {
       issuanceIds.push(iss.id);
+    }
+
+    const producedByIssuanceRows = issuanceIds.length
+      ? await client.query(
+        `SELECT issuance_id, COALESCE(SUM(quantity), 0)::numeric AS produced_qty
+         FROM issuance_production_allocations
+         WHERE issuance_id = ANY($1::int[])
+         GROUP BY issuance_id`,
+        [issuanceIds],
+      )
+      : { rows: [] };
+    const producedByIssuance = new Map(
+      producedByIssuanceRows.rows.map((row) => [Number(row.issuance_id), Number(row.produced_qty || 0)]),
+    );
+
+    for (const iss of issuances) {
       const issued = parseFloat(iss.quantity) || 0;
       const returned = parseFloat(iss.returned_quantity || 0) || 0;
-      const restore = issued - returned;
+      const produced = producedByIssuance.get(Number(iss.id)) || 0;
+      const restore = issued - returned - produced;
       if (restore <= 1e-9) continue;
       restoreByMaterial.set(
         iss.material_id,

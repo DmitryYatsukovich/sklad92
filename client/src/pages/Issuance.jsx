@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { materials as materialsApi, operations as operationsApi, isOfflineQueuedError } from '../api';
 import FilterDateInput from '../components/FilterDateInput';
@@ -96,7 +96,7 @@ function asText(value) {
 }
 
 function remainingQty(i) {
-  return parseFloat(i.quantity) - parseFloat(i.returned_quantity || 0);
+  return parseFloat(i.quantity) - parseFloat(i.returned_quantity || 0) - parseFloat(i.produced_quantity || 0);
 }
 
 function enrichRow(i, materialPrices) {
@@ -156,6 +156,10 @@ function issuanceHistoryLines(row) {
       lines.push(`Передал (${qty || '—'}) — кому передал: ${to} · ${at}`);
     } else if (evt.type === 'return') {
       lines.push(`Вернул на склад (${qty || '—'}) · ${at}`);
+    } else if (evt.type === 'production') {
+      const workers = evt.payload.workers || '—';
+      const blocks = evt.payload.blocks || '—';
+      lines.push(`Выработал (${qty || '—'}) · блоков: ${blocks} · сотрудники: ${workers} · ${at}`);
     }
   }
   if (events.length === 0 && (Number(row.returned_quantity) || 0) > 0) {
@@ -192,6 +196,7 @@ function ThWithSum({ label, column, sortBy, sortDir, onSort, sum, sumClassName =
 
 export default function Issuance({ user }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const [issuances, setIssuances] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [issueUsers, setIssueUsers] = useState([]);
@@ -203,6 +208,9 @@ export default function Issuance({ user }) {
   const [transferRow, setTransferRow] = useState(null);
   const [transferQuantity, setTransferQuantity] = useState('');
   const [transferUserId, setTransferUserId] = useState('');
+  const [productionRow, setProductionRow] = useState(null);
+  const [productionUserSearch, setProductionUserSearch] = useState('');
+  const [productionSelectedUserIds, setProductionSelectedUserIds] = useState([]);
   const [transferSubmitting, setTransferSubmitting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
@@ -501,6 +509,12 @@ export default function Issuance({ user }) {
     setTransferUserId('');
   };
 
+  const closeProduction = () => {
+    setProductionRow(null);
+    setProductionUserSearch('');
+    setProductionSelectedUserIds([]);
+  };
+
   const transferCandidates = useMemo(() => {
     if (!transferRow) return issueUsers;
     const currentRecipientId = Number(transferRow.issued_to_user_id);
@@ -513,6 +527,60 @@ export default function Issuance({ user }) {
     if (!Number.isFinite(transferAmount) || transferAmount < 0) return available;
     return Math.max(available - transferAmount, 0);
   }, [transferRow, transferQuantity]);
+
+  const productionCandidates = useMemo(() => {
+    const q = productionUserSearch.trim().toLowerCase();
+    return issueUsers.filter((u) => {
+      if (!q) return true;
+      const label = `${u.display_name || ''} ${u.login || ''}`.toLowerCase();
+      return label.includes(q);
+    });
+  }, [issueUsers, productionUserSearch]);
+
+  const selectedProductionUsers = useMemo(() => {
+    const ids = new Set(productionSelectedUserIds.map(Number));
+    return issueUsers.filter((u) => ids.has(Number(u.id)));
+  }, [issueUsers, productionSelectedUserIds]);
+
+  const openProduction = (row) => {
+    setProductionRow(row);
+    setProductionUserSearch('');
+    setProductionSelectedUserIds([]);
+    setError('');
+  };
+
+  const toggleProductionUser = (userId) => {
+    const key = String(userId);
+    setProductionSelectedUserIds((prev) => (
+      prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key]
+    ));
+  };
+
+  const handleStartProduction = () => {
+    if (!productionRow) return;
+    if (!productionSelectedUserIds.length) {
+      setError('Выберите хотя бы одного сотрудника для выработки');
+      return;
+    }
+    const selectedWorkersPayload = selectedProductionUsers.map((row) => ({
+      id: Number(row.id),
+      label: row.display_name || row.login || `#${row.id}`,
+    }));
+    navigate('/objects', {
+      state: {
+        productionAllocation: {
+          issuanceId: Number(productionRow.id),
+          materialId: Number(productionRow.material_id),
+          materialName: productionRow.material_name || '',
+          materialCode: productionRow.material_code || '',
+          unit: productionRow.unit || 'шт',
+          availableQty: Math.max(remainingQty(productionRow), 0),
+          selectedWorkers: selectedWorkersPayload,
+        },
+      },
+    });
+    closeProduction();
+  };
 
   const handleDeleteIssuance = async () => {
     if (!returnRow || user?.role !== 'admin') return;
@@ -868,6 +936,9 @@ export default function Issuance({ user }) {
                       {i._returned > 0 && (
                         <div className="text-2xs text-zinc-500">верн. {i._returned}</div>
                       )}
+                      {Number(i.produced_quantity || 0) > 0 && (
+                        <div className="text-2xs text-sky-300">выраб. {formatSumQty(i.produced_quantity)}</div>
+                      )}
                     </td>
                     <td className="text-right tabular-nums">
                       <span className="text-emerald-300">{formatSumQty(i._netQty)}</span>
@@ -887,6 +958,11 @@ export default function Issuance({ user }) {
                           {canReturn && (
                             <button type="button" onClick={() => openTransfer(i)} className="btn-ghost px-1 text-xs">
                               Передать
+                            </button>
+                          )}
+                          {canReturn && (
+                            <button type="button" onClick={() => openProduction(i)} className="btn-ghost px-1 text-xs text-sky-300">
+                              Выработать
                             </button>
                           )}
                         </div>
@@ -1027,6 +1103,81 @@ export default function Issuance({ user }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {productionRow && (
+        <div className="modal-backdrop z-50" onClick={closeProduction}>
+          <div className="card p-5 max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-white mb-1">Выработать материал</h3>
+            <p className="text-zinc-400 text-xs mb-2">
+              {productionRow.material_name} · доступно на руках: {formatSumQty(Math.max(remainingQty(productionRow), 0))} {productionRow.unit}
+            </p>
+            <p className="text-zinc-500 text-xs mb-3">
+              Выберите сотрудников. После нажатия «Добавить сотрудника» откроется вкладка «Объекты» с доступными блоками этого материала.
+            </p>
+            {error && <p className="alert-error mb-3">{error}</p>}
+
+            <div className="space-y-3">
+              <div>
+                <label className="label">Поиск сотрудника</label>
+                <input
+                  type="text"
+                  value={productionUserSearch}
+                  onChange={(e) => setProductionUserSearch(e.target.value)}
+                  className="input"
+                  placeholder="Имя или логин"
+                />
+              </div>
+
+              <div className="max-h-56 overflow-y-auto rounded-lg border border-white/10 bg-black/20 p-2 space-y-1">
+                {productionCandidates.map((u) => {
+                  const key = String(u.id);
+                  const checked = productionSelectedUserIds.includes(key);
+                  return (
+                    <label
+                      key={u.id}
+                      className="flex items-start gap-2 text-sm text-zinc-200 cursor-pointer hover:bg-white/5 rounded px-1 py-0.5"
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={checked}
+                        onChange={() => toggleProductionUser(u.id)}
+                      />
+                      <span>
+                        {u.display_name || u.login}
+                        {u.display_name && u.login ? ` (${u.login})` : ''}
+                      </span>
+                    </label>
+                  );
+                })}
+                {!productionCandidates.length && (
+                  <p className="text-zinc-500 text-xs py-2 text-center">Сотрудники не найдены</p>
+                )}
+              </div>
+
+              {!!selectedProductionUsers.length && (
+                <p className="text-2xs text-emerald-300">
+                  Выбрано: {selectedProductionUsers.map((u) => u.display_name || u.login).join(', ')}
+                </p>
+              )}
+
+              <div className="flex gap-2 justify-end flex-wrap">
+                <button type="button" onClick={closeProduction} className="btn-ghost">
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStartProduction}
+                  className="btn-primary"
+                  disabled={!productionSelectedUserIds.length}
+                >
+                  Добавить сотрудника
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

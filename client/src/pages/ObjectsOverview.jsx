@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { objectsView as objectsApi } from '../api';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { objectsView as objectsApi, operations as operationsApi } from '../api';
 
 const EMPTY_DATA = {
   objects: [],
@@ -77,35 +78,64 @@ function blockSizeClass(level, score) {
   return '';
 }
 
-function LocationSlotChip({ slot, entries, onOpen }) {
-  const entryNames = entries.map((row) => row.name).filter(Boolean);
+function formatEntryLabel(entry) {
+  const qty = Number(entry?.quantity || 0);
+  const unit = String(entry?.unit || '').trim();
+  const qtyLabel = Number.isFinite(qty)
+    ? `${qty.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}${unit ? ` ${unit}` : ''}`
+    : '';
+  return `${entry?.name || '—'}${qtyLabel ? ` — ${qtyLabel}` : ''}`;
+}
+
+function LocationSlotChip({
+  slot,
+  entries,
+  onOpen,
+  selected = false,
+  selectionCaption = '',
+  selectionColor = '',
+}) {
+  const entryLines = entries.map(formatEntryLabel).filter(Boolean);
   const statusName = slot.status_name || 'Без статуса';
   const statusColor = slot.status_color || DEFAULT_STATUS_COLOR;
-  const shortEntry = String(entryNames[0] || slot.category_name || slot.system_name || '—')
-    .trim()
-    .slice(0, 6);
+  const backgroundColor = selectionColor || statusColor;
   const title = [
     `Система: ${slot.system_name || '—'}`,
     `Категория: ${slot.category_name || '—'}`,
     `Статус: ${statusName}`,
     `Исполнитель: ${slot.assigned_user_name || slot.assigned_user_login || '—'}`,
-    `Позиций: ${entryNames.length}`,
-    `Список: ${entryNames.length ? entryNames.join(', ') : '—'}`,
+    `Позиции: ${entryLines.length ? entryLines.join('; ') : '—'}`,
   ].join('\n');
   return (
     <button
       type="button"
       onClick={() => onOpen?.(slot)}
       title={title}
-      className="h-8 w-8 md:h-9 md:w-9 rounded border border-black/20 shadow-sm flex items-center justify-center text-[10px] font-semibold transition-transform hover:scale-105"
+      className={`rounded border shadow-sm p-1.5 text-left transition-transform hover:scale-[1.01] min-h-[5.5rem] min-w-[12rem] max-w-[12rem] ${
+        selected ? 'ring-2 ring-emerald-300/70 border-emerald-200/70' : 'border-black/20'
+      }`}
       style={{
-        backgroundColor: statusColor,
-        color: getTextColorForHex(statusColor),
+        backgroundColor,
+        color: getTextColorForHex(backgroundColor),
       }}
     >
-      <span className="flex h-full w-full flex-col items-center justify-center leading-none">
-        <span className="text-[8px] font-semibold uppercase">{shortEntry || '—'}</span>
-        <span className="text-[8px] opacity-90">{entryNames.length || 0}</span>
+      <span className="block space-y-0.5 leading-tight">
+        <span className="block text-[9px] font-semibold uppercase">
+          {slot.system_name || 'Система'}
+          {slot.category_name ? ` · ${slot.category_name}` : ''}
+        </span>
+        {entryLines.length ? (
+          entryLines.map((line, idx) => (
+            <span key={`${slot.id}-entry-${idx}`} className="block text-[10px]">
+              {line}
+            </span>
+          ))
+        ) : (
+          <span className="block text-[10px] opacity-90">Нет материалов</span>
+        )}
+        {selectionCaption ? (
+          <span className="block text-[9px] font-semibold pt-0.5">{selectionCaption}</span>
+        ) : null}
       </span>
     </button>
   );
@@ -165,6 +195,8 @@ function MultiSelectFilter({
 }
 
 export default function ObjectsOverview() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [data, setData] = useState(EMPTY_DATA);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -180,6 +212,12 @@ export default function ObjectsOverview() {
   });
   const [editorBusy, setEditorBusy] = useState(false);
   const [editorError, setEditorError] = useState('');
+  const [productionMode, setProductionMode] = useState(null);
+  const [productionDrafts, setProductionDrafts] = useState({});
+  const [productionBusy, setProductionBusy] = useState(false);
+  const [productionError, setProductionError] = useState('');
+  const [productionMessage, setProductionMessage] = useState('');
+  const [productionPicker, setProductionPicker] = useState(null);
 
   const load = useCallback(({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -195,6 +233,37 @@ export default function ObjectsOverview() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const payload = location.state?.productionAllocation;
+    if (!payload) return;
+    const issuanceId = Number(payload.issuanceId || 0);
+    const materialId = Number(payload.materialId || 0);
+    if (!issuanceId || !materialId) return;
+    const selectedWorkers = Array.isArray(payload.selectedWorkers)
+      ? payload.selectedWorkers
+        .map((row) => ({
+          id: Number(row?.id || 0),
+          label: String(row?.label || '').trim(),
+        }))
+        .filter((row) => row.id > 0)
+      : [];
+    setProductionMode({
+      issuanceId,
+      materialId,
+      materialName: String(payload.materialName || ''),
+      materialCode: String(payload.materialCode || ''),
+      unit: String(payload.unit || 'шт'),
+      availableQty: Math.max(Number(payload.availableQty || 0), 0),
+      selectedWorkers,
+    });
+    setProductionDrafts({});
+    setProductionBusy(false);
+    setProductionError('');
+    setProductionMessage('');
+    setProductionPicker(null);
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.pathname, location.state, navigate]);
 
   const objects = useMemo(
     () => [...data.objects].sort((a, b) => naturalCompare(a.name, b.name)),
@@ -247,6 +316,22 @@ export default function ObjectsOverview() {
     blockStatuses.forEach((status) => map.set(String(status.id), status));
     return map;
   }, [blockStatuses]);
+  const productionStatuses = useMemo(
+    () => blockStatuses.filter((status) => !!status.is_for_production),
+    [blockStatuses],
+  );
+  const productionStatusById = useMemo(() => {
+    const map = new Map();
+    productionStatuses.forEach((status) => map.set(Number(status.id), status));
+    return map;
+  }, [productionStatuses]);
+  const productionWorkersById = useMemo(() => {
+    const map = new Map();
+    (productionMode?.selectedWorkers || []).forEach((row) => {
+      map.set(Number(row.id), row.label || `#${row.id}`);
+    });
+    return map;
+  }, [productionMode]);
 
   const entrancesByObject = useMemo(() => {
     const map = new Map();
@@ -343,6 +428,22 @@ export default function ObjectsOverview() {
     data.location_system_equipment,
     data.location_system_works,
   ]);
+  const productionMaterialEntryBySlot = useMemo(() => {
+    const materialId = Number(productionMode?.materialId || 0);
+    const map = new Map();
+    if (!materialId) return map;
+    data.location_system_materials.forEach((row) => {
+      if (Number(row.material_id) !== materialId) return;
+      map.set(Number(row.location_system_id), {
+        materialId,
+        name: row.material_name || '',
+        quantity: Number(row.quantity || 0),
+        unit: row.material_unit || '',
+      });
+    });
+    return map;
+  }, [data.location_system_materials, productionMode]);
+  const productionAvailableSlotsCount = productionMaterialEntryBySlot.size;
 
   const objectOptions = objects;
   const entranceOptions = useMemo(() => {
@@ -402,8 +503,144 @@ export default function ObjectsOverview() {
     }
   };
 
+  const isProductionMode = !!productionMode;
+  const productionDraftRows = useMemo(
+    () => Object.values(productionDrafts),
+    [productionDrafts],
+  );
+  const plannedProductionQty = useMemo(
+    () => productionDraftRows.reduce((sum, row) => sum + Number(row.quantity || 0), 0),
+    [productionDraftRows],
+  );
+  const productionRemainingPreview = useMemo(
+    () => Math.max((Number(productionMode?.availableQty || 0) - plannedProductionQty), 0),
+    [productionMode, plannedProductionQty],
+  );
+
+  const clearProductionMode = ({ keepMessage = false } = {}) => {
+    setProductionMode(null);
+    setProductionDrafts({});
+    setProductionBusy(false);
+    setProductionError('');
+    if (!keepMessage) setProductionMessage('');
+    setProductionPicker(null);
+  };
+
+  const applyProductionDraft = ({ slotId, statusId, workerUserId }) => {
+    const materialEntry = productionMaterialEntryBySlot.get(Number(slotId));
+    if (!materialEntry) return;
+    setProductionDrafts((prev) => ({
+      ...prev,
+      [slotId]: {
+        locationSystemId: Number(slotId),
+        statusId: Number(statusId),
+        workerUserId: Number(workerUserId),
+        quantity: Number(materialEntry.quantity || 0),
+      },
+    }));
+  };
+
+  const removeProductionDraft = (slotId) => {
+    setProductionDrafts((prev) => {
+      const next = { ...prev };
+      delete next[slotId];
+      return next;
+    });
+  };
+
+  const openProductionPickerForSlot = (slot) => {
+    const existing = productionDrafts[slot.id];
+    const fallbackStatus = productionStatuses[0]?.id || '';
+    const fallbackWorker = productionMode?.selectedWorkers?.[0]?.id || '';
+    setProductionPicker({
+      slotId: Number(slot.id),
+      statusId: existing?.statusId || fallbackStatus,
+      workerUserId: existing?.workerUserId || fallbackWorker,
+    });
+  };
+
+  const handleProductionSlotClick = (slot) => {
+    if (!isProductionMode) {
+      openSlotEditor(slot);
+      return;
+    }
+    setProductionError('');
+    setProductionMessage('');
+    const materialEntry = productionMaterialEntryBySlot.get(Number(slot.id));
+    if (!materialEntry) return;
+    if (!productionStatuses.length) {
+      setProductionError('В настройках статусов нет ни одного статуса, отмеченного как «для выработки».');
+      return;
+    }
+    const workers = productionMode?.selectedWorkers || [];
+    if (!workers.length) {
+      setProductionError('Нет выбранных сотрудников для выработки.');
+      return;
+    }
+    if (productionStatuses.length === 1 && workers.length === 1) {
+      const statusId = Number(productionStatuses[0].id);
+      const workerUserId = Number(workers[0].id);
+      const existing = productionDrafts[slot.id];
+      if (existing && existing.statusId === statusId && existing.workerUserId === workerUserId) {
+        removeProductionDraft(slot.id);
+      } else {
+        applyProductionDraft({ slotId: slot.id, statusId, workerUserId });
+      }
+      return;
+    }
+    openProductionPickerForSlot(slot);
+  };
+
+  const saveProductionPicker = () => {
+    if (!productionPicker) return;
+    if (!Number(productionPicker.statusId) || !Number(productionPicker.workerUserId)) {
+      setProductionError('Выберите статус и сотрудника');
+      return;
+    }
+    applyProductionDraft({
+      slotId: productionPicker.slotId,
+      statusId: Number(productionPicker.statusId),
+      workerUserId: Number(productionPicker.workerUserId),
+    });
+    setProductionPicker(null);
+  };
+
+  const saveProductionDistribution = async () => {
+    if (!productionMode?.issuanceId) return;
+    if (!productionDraftRows.length) {
+      setProductionError('Выберите хотя бы один блок для сохранения выработки.');
+      return;
+    }
+    if (plannedProductionQty > Number(productionMode.availableQty || 0) + 1e-9) {
+      setProductionError('Сумма распределения превышает доступный остаток на руках.');
+      return;
+    }
+    setProductionBusy(true);
+    setProductionError('');
+    setProductionMessage('');
+    try {
+      await operationsApi.distributeProduction(productionMode.issuanceId, {
+        assignments: productionDraftRows.map((row) => ({
+          location_system_id: row.locationSystemId,
+          worker_user_id: row.workerUserId,
+          status_id: row.statusId,
+        })),
+      });
+      setProductionMessage('Выработка сохранена. Статусы блоков обновлены.');
+      await load({ silent: true });
+      clearProductionMode({ keepMessage: true });
+    } catch (e) {
+      setProductionError(e.message || 'Не удалось сохранить выработку');
+    } finally {
+      setProductionBusy(false);
+    }
+  };
+
   const renderLocationBlocks = (locationKind, locationId) => {
-    const slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
+    let slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
+    if (isProductionMode) {
+      slots = slots.filter((slot) => productionMaterialEntryBySlot.has(Number(slot.id)));
+    }
     if (!slots.length) return null;
     const groupedBySystem = slots.reduce((acc, slot) => {
       const systemName = String(slot.system_name || '').trim() || 'Без системы';
@@ -450,14 +687,26 @@ export default function ObjectsOverview() {
               <div key={categoryRow.key} className="space-y-1">
                 <p className="text-[9px] text-zinc-400">{categoryRow.categoryName}</p>
                 <div className="flex flex-wrap gap-1">
-                  {categoryRow.slots.map((slot) => (
+                  {categoryRow.slots.map((slot) => {
+                    const entries = entriesBySlot.get(slot.id) || [];
+                    const draft = productionDrafts[slot.id] || null;
+                    const draftStatus = draft ? productionStatusById.get(Number(draft.statusId)) : null;
+                    const draftWorker = draft ? productionWorkersById.get(Number(draft.workerUserId)) : '';
+                    const selectionCaption = draft
+                      ? [draftWorker, draftStatus?.name].filter(Boolean).join(' · ')
+                      : '';
+                    return (
                     <LocationSlotChip
                       key={slot.id}
                       slot={slot}
-                      entries={entriesBySlot.get(slot.id) || []}
-                      onOpen={openSlotEditor}
+                      entries={entries}
+                      onOpen={handleProductionSlotClick}
+                      selected={!!draft}
+                      selectionCaption={selectionCaption}
+                      selectionColor={draftStatus?.color || ''}
                     />
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))}
@@ -528,11 +777,27 @@ export default function ObjectsOverview() {
     };
   }, [floorsByEntrance, getFloorCounts]);
 
+  const hasVisibleLocationSlots = useCallback((locationKind, locationId) => {
+    const slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
+    if (!slots.length) return false;
+    if (!isProductionMode) return true;
+    return slots.some((slot) => productionMaterialEntryBySlot.has(Number(slot.id)));
+  }, [slotsByLocation, isProductionMode, productionMaterialEntryBySlot]);
+
   const renderFloorCard = (floor, floorApartments, floorRooms, compact = false) => {
     const isCollapsed = collapsedFloorSet.has(floor.id);
     const floorRoomsBucket = floorApartments.find((apartment) => apartment.name === FLOOR_ROOMS_BUCKET_NAME);
-    const regularApartments = floorApartments.filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME);
-    const floorOnlyRooms = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
+    const regularApartmentsRaw = floorApartments.filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME);
+    const floorOnlyRoomsRaw = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
+    const floorOnlyRooms = isProductionMode
+      ? floorOnlyRoomsRaw.filter((room) => hasVisibleLocationSlots('room', room.id))
+      : floorOnlyRoomsRaw;
+    const regularApartments = isProductionMode
+      ? regularApartmentsRaw.filter((apartment) => (
+        hasVisibleLocationSlots('apartment', apartment.id)
+          || (roomsByApartment.get(apartment.id) || []).some((room) => hasVisibleLocationSlots('room', room.id))
+      ))
+      : regularApartmentsRaw;
     const floorStatusStats = getFloorStatusStats(floorApartments, floorOnlyRooms);
     return (
       <div
@@ -591,7 +856,10 @@ export default function ObjectsOverview() {
                 <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 space-y-1.5">
                   <p className="text-zinc-200 text-2xs font-medium">Квартиры на этаже</p>
                   {regularApartments.map((apartment) => {
-                    const apartmentRooms = roomsByApartment.get(apartment.id) || [];
+                    const apartmentRoomsRaw = roomsByApartment.get(apartment.id) || [];
+                    const apartmentRooms = isProductionMode
+                      ? apartmentRoomsRaw.filter((room) => hasVisibleLocationSlots('room', room.id))
+                      : apartmentRoomsRaw;
                     return (
                       <div key={apartment.id} className="rounded border border-white/10 bg-black/20 px-2 py-1.5">
                         <p className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</p>
@@ -621,6 +889,13 @@ export default function ObjectsOverview() {
   };
 
   const renderObjectCards = () => {
+    if (isProductionMode && productionAvailableSlotsCount === 0) {
+      return (
+        <p className="text-zinc-500 text-sm py-4">
+          Для выбранного материала не найдено доступных блоков в текущей схеме объектов.
+        </p>
+      );
+    }
     if (!filteredObjects.length) {
       return (
         <p className="text-zinc-500 text-sm py-4">
@@ -632,8 +907,23 @@ export default function ObjectsOverview() {
     return (
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {filteredObjects.map((objectRow) => {
-          const objectEntrances = (entrancesByObject.get(objectRow.id) || [])
+          const objectEntrancesRaw = (entrancesByObject.get(objectRow.id) || [])
             .filter((entry) => !entranceIdSet.size || entranceIdSet.has(entry.id));
+          const objectEntrances = isProductionMode
+            ? objectEntrancesRaw.filter((entry) => {
+              const entranceFloors = floorsByEntrance.get(entry.id) || [];
+              return entranceFloors.some((floor) => {
+                const floorApartments = apartmentsByFloor.get(floor.id) || [];
+                return floorApartments.some((apartment) => {
+                  if (apartment.name === FLOOR_ROOMS_BUCKET_NAME) {
+                    return (roomsByApartment.get(apartment.id) || []).some((room) => hasVisibleLocationSlots('room', room.id));
+                  }
+                  if (hasVisibleLocationSlots('apartment', apartment.id)) return true;
+                  return (roomsByApartment.get(apartment.id) || []).some((room) => hasVisibleLocationSlots('room', room.id));
+                });
+              });
+            })
+            : objectEntrancesRaw;
           let floorCount = 0;
           let apartmentCount = 0;
           let roomCount = 0;
@@ -746,10 +1036,55 @@ export default function ObjectsOverview() {
     <div className="space-y-5">
       <div>
         <h2 className="page-title">Объекты</h2>
-        <p className="text-zinc-400 text-sm mt-1">
-          Мини-блоки сгруппированы как в настройках объектов (Система → Категория). Клик по блоку открывает выбор статуса и исполнителя.
-        </p>
+        {isProductionMode ? (
+          <p className="text-zinc-300 text-sm mt-1">
+            Режим выработки: выберите блоки с материалом и назначьте сотрудника + статус для выработки, затем нажмите «Сохранить».
+          </p>
+        ) : (
+          <p className="text-zinc-400 text-sm mt-1">
+            Блоки сгруппированы как в настройках объектов (Система → Категория). Клик по блоку открывает выбор статуса и исполнителя.
+          </p>
+        )}
       </div>
+
+      {isProductionMode && (
+        <div className="rounded-xl border border-sky-500/30 bg-sky-950/20 p-3 space-y-2">
+          <p className="text-sky-200 text-sm font-medium">
+            {productionMode.materialName || 'Материал'}{productionMode.materialCode ? ` (${productionMode.materialCode})` : ''}
+          </p>
+          <p className="text-zinc-300 text-xs">
+            На руках: {Number(productionMode.availableQty || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {productionMode.unit}
+            {' · '}Запланировано: {plannedProductionQty.toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {productionMode.unit}
+            {' · '}Останется: {productionRemainingPreview.toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {productionMode.unit}
+          </p>
+          <p className="text-zinc-400 text-2xs">
+            Сотрудники: {(productionMode.selectedWorkers || []).map((row) => row.label).join(', ') || '—'}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn-primary text-sm"
+              onClick={saveProductionDistribution}
+              disabled={productionBusy || !productionDraftRows.length}
+            >
+              {productionBusy ? 'Сохранение…' : 'Сохранить'}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary text-sm"
+              onClick={() => clearProductionMode()}
+              disabled={productionBusy}
+            >
+              Отмена
+            </button>
+          </div>
+          {productionError && <p className="text-rose-400 text-xs">{productionError}</p>}
+          {productionMessage && <p className="text-emerald-300 text-xs">{productionMessage}</p>}
+        </div>
+      )}
+      {!isProductionMode && productionMessage && (
+        <p className="text-emerald-300 text-xs">{productionMessage}</p>
+      )}
 
       <div className="grid gap-3 lg:grid-cols-2">
         <MultiSelectFilter
@@ -834,6 +1169,67 @@ export default function ObjectsOverview() {
               {!((floorsByEntrance.get(expandedEntrance.id) || []).length) && (
                 <p className="text-zinc-500 text-sm">Для этого подъезда этажи ещё не добавлены</p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {productionPicker && (
+        <div className="modal-backdrop z-50" onClick={() => setProductionPicker(null)} role="dialog" aria-modal="true">
+          <div className="card p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-white font-medium text-lg">Параметры выработки</h3>
+            <p className="text-zinc-400 text-xs mt-1">
+              Блок #{productionPicker.slotId}
+            </p>
+            <div className="space-y-3 mt-4">
+              <div>
+                <label className="label">Статус выработки</label>
+                <select
+                  className="input"
+                  value={productionPicker.statusId}
+                  onChange={(e) => setProductionPicker((prev) => ({ ...prev, statusId: Number(e.target.value || 0) }))}
+                >
+                  <option value="">Выберите статус</option>
+                  {productionStatuses.map((status) => (
+                    <option key={status.id} value={status.id}>
+                      {status.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Сотрудник</label>
+                <select
+                  className="input"
+                  value={productionPicker.workerUserId}
+                  onChange={(e) => setProductionPicker((prev) => ({ ...prev, workerUserId: Number(e.target.value || 0) }))}
+                >
+                  <option value="">Выберите сотрудника</option>
+                  {(productionMode?.selectedWorkers || []).map((row) => (
+                    <option key={row.id} value={row.id}>{row.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex justify-between gap-2">
+                <button
+                  type="button"
+                  className="btn-ghost text-rose-300"
+                  onClick={() => {
+                    removeProductionDraft(productionPicker.slotId);
+                    setProductionPicker(null);
+                  }}
+                >
+                  Снять выбор
+                </button>
+                <div className="flex gap-2">
+                  <button type="button" className="btn-secondary text-sm" onClick={() => setProductionPicker(null)}>
+                    Отмена
+                  </button>
+                  <button type="button" className="btn-primary text-sm" onClick={saveProductionPicker}>
+                    Применить
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -21,10 +21,14 @@ async function ensureObjectStatusSchema() {
           id SERIAL PRIMARY KEY,
           name VARCHAR(200) NOT NULL UNIQUE,
           color VARCHAR(16) NOT NULL,
+          is_for_production BOOLEAN NOT NULL DEFAULT false,
           sort_order INTEGER NOT NULL DEFAULT 0,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           updated_at TIMESTAMPTZ DEFAULT NOW()
         )`,
+      );
+      await pool.query(
+        'ALTER TABLE work_block_statuses ADD COLUMN IF NOT EXISTS is_for_production BOOLEAN NOT NULL DEFAULT false',
       );
       await pool.query(
         'ALTER TABLE work_location_systems ADD COLUMN IF NOT EXISTS status_id INTEGER REFERENCES work_block_statuses(id) ON DELETE SET NULL',
@@ -83,6 +87,17 @@ function parseStatusColor(value) {
   if (!raw) return null;
   if (!/^#[0-9a-fA-F]{6}$/.test(raw)) return null;
   return raw.toUpperCase();
+}
+
+function parseOptionalBoolean(value, fallback = false) {
+  if (value === undefined) return fallback;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+  return fallback;
 }
 
 function parseRequiredName(value, max = 300) {
@@ -259,7 +274,7 @@ router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req,
          ORDER BY o.name NULLS LAST, e.name, COALESCE(f.sort_order, 2147483647), f.name, a.name, r.name`
       ),
       pool.query('SELECT id, name FROM tool_types ORDER BY name'),
-      pool.query('SELECT id, name, color, sort_order, created_at, updated_at FROM work_block_statuses ORDER BY sort_order, name'),
+      pool.query('SELECT id, name, color, is_for_production, sort_order, created_at, updated_at FROM work_block_statuses ORDER BY sort_order, name'),
     ]);
     res.json({
       objects: objects.rows,
@@ -615,7 +630,7 @@ router.delete('/systems/:id', requirePermission('can_settings_categories'), asyn
 // ——— Статусы блоков объектов ———
 router.get('/object-block-statuses', requirePermission('can_settings_work'), async (_req, res) => {
   const r = await pool.query(
-    `SELECT id, name, color, sort_order, created_at, updated_at
+    `SELECT id, name, color, is_for_production, sort_order, created_at, updated_at
      FROM work_block_statuses
      ORDER BY sort_order, name`,
   );
@@ -625,6 +640,7 @@ router.get('/object-block-statuses', requirePermission('can_settings_work'), asy
 router.post('/object-block-statuses', requirePermission('can_settings_work'), async (req, res) => {
   const name = (req.body?.name || '').trim();
   const color = parseStatusColor(req.body?.color);
+  const isForProduction = parseOptionalBoolean(req.body?.is_for_production, false);
   if (!name) return res.status(400).json({ error: 'Укажите название статуса' });
   if (!color) return res.status(400).json({ error: 'Цвет должен быть в формате #RRGGBB' });
   const rawSortOrder = req.body?.sort_order;
@@ -636,10 +652,10 @@ router.post('/object-block-statuses', requirePermission('can_settings_work'), as
   }
   try {
     const r = await pool.query(
-      `INSERT INTO work_block_statuses (name, color, sort_order)
-       VALUES ($1, $2, $3)
-       RETURNING id, name, color, sort_order, created_at, updated_at`,
-      [name, color, sortOrder],
+      `INSERT INTO work_block_statuses (name, color, is_for_production, sort_order)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, name, color, is_for_production, sort_order, created_at, updated_at`,
+      [name, color, isForProduction, sortOrder],
     );
     res.status(201).json(r.rows[0]);
   } catch (e) {
@@ -652,7 +668,7 @@ router.put('/object-block-statuses/:id', requirePermission('can_settings_work'),
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Неверный id' });
   const current = (await pool.query(
-    'SELECT id, name, color, sort_order FROM work_block_statuses WHERE id = $1',
+    'SELECT id, name, color, is_for_production, sort_order FROM work_block_statuses WHERE id = $1',
     [id],
   )).rows[0];
   if (!current) return res.status(404).json({ error: 'Не найдено' });
@@ -661,6 +677,7 @@ router.put('/object-block-statuses/:id', requirePermission('can_settings_work'),
   if (!nextName) return res.status(400).json({ error: 'Укажите название статуса' });
   const nextColor = req.body?.color !== undefined ? parseStatusColor(req.body?.color) : current.color;
   if (!nextColor) return res.status(400).json({ error: 'Цвет должен быть в формате #RRGGBB' });
+  const nextIsForProduction = parseOptionalBoolean(req.body?.is_for_production, current.is_for_production);
 
   let nextSortOrder = current.sort_order ?? 0;
   if (req.body?.sort_order !== undefined) {
@@ -674,10 +691,10 @@ router.put('/object-block-statuses/:id', requirePermission('can_settings_work'),
   try {
     const r = await pool.query(
       `UPDATE work_block_statuses
-       SET name = $1, color = $2, sort_order = $3, updated_at = NOW()
-       WHERE id = $4
-       RETURNING id, name, color, sort_order, created_at, updated_at`,
-      [nextName, nextColor, nextSortOrder, id],
+       SET name = $1, color = $2, is_for_production = $3, sort_order = $4, updated_at = NOW()
+       WHERE id = $5
+       RETURNING id, name, color, is_for_production, sort_order, created_at, updated_at`,
+      [nextName, nextColor, nextIsForProduction, nextSortOrder, id],
     );
     res.json(r.rows[0]);
   } catch (e) {
@@ -1242,7 +1259,7 @@ router.get('/object-settings/layout', requirePermission('can_settings_work'), as
       ),
       pool.query('SELECT id, name FROM material_systems ORDER BY name'),
       pool.query('SELECT id, name, icon_key FROM material_categories ORDER BY name'),
-      pool.query('SELECT id, name, color, sort_order, created_at, updated_at FROM work_block_statuses ORDER BY sort_order, name'),
+      pool.query('SELECT id, name, color, is_for_production, sort_order, created_at, updated_at FROM work_block_statuses ORDER BY sort_order, name'),
       pool.query(
         `SELECT ls.id, ls.location_kind, ls.location_id, ls.system_id, ls.category_id, ls.status_id, ls.assigned_user_id, ls.created_at, ls.updated_at,
                 s.name AS system_name,

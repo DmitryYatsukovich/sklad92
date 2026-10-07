@@ -26,6 +26,7 @@ export default function ObjectBlockStatusesTab() {
   const [editing, setEditing] = useState(null);
   const [name, setName] = useState('');
   const [color, setColor] = useState(COLOR_PALETTE[0]);
+  const [isForProduction, setIsForProduction] = useState(false);
   const [sortOrder, setSortOrder] = useState('0');
   const [busy, setBusy] = useState(false);
 
@@ -51,6 +52,7 @@ export default function ObjectBlockStatusesTab() {
     setEditing(null);
     setName('');
     setColor(COLOR_PALETTE[0]);
+    setIsForProduction(false);
     setSortOrder('0');
     setBusy(false);
   };
@@ -59,6 +61,7 @@ export default function ObjectBlockStatusesTab() {
     setEditing(null);
     setName('');
     setColor(COLOR_PALETTE[0]);
+    setIsForProduction(false);
     setSortOrder(String(rows.length));
     setModalOpen(true);
     setError('');
@@ -68,6 +71,7 @@ export default function ObjectBlockStatusesTab() {
     setEditing(row);
     setName(row.name || '');
     setColor(row.color || COLOR_PALETTE[0]);
+    setIsForProduction(!!row.is_for_production);
     setSortOrder(String(row.sort_order ?? 0));
     setModalOpen(true);
     setError('');
@@ -87,6 +91,7 @@ export default function ObjectBlockStatusesTab() {
       const payload = {
         name: nextName,
         color,
+        is_for_production: !!isForProduction,
         sort_order: parsedSortOrder,
       };
       if (editing?.id) {
@@ -135,6 +140,7 @@ export default function ObjectBlockStatusesTab() {
               <tr className="border-b border-white/10 text-zinc-300">
                 <th className="p-3 font-medium">Статус</th>
                 <th className="p-3 font-medium">Цвет</th>
+                <th className="p-3 font-medium">Для выработки</th>
                 <th className="p-3 font-medium">Порядок</th>
                 <th className="p-3 w-28" />
               </tr>
@@ -148,6 +154,9 @@ export default function ObjectBlockStatusesTab() {
                       <span className="h-4 w-4 rounded-full border border-white/30" style={{ backgroundColor: row.color || '#64748B' }} />
                       {row.color}
                     </span>
+                  </td>
+                  <td className="p-3 text-zinc-300">
+                    {row.is_for_production ? 'Да' : 'Нет'}
                   </td>
                   <td className="p-3 text-zinc-300">{row.sort_order ?? 0}</td>
                   <td className="p-3 text-right space-x-2 whitespace-nowrap">
@@ -229,6 +238,15 @@ export default function ObjectBlockStatusesTab() {
                 </div>
                 <p className="text-zinc-400 text-xs">Выбранный цвет: {color}</p>
               </div>
+
+              <label className="inline-flex items-center gap-2 text-sm text-zinc-200">
+                <input
+                  type="checkbox"
+                  checked={isForProduction}
+                  onChange={(e) => setIsForProduction(e.target.checked)}
+                />
+                Статус для выработки
+              </label>
 
               <div className="flex justify-end gap-2 pt-1">
                 <button type="button" onClick={closeModal} className="btn-secondary text-sm" disabled={busy}>

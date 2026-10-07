@@ -170,10 +170,12 @@ const statements = [
     id SERIAL PRIMARY KEY,
     name VARCHAR(200) NOT NULL UNIQUE,
     color VARCHAR(16) NOT NULL,
+    is_for_production BOOLEAN NOT NULL DEFAULT false,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
   )`,
+  `ALTER TABLE work_block_statuses ADD COLUMN IF NOT EXISTS is_for_production BOOLEAN NOT NULL DEFAULT false`,
   `CREATE TABLE IF NOT EXISTS work_location_systems (
     id SERIAL PRIMARY KEY,
     location_kind VARCHAR(16) NOT NULL,
@@ -245,6 +247,20 @@ const statements = [
   `ALTER TABLE production_confirmation_log ADD COLUMN IF NOT EXISTS work_location_items JSONB`,
   `ALTER TABLE production_confirmation_log ADD COLUMN IF NOT EXISTS event_type VARCHAR(20)`,
   `UPDATE production_confirmation_log SET event_type = CASE WHEN confirmed THEN 'confirm' ELSE 'unconfirm' END WHERE event_type IS NULL`,
+  `CREATE TABLE IF NOT EXISTS issuance_production_allocations (
+    id SERIAL PRIMARY KEY,
+    issuance_id INTEGER NOT NULL REFERENCES issuances(id) ON DELETE CASCADE,
+    location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE RESTRICT,
+    worker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    status_id INTEGER REFERENCES work_block_statuses(id) ON DELETE SET NULL,
+    quantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CHECK (quantity > 0)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_ipa_issuance ON issuance_production_allocations(issuance_id, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_ipa_worker ON issuance_production_allocations(worker_user_id, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_ipa_location_system ON issuance_production_allocations(location_system_id)`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS face_photo VARCHAR(255)`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data BYTEA`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_mime VARCHAR(64)`,

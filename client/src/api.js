@@ -505,6 +505,11 @@ export const operations = {
   issue: (body) => request('/api/operations/issue', { method: 'POST', body: JSON.stringify(body) }),
   return: (body) => request('/api/operations/return', { method: 'POST', body: JSON.stringify(body) }),
   transfer: (body) => request('/api/operations/transfer', { method: 'POST', body: JSON.stringify(body) }),
+  distributeProduction: (issuanceId, body) =>
+    request(`/api/operations/issuances/${issuanceId}/production-distribution`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   setReturnedQuantity: (issuanceId, returned_quantity) =>
     request(`/api/operations/issuances/${issuanceId}/returned`, {
       method: 'PATCH',

@@ -10,11 +10,63 @@ router.use(requireAuth);
 router.use(loadUser);
 router.use(requirePermission('can_issuance'));
 
+let ensureProductionAllocationSchemaPromise = null;
+
+async function ensureProductionAllocationSchema() {
+  if (!ensureProductionAllocationSchemaPromise) {
+    ensureProductionAllocationSchemaPromise = (async () => {
+      await pool.query(
+        'ALTER TABLE work_block_statuses ADD COLUMN IF NOT EXISTS is_for_production BOOLEAN NOT NULL DEFAULT false',
+      );
+      await pool.query(
+        `CREATE TABLE IF NOT EXISTS issuance_production_allocations (
+          id SERIAL PRIMARY KEY,
+          issuance_id INTEGER NOT NULL REFERENCES issuances(id) ON DELETE CASCADE,
+          location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE RESTRICT,
+          worker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+          status_id INTEGER REFERENCES work_block_statuses(id) ON DELETE SET NULL,
+          quantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+          created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          CHECK (quantity > 0)
+        )`,
+      );
+      await pool.query(
+        'CREATE INDEX IF NOT EXISTS idx_ipa_issuance ON issuance_production_allocations(issuance_id, created_at DESC)',
+      );
+      await pool.query(
+        'CREATE INDEX IF NOT EXISTS idx_ipa_worker ON issuance_production_allocations(worker_user_id, created_at DESC)',
+      );
+      await pool.query(
+        'CREATE INDEX IF NOT EXISTS idx_ipa_location_system ON issuance_production_allocations(location_system_id)',
+      );
+    })().catch((error) => {
+      ensureProductionAllocationSchemaPromise = null;
+      throw error;
+    });
+  }
+  await ensureProductionAllocationSchemaPromise;
+}
+
+router.use(async (_req, _res, next) => {
+  try {
+    await ensureProductionAllocationSchema();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
 function parseVersion(value) {
   if (!value) return null;
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return null;
   return d;
+}
+
+function parseId(value) {
+  const n = Number.parseInt(value, 10);
+  return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 function resolveLwwConflict(req, serverUpdatedAt) {
@@ -48,6 +100,16 @@ function makeIssuanceEventTag(type, data = {}) {
     .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
     .join(';');
   return `[[evt:${type};${payload}]]`;
+}
+
+async function getProducedQtyByIssuance(db, issuanceId) {
+  const producedResult = await db.query(
+    `SELECT COALESCE(SUM(quantity), 0)::numeric AS produced_qty
+     FROM issuance_production_allocations
+     WHERE issuance_id = $1`,
+    [issuanceId],
+  );
+  return Number(producedResult.rows[0]?.produced_qty || 0);
 }
 
 // Выдать материал пользователю
@@ -138,19 +200,23 @@ router.post('/return', async (req, res) => {
     }
     const conflict = resolveLwwConflict(req, iss.updated_at);
     if (conflict === 'server_wins') {
+      const produced = await getProducedQtyByIssuance(client, iss.id);
       await client.query('ROLLBACK');
       return sendServerWinsConflict(res, {
         issuance_id: iss.id,
         updated_at: iss.updated_at,
         quantity: iss.quantity,
         returned_quantity: iss.returned_quantity,
+        produced_quantity: produced,
       });
     }
     const already = parseFloat(iss.returned_quantity || 0);
     const total = parseFloat(iss.quantity);
-    if (already + retQty > total + 1e-9) {
+    const produced = await getProducedQtyByIssuance(client, iss.id);
+    const maxReturnable = Math.max(total - produced, 0);
+    if (already + retQty > maxReturnable + 1e-9) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Количество возврата превышает выданное' });
+      return res.status(400).json({ error: `Количество возврата превышает доступное к возврату (${maxReturnable})` });
     }
 
     const upd = await client.query(
@@ -242,7 +308,8 @@ router.post('/transfer', async (req, res) => {
       return res.status(400).json({ error: 'Материал уже выдан этому пользователю' });
     }
 
-    const available = Number(iss.quantity) - Number(iss.returned_quantity || 0);
+    const produced = await getProducedQtyByIssuance(client, iss.id);
+    const available = Number(iss.quantity) - Number(iss.returned_quantity || 0) - produced;
     if (!(available > 0)) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Для передачи нет доступного количества' });
@@ -339,20 +406,24 @@ router.patch('/issuances/:id/returned', async (req, res) => {
     }
     const conflict = resolveLwwConflict(req, iss.updated_at);
     if (conflict === 'server_wins') {
+      const produced = await getProducedQtyByIssuance(client, iss.id);
       await client.query('ROLLBACK');
       return sendServerWinsConflict(res, {
         issuance_id: iss.id,
         updated_at: iss.updated_at,
         quantity: iss.quantity,
         returned_quantity: iss.returned_quantity,
+        produced_quantity: produced,
       });
     }
 
     const issued = parseFloat(iss.quantity);
     const oldReturned = parseFloat(iss.returned_quantity || 0);
-    if (newReturned > issued + 1e-9) {
+    const produced = await getProducedQtyByIssuance(client, iss.id);
+    const maxReturnable = Math.max(issued - produced, 0);
+    if (newReturned > maxReturnable + 1e-9) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Возврат не может превышать выданное количество' });
+      return res.status(400).json({ error: `Возврат не может превышать доступное к возврату (${maxReturnable})` });
     }
 
     const stockDelta = newReturned - oldReturned;
@@ -432,18 +503,21 @@ router.delete('/issuances/:id(\\d+)', requireAdmin, async (req, res) => {
     }
     const conflict = resolveLwwConflict(req, iss.updated_at);
     if (conflict === 'server_wins') {
+      const produced = await getProducedQtyByIssuance(client, iss.id);
       await client.query('ROLLBACK');
       return sendServerWinsConflict(res, {
         issuance_id: iss.id,
         updated_at: iss.updated_at,
         quantity: iss.quantity,
         returned_quantity: iss.returned_quantity,
+        produced_quantity: produced,
       });
     }
 
     const issued = parseFloat(iss.quantity);
     const returned = parseFloat(iss.returned_quantity || 0);
-    const restore = issued - returned;
+    const produced = await getProducedQtyByIssuance(client, iss.id);
+    const restore = issued - returned - produced;
 
     if (restore > 1e-9) {
       const upd = await client.query(
@@ -491,11 +565,24 @@ router.delete('/issuances/all', requireAdmin, async (req, res) => {
       return res.json({ ok: true, deleted: 0, restored: 0 });
     }
 
+    const issuanceIds = issuances.map((row) => row.id);
+    const producedByIssuanceRows = await client.query(
+      `SELECT issuance_id, COALESCE(SUM(quantity), 0)::numeric AS produced_qty
+       FROM issuance_production_allocations
+       WHERE issuance_id = ANY($1::int[])
+       GROUP BY issuance_id`,
+      [issuanceIds],
+    );
+    const producedByIssuance = new Map(
+      producedByIssuanceRows.rows.map((row) => [Number(row.issuance_id), Number(row.produced_qty || 0)]),
+    );
+
     const restoreByMaterial = new Map();
     for (const iss of issuances) {
       const issued = parseFloat(iss.quantity) || 0;
       const returned = parseFloat(iss.returned_quantity || 0) || 0;
-      const restore = issued - returned;
+      const produced = producedByIssuance.get(Number(iss.id)) || 0;
+      const restore = issued - returned - produced;
       if (restore <= 1e-9) continue;
       restoreByMaterial.set(
         iss.material_id,
@@ -559,18 +646,203 @@ router.get('/issuances', async (req, res) => {
     `SELECT i.id, i.material_id, i.issued_to_user_id, i.issued_by_user_id,
             i.quantity, i.issued_at, i.returned_at, i.returned_quantity, i.note, i.updated_at,
             m.code AS material_code, m.name AS material_name, m.unit, m.price, m.production_price,
+            COALESCE(ipa.produced_quantity, 0)::numeric AS produced_quantity,
             u.login AS issued_to_login, u.display_name AS issued_to_name,
             ub.login AS issued_by_login, ub.display_name AS issued_by_name
      FROM issuances i
      JOIN materials m ON m.id = i.material_id
      JOIN users u ON u.id = i.issued_to_user_id
      LEFT JOIN users ub ON ub.id = i.issued_by_user_id
+     LEFT JOIN (
+       SELECT issuance_id, COALESCE(SUM(quantity), 0)::numeric AS produced_quantity
+       FROM issuance_production_allocations
+       GROUP BY issuance_id
+     ) ipa ON ipa.issuance_id = i.id
      ${whereSql}
      ORDER BY i.issued_at DESC
      LIMIT 1000`,
     params,
   );
   res.json(r.rows);
+});
+
+router.post('/issuances/:id/production-distribution', async (req, res) => {
+  const issuanceId = parseId(req.params.id);
+  if (!issuanceId) return res.status(400).json({ error: 'Неверный id выдачи' });
+
+  const rawAssignments = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
+  const assignmentsMap = new Map();
+  for (const row of rawAssignments) {
+    const locationSystemId = parseId(row?.location_system_id);
+    const workerUserId = parseId(row?.worker_user_id);
+    const statusId = parseId(row?.status_id);
+    if (!locationSystemId || !workerUserId || !statusId) {
+      return res.status(400).json({ error: 'В каждом блоке нужно выбрать сотрудника и статус выработки' });
+    }
+    assignmentsMap.set(locationSystemId, { locationSystemId, workerUserId, statusId });
+  }
+  const assignments = [...assignmentsMap.values()];
+  if (!assignments.length) {
+    return res.status(400).json({ error: 'Добавьте хотя бы один блок для выработки' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const issuance = (await client.query(
+      `SELECT id, material_id, issued_to_user_id, quantity, returned_quantity, note
+       FROM issuances
+       WHERE id = $1
+       FOR UPDATE`,
+      [issuanceId],
+    )).rows[0];
+    if (!issuance) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Выдача не найдена' });
+    }
+
+    if (
+      req.user?.role !== 'admin'
+      && !req.user?.can_issuance_all
+      && Number(issuance.issued_to_user_id) !== Number(req.user?.id)
+    ) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Нет доступа к этой выдаче' });
+    }
+
+    const producedBefore = await getProducedQtyByIssuance(client, issuanceId);
+    const issuedQty = Number(issuance.quantity || 0);
+    const returnedQty = Number(issuance.returned_quantity || 0);
+    const availableOnHands = Math.max(issuedQty - returnedQty - producedBefore, 0);
+    if (!(availableOnHands > 0)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'На руках нет доступного материала для выработки' });
+    }
+
+    const statusIds = [...new Set(assignments.map((row) => row.statusId))];
+    const validStatuses = await client.query(
+      `SELECT id, name
+       FROM work_block_statuses
+       WHERE id = ANY($1::int[])
+         AND is_for_production = true`,
+      [statusIds],
+    );
+    const statusMap = new Map(validStatuses.rows.map((row) => [Number(row.id), row]));
+    const invalidStatus = assignments.find((row) => !statusMap.has(row.statusId));
+    if (invalidStatus) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Выбран статус, который не отмечен как статус для выработки' });
+    }
+
+    const workerIds = [...new Set(assignments.map((row) => row.workerUserId))];
+    const workers = await client.query(
+      `SELECT id,
+              COALESCE(NULLIF(TRIM(display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', first_name, last_name)), ''), login) AS worker_name
+       FROM users
+       WHERE id = ANY($1::int[])`,
+      [workerIds],
+    );
+    const workerMap = new Map(workers.rows.map((row) => [Number(row.id), row.worker_name]));
+    const missingWorker = assignments.find((row) => !workerMap.has(row.workerUserId));
+    if (missingWorker) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Сотрудник для выработки не найден' });
+    }
+
+    const slotIds = assignments.map((row) => row.locationSystemId);
+    const slots = await client.query(
+      `SELECT ls.id AS location_system_id,
+              ls.location_kind,
+              ls.location_id,
+              lm.quantity AS material_quantity
+       FROM work_location_systems ls
+       JOIN work_location_system_materials lm ON lm.location_system_id = ls.id
+       WHERE ls.id = ANY($1::int[])
+         AND lm.material_id = $2
+       FOR UPDATE OF ls`,
+      [slotIds, issuance.material_id],
+    );
+    const slotMap = new Map(slots.rows.map((row) => [Number(row.location_system_id), row]));
+    const missingSlot = assignments.find((row) => !slotMap.has(row.locationSystemId));
+    if (missingSlot) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Часть блоков не содержит выбранный материал' });
+    }
+
+    let totalProducedNow = 0;
+    for (const assignment of assignments) {
+      const slot = slotMap.get(assignment.locationSystemId);
+      totalProducedNow += Number(slot.material_quantity || 0);
+    }
+    if (totalProducedNow <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Количество в выбранных блоках должно быть больше нуля' });
+    }
+    if (totalProducedNow > availableOnHands + 1e-9) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: `Недостаточно материала на руках. Доступно: ${availableOnHands}, требуется: ${totalProducedNow}`,
+      });
+    }
+
+    for (const assignment of assignments) {
+      const slot = slotMap.get(assignment.locationSystemId);
+      await client.query(
+        `INSERT INTO issuance_production_allocations
+          (issuance_id, location_system_id, worker_user_id, status_id, quantity, created_by_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          issuanceId,
+          assignment.locationSystemId,
+          assignment.workerUserId,
+          assignment.statusId,
+          Number(slot.material_quantity || 0),
+          req.session.userId,
+        ],
+      );
+
+      await client.query(
+        `UPDATE work_location_systems
+         SET status_id = $1,
+             assigned_user_id = $2,
+             updated_at = NOW()
+         WHERE id = $3`,
+        [assignment.statusId, assignment.workerUserId, assignment.locationSystemId],
+      );
+    }
+
+    const workersSummary = [...new Set(assignments.map((assignment) => workerMap.get(assignment.workerUserId) || `#${assignment.workerUserId}`))]
+      .join(', ');
+    const productionEventTag = makeIssuanceEventTag('production', {
+      qty: totalProducedNow,
+      workers: workersSummary,
+      blocks: assignments.length,
+      at: new Date().toISOString(),
+    });
+    const nextNote = appendIssuanceEventTag(issuance.note, productionEventTag);
+    await client.query(
+      `UPDATE issuances
+       SET note = $2,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [issuanceId, nextNote],
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json({
+      ok: true,
+      issuance_id: issuanceId,
+      allocations_count: assignments.length,
+      produced_quantity: totalProducedNow,
+      remaining_on_hands: Math.max(availableOnHands - totalProducedNow, 0),
+    });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('POST /operations/issuances/:id/production-distribution:', e.message);
+    res.status(500).json({ error: e.message || 'Ошибка сохранения выработки' });
+  } finally {
+    client.release();
+  }
 });
 
 router.post('/export', async (req, res) => {

@@ -101,6 +101,8 @@ function enrichRow(r) {
   const smrTotal = Number.isFinite(rawSmr) ? rawSmr : computedSmr;
   const materialName = asText(row.material_name);
   const workLocation = asText(row.work_location_label);
+  const productionWorkers = asText(row.production_workers);
+  const productionLocations = asText(row.production_locations);
   return {
     ...row,
     material_name: materialName,
@@ -116,7 +118,9 @@ function enrichRow(r) {
     _userSearch: userLabel(row).toLowerCase(),
     _materialSearch: materialName.toLowerCase(),
     _confirmed: !!row.production_confirmed,
-    _workLocation: workLocation,
+    _workLocation: productionLocations || workLocation,
+    _productionWorkers: productionWorkers,
+    _productionLocations: productionLocations,
   };
 }
 
@@ -732,8 +736,15 @@ export default function Production({ user }) {
                   <td className="p-2 text-right tabular-nums text-zinc-300">
                     {formatSumMoney(r._smrTotal)}
                   </td>
-                  <td className="p-2 text-zinc-400 text-2xs max-w-[14rem] truncate" title={r._workLocation}>
-                    {r._workLocation || '—'}
+                  <td className="p-2 text-zinc-400 text-2xs max-w-[16rem]">
+                    <div className="truncate" title={r._workLocation || ''}>
+                      {r._workLocation || '—'}
+                    </div>
+                    {r._productionWorkers && (
+                      <div className="truncate text-zinc-500 mt-0.5" title={r._productionWorkers}>
+                        Сотрудники: {r._productionWorkers}
+                      </div>
+                    )}
                   </td>
                   <td className="p-2">
                     {r._confirmed ? (
