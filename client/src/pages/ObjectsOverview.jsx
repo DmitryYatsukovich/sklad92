@@ -473,6 +473,8 @@ export default function ObjectsOverview() {
       const current = acc.get(slotId) || {
         exactQty: 0,
         fallbackQty: 0,
+        equipmentQty: 0,
+        worksQty: 0,
         unit: row.material_unit || '',
       };
       const qty = Number(row.quantity || 0);
@@ -490,8 +492,44 @@ export default function ObjectsOverview() {
       acc.set(slotId, current);
     });
 
+    data.location_system_equipment.forEach((row) => {
+      const slotId = Number(row.location_system_id || 0);
+      if (!productionEligibleSlotIds.has(slotId)) return;
+      if (!materialNameKey) return;
+      if (normalizeNameKey(row.name) !== materialNameKey) return;
+      const current = acc.get(slotId) || {
+        exactQty: 0,
+        fallbackQty: 0,
+        equipmentQty: 0,
+        worksQty: 0,
+        unit: '',
+      };
+      current.equipmentQty += Number(row.quantity || 0);
+      acc.set(slotId, current);
+    });
+
+    data.location_system_works.forEach((row) => {
+      const slotId = Number(row.location_system_id || 0);
+      if (!productionEligibleSlotIds.has(slotId)) return;
+      if (!materialNameKey) return;
+      if (normalizeNameKey(row.name) !== materialNameKey) return;
+      const current = acc.get(slotId) || {
+        exactQty: 0,
+        fallbackQty: 0,
+        equipmentQty: 0,
+        worksQty: 0,
+        unit: '',
+      };
+      current.worksQty += Number(row.quantity || 0);
+      acc.set(slotId, current);
+    });
+
     acc.forEach((value, slotId) => {
-      const quantity = value.exactQty > 0 ? value.exactQty : value.fallbackQty;
+      let quantity = 0;
+      if (value.exactQty > 0) quantity = value.exactQty;
+      else if (value.fallbackQty > 0) quantity = value.fallbackQty;
+      else if (value.equipmentQty > 0) quantity = value.equipmentQty;
+      else if (value.worksQty > 0) quantity = value.worksQty;
       if (!(quantity > 0)) return;
       map.set(slotId, {
         materialId,
@@ -501,7 +539,13 @@ export default function ObjectsOverview() {
       });
     });
     return map;
-  }, [data.location_system_materials, productionMode, productionEligibleSlotIds]);
+  }, [
+    data.location_system_materials,
+    data.location_system_equipment,
+    data.location_system_works,
+    productionMode,
+    productionEligibleSlotIds,
+  ]);
   const productionEligibleSlotsCount = productionEligibleSlotIds.size;
 
   const objectOptions = objects;

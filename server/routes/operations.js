@@ -795,7 +795,7 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
     }
 
     const slotQuantitiesRows = await client.query(
-      `SELECT lm.location_system_id,
+      `SELECT ls.id AS location_system_id,
               COALESCE(SUM(CASE WHEN lm.material_id = $2 THEN lm.quantity ELSE 0 END), 0)::numeric AS exact_material_quantity,
               COALESCE(SUM(CASE
                 WHEN LOWER(TRIM(m.name)) = LOWER(TRIM($3))
@@ -804,17 +804,36 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
                 THEN lm.quantity
                 ELSE 0
               END), 0)::numeric AS fallback_material_quantity
-       FROM work_location_system_materials lm
-       JOIN materials m ON m.id = lm.material_id
-       WHERE lm.location_system_id = ANY($1::int[])
-       GROUP BY lm.location_system_id`,
+              ,COALESCE((
+                SELECT SUM(eq.quantity)
+                FROM work_location_system_equipment eq
+                WHERE eq.location_system_id = ls.id
+                  AND LOWER(TRIM(eq.name)) = LOWER(TRIM($3))
+              ), 0)::numeric AS equipment_quantity
+              ,COALESCE((
+                SELECT SUM(w.quantity)
+                FROM work_location_system_works w
+                WHERE w.location_system_id = ls.id
+                  AND LOWER(TRIM(w.name)) = LOWER(TRIM($3))
+              ), 0)::numeric AS works_quantity
+       FROM work_location_systems ls
+       LEFT JOIN work_location_system_materials lm ON lm.location_system_id = ls.id
+       LEFT JOIN materials m ON m.id = lm.material_id
+       WHERE ls.id = ANY($1::int[])
+       GROUP BY ls.id`,
       [slotIds, issuance.material_id, materialMeta.name || '', materialMeta.system_id, materialMeta.category_id],
     );
     const slotQuantityMap = new Map(
       slotQuantitiesRows.rows.map((row) => {
         const exactQty = Number(row.exact_material_quantity || 0);
         const fallbackQty = Number(row.fallback_material_quantity || 0);
-        const qty = exactQty > 0 ? exactQty : fallbackQty;
+        const equipmentQty = Number(row.equipment_quantity || 0);
+        const worksQty = Number(row.works_quantity || 0);
+        let qty = 0;
+        if (exactQty > 0) qty = exactQty;
+        else if (fallbackQty > 0) qty = fallbackQty;
+        else if (equipmentQty > 0) qty = equipmentQty;
+        else if (worksQty > 0) qty = worksQty;
         return [Number(row.location_system_id), qty];
       }),
     );
