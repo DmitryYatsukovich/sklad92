@@ -7,13 +7,49 @@ const router = Router();
 router.use(requireAuth);
 router.use(loadUser);
 
+let ensureObjectStatusSchemaPromise = null;
+
 function parseId(value) {
   const n = Number.parseInt(value, 10);
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
+async function ensureObjectStatusSchema() {
+  if (!ensureObjectStatusSchemaPromise) {
+    ensureObjectStatusSchemaPromise = (async () => {
+      await pool.query(
+        `CREATE TABLE IF NOT EXISTS work_block_statuses (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(200) NOT NULL UNIQUE,
+          color VARCHAR(16) NOT NULL,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        )`,
+      );
+      await pool.query(
+        'ALTER TABLE work_location_systems ADD COLUMN IF NOT EXISTS status_id INTEGER REFERENCES work_block_statuses(id) ON DELETE SET NULL',
+      );
+      await pool.query(
+        'ALTER TABLE work_location_systems ADD COLUMN IF NOT EXISTS assigned_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
+      );
+      await pool.query(
+        'CREATE INDEX IF NOT EXISTS idx_wls_status ON work_location_systems(status_id)',
+      );
+      await pool.query(
+        'CREATE INDEX IF NOT EXISTS idx_wls_assigned_user ON work_location_systems(assigned_user_id)',
+      );
+    })().catch((error) => {
+      ensureObjectStatusSchemaPromise = null;
+      throw error;
+    });
+  }
+  await ensureObjectStatusSchemaPromise;
+}
+
 router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => {
   try {
+    await ensureObjectStatusSchema();
     const [
       objects,
       entrances,
@@ -105,7 +141,6 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
       pool.query(
         `SELECT id, full_name, login
          FROM users
-         WHERE COALESCE(profile_active, true) = true
          ORDER BY full_name NULLS LAST, login`,
       ),
     ]);
@@ -130,6 +165,7 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
 });
 
 router.put('/location-systems/:id/status-assignment', requirePermission('can_objects'), async (req, res) => {
+  await ensureObjectStatusSchema();
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Неверный id блока' });
 
