@@ -7,6 +7,10 @@ const EMPTY_DATA = {
   floors: [],
   apartments: [],
   rooms: [],
+  location_systems: [],
+  location_system_materials: [],
+  location_system_equipment: [],
+  location_system_works: [],
 };
 const FLOOR_ROOMS_BUCKET_NAME = 'Помещения этажа';
 const FLOOR_ROOMS_DISPLAY_TITLE = 'Помещения на этаже';
@@ -27,6 +31,10 @@ function normalizeHierarchy(value) {
     floors: normalizeList(safe.floors),
     apartments: normalizeList(safe.apartments),
     rooms: normalizeList(safe.rooms),
+    location_systems: normalizeList(safe.location_systems),
+    location_system_materials: normalizeList(safe.location_system_materials),
+    location_system_equipment: normalizeList(safe.location_system_equipment),
+    location_system_works: normalizeList(safe.location_system_works),
   };
 }
 
@@ -37,6 +45,20 @@ function asIntSet(values) {
 function toggleSelection(list, id) {
   const key = String(id);
   return list.includes(key) ? list.filter((x) => x !== key) : [...list, key];
+}
+
+function slotCompleteness(slot, entryNames = []) {
+  const hasSystem = Boolean(String(slot?.system_name || '').trim());
+  const hasCategory = Boolean(String(slot?.category_name || '').trim());
+  const hasEntryName = entryNames.some((name) => Boolean(String(name || '').trim()));
+  const missing = [];
+  if (!hasSystem) missing.push('система');
+  if (!hasCategory) missing.push('категория');
+  if (!hasEntryName) missing.push('название');
+  return {
+    isIncomplete: missing.length > 0,
+    missing,
+  };
 }
 
 function blockSizeClass(level, score) {
@@ -52,6 +74,29 @@ function blockSizeClass(level, score) {
   }
   if (level === 'floor') return '';
   return '';
+}
+
+function LocationSlotChip({ slot, entries }) {
+  const entryNames = entries.map((row) => row.name).filter(Boolean);
+  const completeness = slotCompleteness(slot, entryNames);
+  const previewText = entryNames.length ? entryNames.slice(0, 2).join(', ') : 'Позиции не добавлены';
+  const title = [
+    `Система: ${slot.system_name || '—'}`,
+    `Категория: ${slot.category_name || '—'}`,
+    `Позиций: ${entries.length}`,
+    `Список: ${entryNames.length ? entryNames.join(', ') : '—'}`,
+    completeness.isIncomplete ? `Не заполнено: ${completeness.missing.join(', ')}` : '',
+  ].filter(Boolean).join('\n');
+  return (
+    <div
+      className={`w-[3.8rem] h-[3.8rem] rounded border p-1 text-left ${completeness.isIncomplete ? 'border-rose-500/70 bg-rose-950/35 text-rose-100' : 'border-white/15 bg-zinc-900/70 text-zinc-100'}`}
+      title={title}
+    >
+      <p className="text-[9px] font-semibold leading-tight truncate">{slot.system_name || 'Без системы'}</p>
+      <p className="text-[8px] text-zinc-400 leading-tight truncate">{slot.category_name || 'Без категории'}</p>
+      <p className="mt-0.5 text-[8px] leading-tight truncate">{previewText}</p>
+    </div>
+  );
 }
 
 function MultiSelectFilter({
@@ -197,6 +242,62 @@ export default function ObjectsOverview() {
     return map;
   }, [rooms]);
 
+  const slotsByLocation = useMemo(() => {
+    const map = new Map();
+    data.location_systems.forEach((slot) => {
+      const key = `${slot.location_kind}:${slot.location_id}`;
+      const list = map.get(key) || [];
+      list.push(slot);
+      map.set(key, list);
+    });
+    map.forEach((list, key) => {
+      map.set(key, [...list].sort((a, b) => (
+        naturalCompare(a.system_name, b.system_name)
+        || naturalCompare(a.category_name, b.category_name)
+        || (Number(a.id || 0) - Number(b.id || 0))
+      )));
+    });
+    return map;
+  }, [data.location_systems]);
+
+  const entriesBySlot = useMemo(() => {
+    const map = new Map();
+    const pushEntry = (slotId, row) => {
+      const list = map.get(slotId) || [];
+      list.push(row);
+      map.set(slotId, list);
+    };
+    data.location_system_materials.forEach((row) => {
+      pushEntry(row.location_system_id, {
+        name: row.material_name,
+        quantity: Number(row.quantity || 0),
+        unit: row.material_unit || '',
+      });
+    });
+    data.location_system_equipment.forEach((row) => {
+      pushEntry(row.location_system_id, {
+        name: row.name,
+        quantity: Number(row.quantity || 0),
+        unit: '',
+      });
+    });
+    data.location_system_works.forEach((row) => {
+      pushEntry(row.location_system_id, {
+        name: row.name,
+        quantity: Number(row.quantity || 0),
+        unit: '',
+      });
+    });
+    map.forEach((list, key) => {
+      map.set(key, [...list].sort((a, b) => naturalCompare(a.name, b.name)));
+    });
+    return map;
+  }, [
+    data.location_system_materials,
+    data.location_system_equipment,
+    data.location_system_works,
+  ]);
+
   const objectOptions = objects;
   const entranceOptions = useMemo(() => {
     const filteredByObjects = objectIdSet.size
@@ -219,6 +320,22 @@ export default function ObjectsOverview() {
 
   const toggleFloorCollapse = (floorId) => {
     setCollapsedFloors((prev) => toggleSelection(prev, floorId));
+  };
+
+  const renderLocationBlocks = (locationKind, locationId) => {
+    const slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
+    if (!slots.length) return null;
+    return (
+      <div className="mt-1 flex flex-wrap gap-1">
+        {slots.map((slot) => (
+          <LocationSlotChip
+            key={slot.id}
+            slot={slot}
+            entries={entriesBySlot.get(slot.id) || []}
+          />
+        ))}
+      </div>
+    );
   };
 
   const renderFloorCard = (floor, floorApartments, floorRooms, compact = false) => {
@@ -257,6 +374,7 @@ export default function ObjectsOverview() {
                         className="rounded border border-white/10 bg-black/20 px-2 py-1.5"
                       >
                         <p className="text-zinc-200 text-2xs font-medium">Пом. {room.name}</p>
+                        {renderLocationBlocks('room', room.id)}
                       </div>
                     ))}
                   </div>
@@ -271,11 +389,13 @@ export default function ObjectsOverview() {
                     return (
                       <div key={apartment.id} className="rounded border border-white/10 bg-black/20 px-2 py-1.5">
                         <p className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</p>
+                        {renderLocationBlocks('apartment', apartment.id)}
                         {apartmentRooms.length ? (
                           <div className="mt-1 space-y-1">
                             {apartmentRooms.map((room) => (
-                              <div key={room.id} className="px-1.5 py-1 rounded bg-zinc-800/80 text-zinc-300 text-[10px] leading-none">
-                                Пом. {room.name}
+                              <div key={room.id} className="px-1.5 py-1 rounded bg-zinc-800/80 text-zinc-300 text-[10px] leading-none space-y-1">
+                                <p>Пом. {room.name}</p>
+                                {renderLocationBlocks('room', room.id)}
                               </div>
                             ))}
                           </div>

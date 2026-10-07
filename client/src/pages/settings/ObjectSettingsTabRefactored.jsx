@@ -15,27 +15,21 @@ function formatQty(value) {
   return Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 });
 }
 
-const CATEGORY_SQUARE_ACCENTS = [
-  'border-sky-400/45 bg-sky-950/40 text-sky-100',
-  'border-emerald-400/45 bg-emerald-950/35 text-emerald-100',
-  'border-violet-400/45 bg-violet-950/35 text-violet-100',
-  'border-amber-400/45 bg-amber-950/35 text-amber-100',
-  'border-rose-400/45 bg-rose-950/35 text-rose-100',
-  'border-cyan-400/45 bg-cyan-950/35 text-cyan-100',
-  'border-lime-400/45 bg-lime-950/35 text-lime-100',
-  'border-fuchsia-400/45 bg-fuchsia-950/35 text-fuchsia-100',
-];
-
-function getCategorySquareAccent(categoryId) {
-  if (categoryId == null || categoryId === '') return 'border-white/15 bg-zinc-900/60 text-zinc-100';
-  const n = Number.parseInt(String(categoryId), 10);
-  if (Number.isInteger(n)) {
-    return CATEGORY_SQUARE_ACCENTS[Math.abs(n) % CATEGORY_SQUARE_ACCENTS.length];
-  }
-  const source = String(categoryId);
-  let hash = 0;
-  for (let i = 0; i < source.length; i += 1) hash += source.charCodeAt(i);
-  return CATEGORY_SQUARE_ACCENTS[Math.abs(hash) % CATEGORY_SQUARE_ACCENTS.length];
+function slotCompleteness(slot, entryNames = []) {
+  const hasSystem = Boolean(String(slot?.system_name || '').trim());
+  const hasCategory = Boolean(String(slot?.category_name || '').trim());
+  const hasEntryName = entryNames.some((name) => Boolean(String(name || '').trim()));
+  const missing = [];
+  if (!hasSystem) missing.push('система');
+  if (!hasCategory) missing.push('категория');
+  if (!hasEntryName) missing.push('название');
+  return {
+    hasSystem,
+    hasCategory,
+    hasEntryName,
+    isIncomplete: missing.length > 0,
+    missing,
+  };
 }
 
 function toggleSelection(list, value) {
@@ -69,13 +63,14 @@ function SystemSquare({
   slot,
   onOpen,
   totals,
-  categoryAccentClass,
+  incomplete = false,
   selectionMode = false,
   selected = false,
   onToggleSelect,
 }) {
   const entriesPreview = Array.isArray(slot.entryNames) ? slot.entryNames.filter(Boolean) : [];
   const previewText = entriesPreview.length ? entriesPreview.slice(0, 2).join(', ') : 'Позиции не добавлены';
+  const tooltip = `${slot.system_name || 'Без системы'}${slot.category_name ? ` • ${slot.category_name}` : ''}${slot.missingFieldsText ? `\nНе заполнено: ${slot.missingFieldsText}` : ''}`;
   return (
     <button
       type="button"
@@ -86,8 +81,8 @@ function SystemSquare({
         }
         onOpen(slot);
       }}
-      className={`relative w-20 h-20 rounded-md border p-1.5 text-left transition hover:bg-white/10 ${categoryAccentClass || 'border-white/15 bg-zinc-900/60 text-zinc-100'} ${selectionMode ? (selected ? 'ring-2 ring-white/70' : 'ring-1 ring-white/25') : ''}`}
-      title={`${slot.system_name}${slot.category_name ? ` • ${slot.category_name}` : ''}`}
+      className={`relative w-20 h-20 rounded-md border p-1.5 text-left transition hover:bg-white/10 ${incomplete ? 'border-rose-500/70 bg-rose-950/35 text-rose-100' : 'border-white/15 bg-zinc-900/60 text-zinc-100'} ${selectionMode ? (selected ? 'ring-2 ring-white/70' : 'ring-1 ring-white/25') : ''}`}
+      title={tooltip}
     >
       {selectionMode && (
         <span
@@ -1212,7 +1207,12 @@ export default function ObjectSettingsTabRefactored() {
     const key = `${locationKind}:${locationId}`;
     const slots = (slotsByLocation.get(key) || []).filter(slotMatchesFilters);
     const sortedSlotCards = slots
-      .map((slot) => ({ slot, entries: getSlotEntries(slot.id) }))
+      .map((slot) => {
+        const entries = getSlotEntries(slot.id);
+        const entryNames = entries.map((row) => row.name);
+        const completeness = slotCompleteness(slot, entryNames);
+        return { slot, entries, entryNames, completeness };
+      })
       .sort((a, b) => (
         naturalCompare(a.slot.system_name, b.slot.system_name)
         || naturalCompare(a.entries[0]?.name || '', b.entries[0]?.name || '')
@@ -1222,24 +1222,79 @@ export default function ObjectSettingsTabRefactored() {
     const isPastingHere = pasteBusyKey === `slot:${key}`;
     const selectingMultiple = multiCopyLocationKey === key;
     if (!sortedSlotCards.length && hasSlotFilters) return null;
+
+    const groupedBySystem = sortedSlotCards.reduce((acc, item) => {
+      const systemName = String(item.slot.system_name || '').trim() || 'Без системы';
+      const systemKey = `${String(item.slot.system_id || 'none')}::${normalizeNameKey(systemName) || 'none'}`;
+      if (!acc.has(systemKey)) {
+        acc.set(systemKey, {
+          systemKey,
+          systemName,
+          categories: new Map(),
+        });
+      }
+      const systemBucket = acc.get(systemKey);
+      const categoryName = String(item.slot.category_name || '').trim() || 'Без категории';
+      const categoryKey = `${String(item.slot.category_id ?? 'none')}::${normalizeNameKey(categoryName) || 'none'}`;
+      if (!systemBucket.categories.has(categoryKey)) {
+        systemBucket.categories.set(categoryKey, {
+          categoryName,
+          items: [],
+        });
+      }
+      systemBucket.categories.get(categoryKey).items.push(item);
+      return acc;
+    }, new Map());
+
+    const groupedRows = [...groupedBySystem.values()]
+      .map((systemRow) => ({
+        ...systemRow,
+        categories: [...systemRow.categories.values()]
+          .map((categoryRow) => ({
+            ...categoryRow,
+            items: [...categoryRow.items].sort((a, b) => a.slot.id - b.slot.id),
+          }))
+          .sort((a, b) => naturalCompare(a.categoryName, b.categoryName)),
+      }))
+      .sort((a, b) => naturalCompare(a.systemName, b.systemName));
+
     return (
       <div className="space-y-2">
+        <div className="space-y-2">
+          {groupedRows.map((systemRow) => (
+            <div key={systemRow.systemKey} className="rounded-md border border-white/10 bg-black/20 p-1.5 space-y-1.5">
+              <p className="text-[10px] text-zinc-200 font-semibold">{systemRow.systemName}</p>
+              {systemRow.categories.map((categoryRow) => (
+                <div key={`${systemRow.systemName}:${categoryRow.categoryName}`} className="space-y-1">
+                  <p className="text-[10px] text-zinc-400">{categoryRow.categoryName}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {categoryRow.items.map(({ slot, entries, entryNames, completeness }) => {
+                      const selectedForMultiCopy = selectingMultiple && multiCopySelectedSlotIds.includes(String(slot.id));
+                      return (
+                        <SystemSquare
+                          key={slot.id}
+                          slot={{
+                            ...slot,
+                            locationTitle: title,
+                            entryNames,
+                            missingFieldsText: completeness.missing.join(', '),
+                          }}
+                          onOpen={openSlotModal}
+                          totals={{ positions: entries.length }}
+                          incomplete={completeness.isIncomplete}
+                          selectionMode={selectingMultiple}
+                          selected={selectedForMultiCopy}
+                          onToggleSelect={handleToggleMultiCopySlot}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
         <div className="flex flex-wrap items-center gap-2">
-          {sortedSlotCards.map(({ slot, entries }) => {
-            const selectedForMultiCopy = selectingMultiple && multiCopySelectedSlotIds.includes(String(slot.id));
-            return (
-              <SystemSquare
-                key={slot.id}
-                slot={{ ...slot, locationTitle: title, entryNames: entries.map((row) => row.name) }}
-                onOpen={openSlotModal}
-                totals={{ positions: entries.length }}
-                categoryAccentClass={getCategorySquareAccent(slot.category_id)}
-                selectionMode={selectingMultiple}
-                selected={selectedForMultiCopy}
-                onToggleSelect={handleToggleMultiCopySlot}
-              />
-            );
-          })}
           <button
             type="button"
             onClick={() => openCreateSlotModal(locationKind, locationId, title)}
