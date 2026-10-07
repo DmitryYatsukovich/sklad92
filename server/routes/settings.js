@@ -1248,7 +1248,8 @@ router.get('/object-settings/layout', requirePermission('can_settings_work'), as
                 s.name AS system_name,
                 c.name AS category_name, c.icon_key AS category_icon_key,
                 bs.name AS status_name, bs.color AS status_color,
-                u.full_name AS assigned_user_name, u.login AS assigned_user_login
+                COALESCE(NULLIF(TRIM(u.display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.login) AS assigned_user_name,
+                u.login AS assigned_user_login
          FROM work_location_systems ls
          JOIN material_systems s ON s.id = ls.system_id
          LEFT JOIN material_categories c ON c.id = ls.category_id
@@ -1326,7 +1327,8 @@ router.post('/object-settings/location-systems', requirePermission('can_settings
             s.name AS system_name,
             c.name AS category_name, c.icon_key AS category_icon_key,
             bs.name AS status_name, bs.color AS status_color,
-            u.full_name AS assigned_user_name, u.login AS assigned_user_login
+            COALESCE(NULLIF(TRIM(u.display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.login) AS assigned_user_name,
+            u.login AS assigned_user_login
      FROM work_location_systems ls
      JOIN material_systems s ON s.id = ls.system_id
      LEFT JOIN material_categories c ON c.id = ls.category_id
@@ -1375,7 +1377,8 @@ router.put('/object-settings/location-systems/:id', requirePermission('can_setti
             s.name AS system_name,
             c.name AS category_name, c.icon_key AS category_icon_key,
             bs.name AS status_name, bs.color AS status_color,
-            u.full_name AS assigned_user_name, u.login AS assigned_user_login
+            COALESCE(NULLIF(TRIM(u.display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.login) AS assigned_user_name,
+            u.login AS assigned_user_login
      FROM work_location_systems ls
      JOIN material_systems s ON s.id = ls.system_id
      LEFT JOIN material_categories c ON c.id = ls.category_id

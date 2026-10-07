@@ -108,7 +108,8 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
                 s.name AS system_name,
                 c.name AS category_name,
                 bs.name AS status_name, bs.color AS status_color,
-                u.full_name AS assigned_user_name, u.login AS assigned_user_login
+                COALESCE(NULLIF(TRIM(u.display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.login) AS assigned_user_name,
+                u.login AS assigned_user_login
          FROM work_location_systems ls
          LEFT JOIN material_systems s ON s.id = ls.system_id
          LEFT JOIN material_categories c ON c.id = ls.category_id
@@ -139,9 +140,11 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
          ORDER BY sort_order, name`,
       ),
       pool.query(
-        `SELECT id, full_name, login
+        `SELECT id,
+                COALESCE(NULLIF(TRIM(display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', first_name, last_name)), ''), login) AS full_name,
+                login
          FROM users
-         ORDER BY full_name NULLS LAST, login`,
+         ORDER BY 2, login`,
       ),
     ]);
 
@@ -218,7 +221,8 @@ router.put('/location-systems/:id/status-assignment', requirePermission('can_obj
             s.name AS system_name,
             c.name AS category_name,
             bs.name AS status_name, bs.color AS status_color,
-            u.full_name AS assigned_user_name, u.login AS assigned_user_login
+            COALESCE(NULLIF(TRIM(u.display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.login) AS assigned_user_name,
+            u.login AS assigned_user_login
      FROM work_location_systems ls
      LEFT JOIN material_systems s ON s.id = ls.system_id
      LEFT JOIN material_categories c ON c.id = ls.category_id
