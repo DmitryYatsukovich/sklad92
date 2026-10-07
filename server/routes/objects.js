@@ -97,6 +97,7 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
       locationSystemMaterials,
       locationSystemEquipment,
       locationSystemWorks,
+      materialBalances,
       blockStatuses,
       assignableUsers,
     ] = await Promise.all([
@@ -176,6 +177,34 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
          ORDER BY location_system_id, name, id`,
       ),
       pool.query(
+        `WITH produced_by_issuance AS (
+           SELECT issuance_id, COALESCE(SUM(quantity), 0)::numeric AS produced_qty
+           FROM issuance_production_allocations
+           GROUP BY issuance_id
+         ),
+         on_hands_by_material AS (
+           SELECT i.material_id,
+                  COALESCE(SUM(GREATEST(i.quantity - COALESCE(i.returned_quantity, 0) - COALESCE(pbi.produced_qty, 0), 0)), 0)::numeric AS on_hands_quantity
+           FROM issuances i
+           LEFT JOIN produced_by_issuance pbi ON pbi.issuance_id = i.id
+           GROUP BY i.material_id
+         )
+         SELECT m.id,
+                m.name,
+                m.unit,
+                m.system_id,
+                m.category_id,
+                ms.name AS system_name,
+                mc.name AS category_name,
+                COALESCE(m.quantity, 0)::numeric AS warehouse_quantity,
+                COALESCE(oh.on_hands_quantity, 0)::numeric AS on_hands_quantity
+         FROM materials m
+         LEFT JOIN material_systems ms ON ms.id = m.system_id
+         LEFT JOIN material_categories mc ON mc.id = m.category_id
+         LEFT JOIN on_hands_by_material oh ON oh.material_id = m.id
+         ORDER BY ms.name NULLS LAST, mc.name NULLS LAST, m.name`,
+      ),
+      pool.query(
         `SELECT id, name, color, is_for_production, sort_order, created_at, updated_at
          FROM work_block_statuses
          ORDER BY sort_order, name`,
@@ -199,6 +228,7 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
       location_system_materials: locationSystemMaterials.rows,
       location_system_equipment: locationSystemEquipment.rows,
       location_system_works: locationSystemWorks.rows,
+      material_balances: materialBalances.rows,
       block_statuses: blockStatuses.rows,
       assignable_users: assignableUsers.rows,
     });

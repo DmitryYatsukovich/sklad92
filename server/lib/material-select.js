@@ -10,8 +10,13 @@ export const MATERIAL_SELECT = `
   s.name AS system_name,
   org.name AS organization_name,
   COALESCE((
-    SELECT SUM(GREATEST(i.quantity - COALESCE(i.returned_quantity, 0), 0))
+    SELECT SUM(GREATEST(i.quantity - COALESCE(i.returned_quantity, 0) - COALESCE(prod.produced_qty, 0), 0))
     FROM issuances i
+    LEFT JOIN (
+      SELECT issuance_id, COALESCE(SUM(quantity), 0)::numeric AS produced_qty
+      FROM issuance_production_allocations
+      GROUP BY issuance_id
+    ) prod ON prod.issuance_id = i.id
     JOIN materials im ON im.id = i.material_id
     WHERE im.id = m.id OR im.parent_material_id = m.id
   ), 0) AS on_hands_quantity`;

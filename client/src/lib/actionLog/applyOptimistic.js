@@ -446,8 +446,7 @@ export function applyPendingToProduction(rows, entries, ctx = {}) {
       const row = findProductionRow(list, id);
       if (row) {
         const returned = Number(body.returned_quantity ?? payload.returned_quantity) || 0;
-        const issued = Number(row.total_issued) || 0;
-        const produced = Math.max(issued - returned, 0);
+        const produced = Number(row.produced) || 0;
         const unitSmr = Number(row.production_price) || 0;
         Object.assign(row, {
           total_returned: returned,

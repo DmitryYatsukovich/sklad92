@@ -130,10 +130,14 @@ function normalizeProductionRows(data) {
     .map((row) => {
       const issued = Number(row.total_issued) || 0;
       const returned = Number(row.total_returned) || 0;
+      const producedFromAllocations = Number(row.produced);
+      const produced = Number.isFinite(producedFromAllocations)
+        ? producedFromAllocations
+        : Math.max(issued - returned, 0);
       return {
         ...row,
         issuance_id: Number(row.issuance_id),
-        produced: Math.max(issued - returned, 0),
+        produced,
       };
     });
 }

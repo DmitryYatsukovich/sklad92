@@ -12,6 +12,7 @@ const EMPTY_DATA = {
   location_system_materials: [],
   location_system_equipment: [],
   location_system_works: [],
+  material_balances: [],
   block_statuses: [],
   assignable_users: [],
 };
@@ -39,6 +40,7 @@ function normalizeHierarchy(value) {
     location_system_materials: normalizeList(safe.location_system_materials),
     location_system_equipment: normalizeList(safe.location_system_equipment),
     location_system_works: normalizeList(safe.location_system_works),
+    material_balances: normalizeList(safe.material_balances),
     block_statuses: normalizeList(safe.block_statuses),
     assignable_users: normalizeList(safe.assignable_users),
   };
@@ -450,6 +452,11 @@ export default function ObjectsOverview() {
     });
     return map;
   }, [entrances]);
+  const entranceById = useMemo(() => {
+    const map = new Map();
+    entrances.forEach((row) => map.set(Number(row.id), row));
+    return map;
+  }, [entrances]);
 
   const floorsByEntrance = useMemo(() => {
     const map = new Map();
@@ -458,6 +465,11 @@ export default function ObjectsOverview() {
       list.push(row);
       map.set(row.entrance_id, list);
     });
+    return map;
+  }, [floors]);
+  const floorById = useMemo(() => {
+    const map = new Map();
+    floors.forEach((row) => map.set(Number(row.id), row));
     return map;
   }, [floors]);
 
@@ -724,6 +736,35 @@ export default function ObjectsOverview() {
     return options;
   }, [blockStatuses, data.location_systems]);
 
+  const slotLocationMetaById = useMemo(() => {
+    const map = new Map();
+    data.location_systems.forEach((slot) => {
+      const slotId = Number(slot.id || 0);
+      if (!slotId) return;
+      let apartment = null;
+      if (slot.location_kind === 'apartment') {
+        apartment = apartmentsById.get(Number(slot.location_id || 0)) || null;
+      } else if (slot.location_kind === 'room') {
+        const room = roomsById.get(Number(slot.location_id || 0)) || null;
+        apartment = room ? (apartmentsById.get(Number(room.apartment_id || 0)) || null) : null;
+      }
+      const floor = apartment ? (floorById.get(Number(apartment.floor_id || 0)) || null) : null;
+      const entrance = floor ? (entranceById.get(Number(floor.entrance_id || 0)) || null) : null;
+      map.set(slotId, {
+        objectId: entrance ? Number(entrance.object_id || 0) : 0,
+        entranceId: floor ? Number(floor.entrance_id || 0) : 0,
+        floorId: apartment ? Number(apartment.floor_id || 0) : 0,
+      });
+    });
+    return map;
+  }, [
+    data.location_systems,
+    apartmentsById,
+    roomsById,
+    floorById,
+    entranceById,
+  ]);
+
   const slotFiltersActive = isProductionMode
     || !!selectedSystems.length
     || !!selectedCategories.length
@@ -743,29 +784,21 @@ export default function ObjectsOverview() {
     statusFilterSet,
   ]);
 
-  const locationMatchesFloorFilter = useCallback((locationKind, locationId) => {
-    if (!floorIdSet.size) return true;
-    const id = Number(locationId || 0);
-    if (!id) return false;
-    if (locationKind === 'apartment') {
-      const apartment = apartmentsById.get(id);
-      return apartment ? floorIdSet.has(Number(apartment.floor_id)) : false;
-    }
-    if (locationKind === 'room') {
-      const room = roomsById.get(id);
-      if (!room) return false;
-      const apartment = apartmentsById.get(Number(room.apartment_id));
-      return apartment ? floorIdSet.has(Number(apartment.floor_id)) : false;
-    }
-    return false;
-  }, [apartmentsById, roomsById, floorIdSet]);
+  const slotMatchesLayoutFilters = useCallback((slot) => {
+    const slotId = Number(slot?.id || 0);
+    if (!slotId) return false;
+    const meta = slotLocationMetaById.get(slotId);
+    if (objectIdSet.size && !objectIdSet.has(Number(meta?.objectId || 0))) return false;
+    if (entranceIdSet.size && !entranceIdSet.has(Number(meta?.entranceId || 0))) return false;
+    if (floorIdSet.size && !floorIdSet.has(Number(meta?.floorId || 0))) return false;
+    return true;
+  }, [slotLocationMetaById, objectIdSet, entranceIdSet, floorIdSet]);
 
   const hasVisibleLocationSlots = useCallback((locationKind, locationId) => {
-    if (!locationMatchesFloorFilter(locationKind, locationId)) return false;
     const slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
     if (!slots.length) return false;
-    return slots.some((slot) => slotMatchesFilters(slot));
-  }, [locationMatchesFloorFilter, slotsByLocation, slotMatchesFilters]);
+    return slots.some((slot) => slotMatchesLayoutFilters(slot) && slotMatchesFilters(slot));
+  }, [slotsByLocation, slotMatchesLayoutFilters, slotMatchesFilters]);
 
   const isFloorVisible = useCallback((floorId) => {
     if (floorIdSet.size && !floorIdSet.has(Number(floorId))) return false;
@@ -835,6 +868,89 @@ export default function ObjectsOverview() {
       return [...next].map((id) => String(id));
     });
   }, [visibleFloorIds, allVisibleFloorsCollapsed]);
+
+  const materialBalanceById = useMemo(() => {
+    const map = new Map();
+    data.material_balances.forEach((row) => {
+      const materialId = Number(row?.id || 0);
+      if (!materialId) return;
+      map.set(materialId, {
+        warehouseQuantity: Number(row?.warehouse_quantity || 0),
+        onHandsQuantity: Number(row?.on_hands_quantity || 0),
+      });
+    });
+    return map;
+  }, [data.material_balances]);
+
+  const visibleSlotIds = useMemo(() => {
+    const ids = new Set();
+    data.location_systems.forEach((slot) => {
+      if (!slotMatchesLayoutFilters(slot)) return;
+      if (!slotMatchesFilters(slot)) return;
+      ids.add(Number(slot.id));
+    });
+    return ids;
+  }, [data.location_systems, slotMatchesLayoutFilters, slotMatchesFilters]);
+
+  const needSummaryRows = useMemo(() => {
+    const grouped = new Map();
+    data.location_system_materials.forEach((row) => {
+      const slotId = Number(row?.location_system_id || 0);
+      if (!visibleSlotIds.has(slotId)) return;
+      const materialId = Number(row?.material_id || 0);
+      if (!materialId) return;
+      const key = String(materialId);
+      const existing = grouped.get(key) || {
+        materialId,
+        materialName: row?.material_name || `Материал #${materialId}`,
+        materialUnit: row?.material_unit || '',
+        systemName: row?.material_system_name || 'Без системы',
+        categoryName: row?.material_category_name || 'Без категории',
+        requiredQuantity: 0,
+      };
+      existing.requiredQuantity += Number(row?.quantity || 0);
+      grouped.set(key, existing);
+    });
+    return [...grouped.values()]
+      .map((row) => {
+        const balances = materialBalanceById.get(Number(row.materialId)) || {
+          warehouseQuantity: 0,
+          onHandsQuantity: 0,
+        };
+        const availableTotal = Number(balances.warehouseQuantity || 0) + Number(balances.onHandsQuantity || 0);
+        const needToOrder = Math.max(Number(row.requiredQuantity || 0) - availableTotal, 0);
+        return {
+          ...row,
+          warehouseQuantity: Number(balances.warehouseQuantity || 0),
+          onHandsQuantity: Number(balances.onHandsQuantity || 0),
+          needToOrder,
+        };
+      })
+      .sort((a, b) => (
+        naturalCompare(a.systemName, b.systemName)
+        || naturalCompare(a.categoryName, b.categoryName)
+        || naturalCompare(a.materialName, b.materialName)
+      ));
+  }, [data.location_system_materials, visibleSlotIds, materialBalanceById]);
+
+  const needSummaryBySystemCategory = useMemo(() => {
+    const map = new Map();
+    needSummaryRows.forEach((row) => {
+      const key = `${row.systemName}:::${row.categoryName}`;
+      const bucket = map.get(key) || {
+        key,
+        systemName: row.systemName,
+        categoryName: row.categoryName,
+        rows: [],
+      };
+      bucket.rows.push(row);
+      map.set(key, bucket);
+    });
+    return [...map.values()].sort((a, b) => (
+      naturalCompare(a.systemName, b.systemName)
+      || naturalCompare(a.categoryName, b.categoryName)
+    ));
+  }, [needSummaryRows]);
 
   const openSlotEditor = (slot) => {
     setEditor({
@@ -1734,6 +1850,64 @@ export default function ObjectsOverview() {
           </button>
         </div>
       )}
+
+      <div className="rounded-xl border border-white/10 bg-surface-850/80 p-3 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-white text-sm font-semibold">Нужно для завершения</h3>
+          <span className="text-zinc-400 text-2xs">
+            Позиции: {needSummaryRows.length}
+          </span>
+        </div>
+        {needSummaryBySystemCategory.length ? (
+          <div className="space-y-2 max-h-[26rem] overflow-auto pr-1">
+            {needSummaryBySystemCategory.map((group) => (
+              <section key={group.key} className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-1.5">
+                <p className="text-zinc-200 text-2xs font-semibold">
+                  {group.systemName} · {group.categoryName}
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-zinc-500 border-b border-white/10">
+                        <th className="text-left py-1">Материал</th>
+                        <th className="text-right py-1">Нужно для завершения</th>
+                        <th className="text-right py-1">На складе</th>
+                        <th className="text-right py-1">На руках</th>
+                        <th className="text-right py-1">Нужно заказать</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.rows.map((row) => {
+                        const needDanger = Number(row.needToOrder || 0) > 0;
+                        const unitLabel = row.materialUnit ? ` ${row.materialUnit}` : '';
+                        return (
+                          <tr key={row.materialId} className="border-b border-white/5 last:border-b-0">
+                            <td className="py-1.5 text-zinc-200">{row.materialName}</td>
+                            <td className="py-1.5 text-right tabular-nums text-zinc-200">
+                              {Number(row.requiredQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}{unitLabel}
+                            </td>
+                            <td className="py-1.5 text-right tabular-nums text-zinc-300">
+                              {Number(row.warehouseQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}{unitLabel}
+                            </td>
+                            <td className="py-1.5 text-right tabular-nums text-sky-300">
+                              {Number(row.onHandsQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}{unitLabel}
+                            </td>
+                            <td className={`py-1.5 text-right tabular-nums font-semibold ${needDanger ? 'text-rose-400' : 'text-emerald-300'}`}>
+                              {Number(row.needToOrder || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })}{unitLabel}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <p className="text-zinc-500 text-xs">По выбранным фильтрам нет материалов для расчёта.</p>
+        )}
+      </div>
 
       {error && <p className="text-rose-400 text-sm">{error}</p>}
       {loading ? <p className="text-zinc-500 text-sm">Загрузка схемы объектов…</p> : renderObjectCards()}
