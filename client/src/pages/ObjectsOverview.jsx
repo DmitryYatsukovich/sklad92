@@ -156,12 +156,13 @@ function LocationSlotChip({
   compact = false,
 }) {
   const entryLines = entries.map(formatEntryLabel).filter(Boolean);
-  const visibleEntryLines = compact ? entryLines.slice(0, 2) : entryLines;
-  const hiddenEntriesCount = compact ? Math.max(0, entryLines.length - visibleEntryLines.length) : 0;
+  const primaryEntry = entryLines[0] || 'Нет материалов';
+  const hiddenEntriesCount = Math.max(0, entryLines.length - 1);
   const statusName = slot.status_name || 'Без статуса';
   const statusColor = slot.status_color || DEFAULT_STATUS_COLOR;
   const accentColor = selectionColor || statusColor;
   const textColor = getTextColorForHex(accentColor);
+  const statusShort = statusName.length > 7 ? `${statusName.slice(0, 7)}…` : statusName;
   const title = [
     `Система: ${slot.system_name || '—'}`,
     `Категория: ${slot.category_name || '—'}`,
@@ -175,10 +176,10 @@ function LocationSlotChip({
       onClick={() => onOpen?.(slot)}
       title={title}
       disabled={disabled}
-      className={`rounded-md border shadow-sm text-left transition-transform ${
+      className={`rounded-md border shadow-sm text-left transition-transform overflow-hidden ${
         compact
-          ? 'p-1 min-h-[3.2rem] min-w-0 w-full max-w-none'
-          : 'p-1.25 min-h-[4rem] min-w-0 w-full max-w-none'
+          ? 'h-[3.25rem] w-[3.25rem] p-0.5'
+          : 'h-[3.9rem] w-[3.9rem] p-0.75'
       } ${
         disabled ? 'opacity-55 cursor-not-allowed' : 'hover:scale-[1.01] hover:shadow-[0_6px_20px_rgba(0,0,0,0.25)]'
       } ${
@@ -190,28 +191,21 @@ function LocationSlotChip({
         color: textColor,
       }}
     >
-      <span className={`block space-y-0.5 leading-tight ${compact ? 'break-words' : ''}`}>
-        <span className={`block font-semibold uppercase tracking-wide ${compact ? 'text-[7px]' : 'text-[8px]'}`}>
+      <span className="flex h-full flex-col justify-between leading-tight">
+        <span className={`block font-semibold uppercase tracking-wide truncate ${compact ? 'text-[6px]' : 'text-[7px]'}`}>
           {slot.system_name || 'Система'}
-          {slot.category_name ? ` · ${slot.category_name}` : ''}
         </span>
-        {visibleEntryLines.length ? (
-          visibleEntryLines.map((line, idx) => (
-            <span key={`${slot.id}-entry-${idx}`} className={`block ${compact ? 'text-[7px]' : 'text-[9px]'} leading-tight`}>
-              {line}
-            </span>
-          ))
-        ) : (
-          <span className={`block opacity-90 ${compact ? 'text-[7px]' : 'text-[9px]'}`}>Нет материалов</span>
-        )}
+        <span className={`block truncate opacity-90 ${compact ? 'text-[6px]' : 'text-[7px]'}`}>
+          {primaryEntry}
+        </span>
         {hiddenEntriesCount > 0 && (
-          <span className="block text-[7px] opacity-85">+{hiddenEntriesCount} поз.</span>
+          <span className={`${compact ? 'text-[6px]' : 'text-[7px]'} opacity-85`}>+{hiddenEntriesCount}</span>
         )}
         {selectionCaption ? (
-          <span className={`block font-semibold pt-0.5 ${compact ? 'text-[7px]' : 'text-[8px]'}`}>{selectionCaption}</span>
+          <span className={`block truncate font-semibold ${compact ? 'text-[6px]' : 'text-[7px]'}`}>{selectionCaption}</span>
         ) : null}
-        <span className="inline-flex mt-0.5 rounded-full border border-black/20 px-1 py-0.5 text-[7px] font-semibold uppercase">
-          {statusName}
+        <span className={`inline-flex rounded-full border border-black/20 px-1 py-0.5 font-semibold uppercase max-w-full truncate ${compact ? 'text-[6px]' : 'text-[7px]'}`}>
+          {statusShort}
         </span>
       </span>
     </button>
@@ -1476,11 +1470,11 @@ export default function ObjectsOverview() {
             key={systemRow.key}
             className={`rounded-md border border-white/10 bg-black/25 shadow-[0_4px_12px_rgba(0,0,0,0.2)] ${compact ? 'p-1 space-y-0.5' : 'p-1.5 space-y-1'}`}
           >
-            <p className={`${compact ? 'text-[9px]' : 'text-[10px]'} text-zinc-200 font-semibold tracking-wide`}>{systemRow.systemName}</p>
+            <p className={`${compact ? 'text-[8px]' : 'text-[9px]'} text-zinc-200 font-semibold tracking-wide truncate`}>{systemRow.systemName}</p>
             {systemRow.categories.map((categoryRow) => (
               <div key={categoryRow.key} className={`${compact ? 'space-y-0.5' : 'space-y-1'}`}>
-                <p className={`${compact ? 'text-[8px]' : 'text-[9px]'} text-zinc-400`}>{categoryRow.categoryName}</p>
-                <div className={`grid ${compact ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-2'} gap-1`}>
+                <p className={`${compact ? 'text-[7px]' : 'text-[8px]'} text-zinc-400 truncate`}>{categoryRow.categoryName}</p>
+                <div className={`flex flex-wrap items-start ${compact ? 'gap-0.5' : 'gap-1'}`}>
                   {categoryRow.slots.map((slot) => {
                     const entries = entriesBySlot.get(slot.id) || [];
                     const draft = productionDrafts[slot.id] || null;
