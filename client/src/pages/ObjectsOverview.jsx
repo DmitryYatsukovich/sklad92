@@ -213,23 +213,23 @@ function MultiSelectFilter({
   getOptionLabel,
 }) {
   return (
-    <details className="rounded-xl border border-white/10 bg-surface-850/80 p-3">
-      <summary className="list-none cursor-pointer">
+    <details className="rounded-xl border border-white/10 bg-zinc-900/70 px-3 py-2.5 shadow-[0_6px_24px_rgba(0,0,0,0.24)]">
+      <summary className="list-none cursor-pointer select-none">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-sm text-zinc-200 font-medium">{title}</span>
-          <span className="text-2xs text-zinc-400">
+          <span className="text-xs text-zinc-100 font-semibold tracking-wide">{title}</span>
+          <span className="text-[10px] text-zinc-400 rounded-full border border-white/10 px-1.5 py-0.5">
             {selected.length ? `Выбрано: ${selected.length}` : 'Все'}
           </span>
         </div>
       </summary>
-      <div className="mt-3 space-y-2 max-h-52 overflow-auto pr-1">
+      <div className="mt-2.5 space-y-1.5 max-h-56 overflow-auto pr-1">
         {options.length ? options.map((option) => {
           const id = String(option.id);
           const checked = selected.includes(id);
           return (
             <label
               key={id}
-              className="flex items-start gap-2 rounded-lg border border-white/5 p-2 hover:bg-white/5 cursor-pointer"
+              className="flex items-start gap-2 rounded-lg border border-white/5 px-2 py-1.5 hover:bg-white/[0.06] cursor-pointer"
             >
               <input
                 type="checkbox"
@@ -237,18 +237,18 @@ function MultiSelectFilter({
                 onChange={() => onToggle(id)}
                 className="mt-1 rounded border-zinc-600 text-sky-500"
               />
-              <span className="text-sm text-zinc-200">{getOptionLabel(option)}</span>
+              <span className="text-xs text-zinc-200 leading-tight">{getOptionLabel(option)}</span>
             </label>
           );
         }) : (
-          <p className="text-zinc-500 text-sm">Нет вариантов для выбора</p>
+          <p className="text-zinc-500 text-xs">Нет вариантов для выбора</p>
         )}
       </div>
       {!!selected.length && (
         <button
           type="button"
           onClick={onClear}
-          className="mt-3 text-2xs text-sky-400 hover:text-sky-300"
+          className="mt-2 text-[10px] text-sky-400 hover:text-sky-300"
         >
           Сбросить выбор
         </button>
@@ -1460,9 +1460,9 @@ export default function ObjectsOverview() {
         {groupedRows.map((systemRow) => (
           <div
             key={systemRow.key}
-            className={`rounded-md border border-white/10 bg-white/[0.02] ${compact ? 'p-1 space-y-0.5' : 'p-1.5 space-y-1'}`}
+            className={`rounded-md border border-white/10 bg-black/20 ${compact ? 'p-1 space-y-0.5' : 'p-1.5 space-y-1'}`}
           >
-            <p className={`${compact ? 'text-[9px]' : 'text-[10px]'} text-zinc-200 font-semibold`}>{systemRow.systemName}</p>
+            <p className={`${compact ? 'text-[9px]' : 'text-[10px]'} text-zinc-200 font-semibold tracking-wide`}>{systemRow.systemName}</p>
             {systemRow.categories.map((categoryRow) => (
               <div key={categoryRow.key} className={`${compact ? 'space-y-0.5' : 'space-y-1'}`}>
                 <p className={`${compact ? 'text-[8px]' : 'text-[9px]'} text-zinc-400`}>{categoryRow.categoryName}</p>
@@ -1598,19 +1598,19 @@ export default function ObjectsOverview() {
     return (
       <div
         key={floor.id}
-        className={`rounded-lg border border-white/10 bg-black/20 ${compact ? 'p-2.5' : 'p-2'} space-y-1.5`}
+        className={`rounded-lg border border-white/10 bg-zinc-900/70 ${compact ? 'p-2.5' : 'p-2'} space-y-1.5 shadow-[0_4px_14px_rgba(0,0,0,0.2)]`}
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
             onClick={() => toggleFloorCollapse(floor.id)}
-            className="text-zinc-100 text-xs font-semibold hover:text-white text-left"
+            className="text-zinc-100 text-xs font-semibold hover:text-white text-left tracking-wide"
             title={isCollapsed ? 'Развернуть этаж' : 'Свернуть этаж'}
           >
             Этаж {floor.name}
           </button>
           <div className="flex flex-wrap items-center justify-end gap-1.5">
-            <span className="text-2xs text-zinc-400">
+            <span className="text-[10px] text-zinc-400">
               Квартир: {regularApartments.length} · Помещений: {floorRooms}
             </span>
             {floorStatusStats.map((row) => (
@@ -1632,15 +1632,15 @@ export default function ObjectsOverview() {
           (regularApartments.length || floorOnlyRooms.length) ? (
             <div className="space-y-2">
               {floorOnlyRooms.length ? (
-                <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5">
-                  <p className="text-zinc-200 text-2xs font-medium">{FLOOR_ROOMS_DISPLAY_TITLE}</p>
+                <div className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5">
+                  <p className="text-zinc-200 text-[10px] font-medium">{FLOOR_ROOMS_DISPLAY_TITLE}</p>
                   <div className="mt-1 space-y-1.5">
                     {floorOnlyRooms.map((room) => (
                       <div
                         key={room.id}
                         className="rounded border border-white/10 bg-black/20 px-2 py-1.5"
                       >
-                        <p className="text-zinc-200 text-2xs font-medium">Пом. {room.name}</p>
+                        <p className="text-zinc-200 text-[10px] font-medium">Пом. {room.name}</p>
                         {renderLocationBlocks('room', room.id)}
                       </div>
                     ))}
@@ -1649,8 +1649,8 @@ export default function ObjectsOverview() {
               ) : null}
 
               {regularApartments.length ? (
-                <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 space-y-1.5">
-                  <p className="text-zinc-200 text-2xs font-medium">Квартиры на этаже</p>
+                <div className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5 space-y-1.5">
+                  <p className="text-zinc-200 text-[10px] font-medium">Квартиры на этаже</p>
                   {regularApartments.map((apartment) => {
                     const apartmentRoomsRaw = roomsByApartment.get(apartment.id) || [];
                     const apartmentRooms = slotFiltersActive
@@ -1658,7 +1658,7 @@ export default function ObjectsOverview() {
                       : apartmentRoomsRaw;
                     return (
                       <div key={apartment.id} className="rounded border border-white/10 bg-black/20 px-2 py-1.5">
-                        <p className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</p>
+                        <p className="text-zinc-200 text-[10px] font-medium">Кв. {apartment.name}</p>
                         {renderLocationBlocks('apartment', apartment.id)}
                         {apartmentRooms.length ? (
                           <div className="mt-1 space-y-1">
@@ -1701,7 +1701,7 @@ export default function ObjectsOverview() {
     }
 
     return (
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
         {filteredObjects.map((objectRow) => {
           const objectEntrancesRaw = (entrancesByObject.get(objectRow.id) || [])
             .filter((entry) => !entranceIdSet.size || entranceIdSet.has(entry.id));
@@ -1744,27 +1744,27 @@ export default function ObjectsOverview() {
           return (
             <article
               key={objectRow.id}
-              className={`rounded-2xl border border-sky-500/30 bg-gradient-to-b from-sky-950/30 to-black/20 p-4 space-y-3 ${blockSizeClass('object', objectScore)}`}
+              className={`rounded-2xl border border-sky-500/25 bg-gradient-to-br from-slate-900/95 via-sky-950/35 to-black/70 p-3 space-y-2.5 shadow-[0_12px_36px_rgba(0,0,0,0.28)] ${blockSizeClass('object', objectScore)}`}
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <h3 className="text-white font-semibold text-base">{objectRow.name}</h3>
+                <h3 className="text-white font-semibold text-sm tracking-wide">{objectRow.name}</h3>
                 <div className="flex flex-wrap gap-1">
-                  <span className="px-2 py-0.5 rounded-full text-2xs bg-emerald-500/20 text-emerald-300">
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                     Оборудование: {equipmentCount}
                   </span>
-                  <span className="px-2 py-0.5 rounded-full text-2xs bg-amber-500/20 text-amber-300">
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30">
                     Работы: {worksCount}
                   </span>
                 </div>
               </div>
 
-              <p className="text-zinc-400 text-2xs">
+              <p className="text-zinc-400 text-[11px]">
                 Подъезды: {objectEntrances.length} · Этажи: {floorCount} · Квартиры: {apartmentCount} · Помещения: {roomCount}
               </p>
               {!!entranceCountRows.length && (
                 <div className="flex flex-wrap gap-1.5">
                   {entranceCountRows.map((row) => (
-                    <span key={row.entranceId} className="px-2 py-0.5 rounded-full border border-emerald-500/35 bg-emerald-950/30 text-emerald-200 text-2xs">
+                    <span key={row.entranceId} className="px-1.5 py-0.5 rounded-full border border-emerald-500/35 bg-emerald-950/30 text-emerald-200 text-[10px]">
                       Подъезд {row.entranceName}: Кв. {row.apartmentsCount} · Пом. {row.roomsCount}
                     </span>
                   ))}
@@ -1772,7 +1772,7 @@ export default function ObjectsOverview() {
               )}
 
               {objectEntrances.length ? (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-3">
                   {objectEntrances.map((entry) => {
                     const entranceFloors = entry._visibleFloors || [];
                     const entranceTransits = transitsByEntrance.get(Number(entry.id)) || [];
@@ -1821,7 +1821,7 @@ export default function ObjectsOverview() {
                     return (
                       <section
                         key={entry.id}
-                        className={`rounded-xl border border-emerald-500/25 bg-emerald-950/20 p-3 space-y-2 ${blockSizeClass('entrance', entranceScore)}`}
+                        className={`rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-2.5 space-y-2 shadow-[0_6px_20px_rgba(0,0,0,0.22)] ${blockSizeClass('entrance', entranceScore)}`}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <button
@@ -1831,12 +1831,12 @@ export default function ObjectsOverview() {
                               name: entry.name,
                               objectName: objectRow.name,
                             })}
-                            className="text-emerald-200 text-sm font-medium hover:text-emerald-100 underline decoration-dotted underline-offset-2"
+                            className="text-emerald-200 text-xs font-semibold hover:text-emerald-100 underline decoration-dotted underline-offset-2"
                             title="Открыть подъезд на весь экран"
                           >
                             Подъезд {entry.name}
                           </button>
-                          <span className="text-2xs text-zinc-400">
+                          <span className="text-[10px] text-zinc-400">
                             Этажей: {entranceFloors.length} · Кв.: {entranceApartments} · Пом.: {entranceRooms}
                           </span>
                         </div>
@@ -1868,7 +1868,7 @@ export default function ObjectsOverview() {
                                       gridRow: `${locationRow.startRow} / ${locationRow.endRow}`,
                                     }}
                                   >
-                                    <p className="text-zinc-100 text-[10px] font-semibold leading-tight break-words">{title}</p>
+                                    <p className="text-zinc-100 text-[10px] font-semibold leading-tight break-words uppercase tracking-wide">{title}</p>
                                     <p className="text-zinc-400 text-[9px] leading-tight">{subtitle}</p>
                                     {blocks || <p className="text-zinc-500 text-[9px]">Блоки не добавлены</p>}
                                   </div>
@@ -1920,37 +1920,37 @@ export default function ObjectsOverview() {
   const activeSlot = editor.slotId ? slotById.get(editor.slotId) : null;
 
   return (
-    <div className="space-y-5">
-      <div>
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-white/10 bg-zinc-900/65 p-3 shadow-[0_8px_26px_rgba(0,0,0,0.24)]">
         <h2 className="page-title">Объекты</h2>
         {isProductionMode ? (
-          <p className="text-zinc-300 text-sm mt-1">
+          <p className="text-zinc-300 text-xs mt-1 leading-relaxed">
             Режим выработки: выберите блоки с материалом и назначьте сотрудника + статус для выработки, затем нажмите «Сохранить».
           </p>
         ) : (
-          <p className="text-zinc-400 text-sm mt-1">
+          <p className="text-zinc-400 text-xs mt-1 leading-relaxed">
             Блоки сгруппированы как в настройках объектов (Система → Категория). Клик по блоку открывает выбор статуса и исполнителя.
           </p>
         )}
       </div>
 
       {isProductionMode && (
-        <div className="rounded-xl border border-sky-500/30 bg-sky-950/20 p-3 space-y-2">
-          <p className="text-sky-200 text-sm font-medium">
+        <div className="rounded-xl border border-sky-500/30 bg-sky-950/20 p-3 space-y-2 shadow-[0_8px_24px_rgba(0,0,0,0.24)]">
+          <p className="text-sky-200 text-xs font-semibold tracking-wide">
             {productionMode.materialName || 'Материал'}{productionMode.materialCode ? ` (${productionMode.materialCode})` : ''}
           </p>
-          <p className="text-zinc-400 text-2xs">
+          <p className="text-zinc-400 text-[10px]">
             Система: {productionMode.materialSystemName || '—'}
             {' · '}
             Категория: {productionMode.materialCategoryName || '—'}
           </p>
-          <p className="text-zinc-300 text-xs">
+          <p className="text-zinc-300 text-[11px]">
             На руках: {Number(productionMode.availableQty || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {productionMode.unit}
             {' · '}Запланировано: {plannedProductionQty.toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {productionMode.unit}
             {' · '}Проведено: {productionCommittedQty.toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {productionMode.unit}
             {' · '}Останется: {productionRemainingPreview.toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {productionMode.unit}
           </p>
-          <p className="text-zinc-400 text-2xs">
+          <p className="text-zinc-400 text-[10px]">
             Сотрудники: {(productionMode.selectedWorkers || []).map((row) => row.label).join(', ') || '—'}
           </p>
           <div className="flex flex-wrap gap-2">
@@ -1979,73 +1979,75 @@ export default function ObjectsOverview() {
         <p className="text-emerald-300 text-xs">{productionMessage}</p>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-zinc-400 text-xs">
-          Фильтры по объектам, этажам и блокам
-        </p>
-        <button
-          type="button"
-          className="btn-secondary text-xs"
-          onClick={toggleAllFloors}
-          disabled={!visibleFloorIds.length}
-        >
-          {allVisibleFloorsCollapsed ? 'Развернуть все этажи' : 'Свернуть все этажи'}
-        </button>
-      </div>
+      <div className="rounded-2xl border border-white/10 bg-zinc-900/65 p-3 space-y-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.22)]">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-zinc-300 text-xs font-semibold tracking-wide">
+            Фильтры по объектам, этажам и блокам
+          </p>
+          <button
+            type="button"
+            className="btn-secondary text-xs"
+            onClick={toggleAllFloors}
+            disabled={!visibleFloorIds.length}
+          >
+            {allVisibleFloorsCollapsed ? 'Развернуть все этажи' : 'Свернуть все этажи'}
+          </button>
+        </div>
 
-      <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
-        <MultiSelectFilter
-          title="Фильтр объектов"
-          options={objectOptions}
-          selected={selectedObjects}
-          onToggle={(id) => setSelectedObjects((prev) => toggleSelection(prev, id))}
-          onClear={() => setSelectedObjects([])}
-          getOptionLabel={(option) => option.name}
-        />
-        <MultiSelectFilter
-          title="Фильтр подъездов"
-          options={entranceOptions}
-          selected={selectedEntrances}
-          onToggle={(id) => setSelectedEntrances((prev) => toggleSelection(prev, id))}
-          onClear={() => setSelectedEntrances([])}
-          getOptionLabel={(option) => (option._objectName ? `${option._objectName} → ${option.name}` : option.name)}
-        />
-        <MultiSelectFilter
-          title="Фильтр этажей"
-          options={floorOptions}
-          selected={selectedFloors}
-          onToggle={(id) => setSelectedFloors((prev) => toggleSelection(prev, id))}
-          onClear={() => setSelectedFloors([])}
-          getOptionLabel={(option) => (
-            option.objectName
-              ? `${option.objectName} → Подъезд ${option.entranceName || '—'} → Этаж ${option.name}`
-              : `Этаж ${option.name}`
-          )}
-        />
-        <MultiSelectFilter
-          title="Фильтр систем"
-          options={systemOptions}
-          selected={selectedSystems}
-          onToggle={(id) => setSelectedSystems((prev) => toggleSelection(prev, id))}
-          onClear={() => setSelectedSystems([])}
-          getOptionLabel={(option) => option.name}
-        />
-        <MultiSelectFilter
-          title="Фильтр категорий"
-          options={categoryOptions}
-          selected={selectedCategories}
-          onToggle={(id) => setSelectedCategories((prev) => toggleSelection(prev, id))}
-          onClear={() => setSelectedCategories([])}
-          getOptionLabel={(option) => option.name}
-        />
-        <MultiSelectFilter
-          title="Фильтр статусов"
-          options={statusOptions}
-          selected={selectedStatuses}
-          onToggle={(id) => setSelectedStatuses((prev) => toggleSelection(prev, id))}
-          onClear={() => setSelectedStatuses([])}
-          getOptionLabel={(option) => option.name}
-        />
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+          <MultiSelectFilter
+            title="Фильтр объектов"
+            options={objectOptions}
+            selected={selectedObjects}
+            onToggle={(id) => setSelectedObjects((prev) => toggleSelection(prev, id))}
+            onClear={() => setSelectedObjects([])}
+            getOptionLabel={(option) => option.name}
+          />
+          <MultiSelectFilter
+            title="Фильтр подъездов"
+            options={entranceOptions}
+            selected={selectedEntrances}
+            onToggle={(id) => setSelectedEntrances((prev) => toggleSelection(prev, id))}
+            onClear={() => setSelectedEntrances([])}
+            getOptionLabel={(option) => (option._objectName ? `${option._objectName} → ${option.name}` : option.name)}
+          />
+          <MultiSelectFilter
+            title="Фильтр этажей"
+            options={floorOptions}
+            selected={selectedFloors}
+            onToggle={(id) => setSelectedFloors((prev) => toggleSelection(prev, id))}
+            onClear={() => setSelectedFloors([])}
+            getOptionLabel={(option) => (
+              option.objectName
+                ? `${option.objectName} → Подъезд ${option.entranceName || '—'} → Этаж ${option.name}`
+                : `Этаж ${option.name}`
+            )}
+          />
+          <MultiSelectFilter
+            title="Фильтр систем"
+            options={systemOptions}
+            selected={selectedSystems}
+            onToggle={(id) => setSelectedSystems((prev) => toggleSelection(prev, id))}
+            onClear={() => setSelectedSystems([])}
+            getOptionLabel={(option) => option.name}
+          />
+          <MultiSelectFilter
+            title="Фильтр категорий"
+            options={categoryOptions}
+            selected={selectedCategories}
+            onToggle={(id) => setSelectedCategories((prev) => toggleSelection(prev, id))}
+            onClear={() => setSelectedCategories([])}
+            getOptionLabel={(option) => option.name}
+          />
+          <MultiSelectFilter
+            title="Фильтр статусов"
+            options={statusOptions}
+            selected={selectedStatuses}
+            onToggle={(id) => setSelectedStatuses((prev) => toggleSelection(prev, id))}
+            onClear={() => setSelectedStatuses([])}
+            getOptionLabel={(option) => option.name}
+          />
+        </div>
       </div>
 
       {!!(
@@ -2056,12 +2058,12 @@ export default function ObjectsOverview() {
         || selectedCategories.length
         || selectedStatuses.length
       ) && (
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-zinc-400 text-xs">Активные фильтры:</p>
+        <div className="rounded-xl border border-white/10 bg-zinc-900/55 px-3 py-2 flex flex-wrap items-center gap-1.5">
+          <p className="text-zinc-400 text-[10px] mr-1">Активные фильтры:</p>
           {selectedObjects.map((id) => {
             const objectName = objectOptions.find((o) => String(o.id) === id)?.name || id;
             return (
-              <span key={`obj-${id}`} className="px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 text-2xs">
+              <span key={`obj-${id}`} className="px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-300 text-[10px] border border-sky-500/30">
                 Объект: {objectName}
               </span>
             );
@@ -2070,7 +2072,7 @@ export default function ObjectsOverview() {
             const entrance = entranceOptions.find((o) => String(o.id) === id);
             const title = entrance ? (entrance._objectName ? `${entrance._objectName} → ${entrance.name}` : entrance.name) : id;
             return (
-              <span key={`ent-${id}`} className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 text-2xs">
+              <span key={`ent-${id}`} className="px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[10px] border border-emerald-500/30">
                 Подъезд: {title}
               </span>
             );
@@ -2081,7 +2083,7 @@ export default function ObjectsOverview() {
               ? `${floor.objectName ? `${floor.objectName} → ` : ''}Подъезд ${floor.entranceName || '—'} → Этаж ${floor.name}`
               : id;
             return (
-              <span key={`floor-${id}`} className="px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-300 text-2xs">
+              <span key={`floor-${id}`} className="px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-300 text-[10px] border border-violet-500/30">
                 Этаж: {title}
               </span>
             );
@@ -2089,7 +2091,7 @@ export default function ObjectsOverview() {
           {selectedSystems.map((id) => {
             const systemName = systemOptions.find((o) => String(o.id) === id)?.name || id;
             return (
-              <span key={`system-${id}`} className="px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 text-2xs">
+              <span key={`system-${id}`} className="px-1.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 text-[10px] border border-cyan-500/30">
                 Система: {systemName}
               </span>
             );
@@ -2097,7 +2099,7 @@ export default function ObjectsOverview() {
           {selectedCategories.map((id) => {
             const categoryName = categoryOptions.find((o) => String(o.id) === id)?.name || id;
             return (
-              <span key={`category-${id}`} className="px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 text-2xs">
+              <span key={`category-${id}`} className="px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 text-[10px] border border-indigo-500/30">
                 Категория: {categoryName}
               </span>
             );
@@ -2105,14 +2107,14 @@ export default function ObjectsOverview() {
           {selectedStatuses.map((id) => {
             const statusName = statusOptions.find((o) => String(o.id) === id)?.name || id;
             return (
-              <span key={`status-${id}`} className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-2xs">
+              <span key={`status-${id}`} className="px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-[10px] border border-amber-500/30">
                 Статус: {statusName}
               </span>
             );
           })}
           <button
             type="button"
-            className="text-2xs text-zinc-400 hover:text-white"
+            className="text-[10px] text-zinc-400 hover:text-white ml-auto"
             onClick={() => {
               setSelectedObjects([]);
               setSelectedEntrances([]);
@@ -2127,22 +2129,22 @@ export default function ObjectsOverview() {
         </div>
       )}
 
-      <div className="rounded-xl border border-white/10 bg-surface-850/80 p-3 space-y-2">
+      <div className="rounded-xl border border-white/10 bg-zinc-900/70 p-3 space-y-2 shadow-[0_8px_24px_rgba(0,0,0,0.2)]">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-white text-sm font-semibold">Нужно для завершения</h3>
-          <span className="text-zinc-400 text-2xs">
+          <h3 className="text-white text-xs font-semibold tracking-wide uppercase">Нужно для завершения</h3>
+          <span className="text-zinc-400 text-[10px]">
             Позиции: {needSummaryRows.length}
           </span>
         </div>
         {needSummaryBySystemCategory.length ? (
           <div className="space-y-2 max-h-[26rem] overflow-auto pr-1">
             {needSummaryBySystemCategory.map((group) => (
-              <section key={group.key} className="rounded-lg border border-white/10 bg-black/20 p-2 space-y-1.5">
-                <p className="text-zinc-200 text-2xs font-semibold">
+              <section key={group.key} className="rounded-lg border border-white/10 bg-black/25 p-2 space-y-1.5">
+                <p className="text-zinc-200 text-[10px] font-semibold tracking-wide">
                   {group.systemName} · {group.categoryName}
                 </p>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs table-fixed">
+                  <table className="w-full text-[11px] table-fixed">
                     <colgroup>
                       <col style={{ width: '30%' }} />
                       <col style={{ width: '14%' }} />
@@ -2168,7 +2170,7 @@ export default function ObjectsOverview() {
                           ? `${row.materialName} (${row.materialUnit})`
                           : row.materialName;
                         return (
-                          <tr key={row.materialId} className="border-b border-white/5 last:border-b-0">
+                          <tr key={row.materialId} className="border-b border-white/5 last:border-b-0 hover:bg-white/[0.03]">
                             <td className="py-1.5 pr-2 text-zinc-200 truncate" title={nameWithUnit}>
                               {nameWithUnit}
                             </td>

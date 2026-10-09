@@ -112,7 +112,7 @@ function SystemSquare({
         }
         onOpen(slot);
       }}
-      className={`relative w-20 h-20 rounded-md border p-1.5 text-left transition hover:bg-white/10 ${incomplete ? 'border-rose-500/70 bg-rose-950/35 text-rose-100' : 'border-white/15 bg-zinc-900/60 text-zinc-100'} ${selectionMode ? (selected ? 'ring-2 ring-white/70' : 'ring-1 ring-white/25') : ''}`}
+      className={`relative w-[4.25rem] h-[4.25rem] rounded-md border p-1.5 text-left transition hover:bg-white/10 shadow-[0_4px_10px_rgba(0,0,0,0.18)] ${incomplete ? 'border-rose-500/70 bg-rose-950/35 text-rose-100' : 'border-white/15 bg-zinc-900/70 text-zinc-100'} ${selectionMode ? (selected ? 'ring-2 ring-white/70' : 'ring-1 ring-white/25') : ''}`}
       title={tooltip}
     >
       {selectionMode && (
@@ -123,7 +123,7 @@ function SystemSquare({
       )}
       <div className="flex h-full flex-col justify-between">
         <div className="space-y-0.5">
-          <p className="text-[9px] font-semibold leading-tight truncate">{slot.system_name}</p>
+          <p className="text-[8px] font-semibold leading-tight truncate tracking-wide">{slot.system_name}</p>
           <p className="text-[8px] text-zinc-400 leading-tight truncate">{slot.category_name || 'Без категории'}</p>
         </div>
         <div className="space-y-0.5">
@@ -138,21 +138,23 @@ function SystemSquare({
 function MultiSelectFilter({ label, options, selectedValues, onToggle }) {
   const selectedCount = selectedValues.length;
   return (
-    <details className="filter-field relative w-full sm:w-56">
-      <summary className="input cursor-pointer list-none">
+    <details className="filter-field relative w-full sm:w-56 rounded-lg border border-white/10 bg-zinc-900/70 px-2.5 py-2">
+      <summary className="cursor-pointer list-none select-none">
         <span className="inline-flex w-full items-center justify-between gap-2">
-          <span className="truncate">{label}</span>
-          <span className="text-zinc-500 text-2xs">{selectedCount ? `${selectedCount}` : '▼'}</span>
+          <span className="truncate text-xs text-zinc-200 font-medium">{label}</span>
+          <span className="text-zinc-500 text-[10px] rounded-full border border-white/10 px-1.5 py-0.5">
+            {selectedCount ? `${selectedCount}` : '▼'}
+          </span>
         </span>
       </summary>
-      <div className="absolute z-30 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-white/10 bg-surface-900 p-2 shadow-xl">
+      <div className="absolute left-0 right-0 z-30 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-white/10 bg-surface-900 p-2 shadow-xl">
         {options.length === 0 && (
           <p className="px-1 py-1 text-2xs text-zinc-500">Нет вариантов</p>
         )}
         {options.map((option) => (
           <label
             key={option.value}
-            className="flex items-center gap-2 px-1 py-1.5 text-2xs text-zinc-200 hover:bg-white/5 rounded"
+            className="flex items-center gap-2 px-1 py-1.5 text-[11px] text-zinc-200 hover:bg-white/5 rounded"
           >
             <input
               type="checkbox"
@@ -1228,7 +1230,7 @@ export default function ObjectSettingsTabRefactored() {
         <button
           type="button"
           onClick={() => handleCopyLocationBlocks(locationKind, locationId, title)}
-          className="px-2 py-0.5 rounded border border-white/15 text-[10px] text-zinc-200 hover:bg-white/10"
+          className="px-1.5 py-0.5 rounded border border-white/15 text-[9px] text-zinc-200 hover:bg-white/10"
           disabled={!!pasteBusyKey || slotBusy}
         >
           Копировать все блоки
@@ -1237,7 +1239,7 @@ export default function ObjectSettingsTabRefactored() {
           <button
             type="button"
             onClick={() => handleStartMultiCopySelection(locationKind, locationId)}
-            className="px-2 py-0.5 rounded border border-indigo-400/40 text-[10px] text-indigo-200 hover:bg-indigo-900/30"
+            className="px-1.5 py-0.5 rounded border border-indigo-400/40 text-[9px] text-indigo-200 hover:bg-indigo-900/30"
             disabled={!!pasteBusyKey || slotBusy || blockCount === 0}
           >
             Копировать несколько
@@ -1247,7 +1249,7 @@ export default function ObjectSettingsTabRefactored() {
             <button
               type="button"
               onClick={() => handleCopySelectedBlocks(locationKind, locationId, title)}
-              className="px-2 py-0.5 rounded border border-indigo-300/60 text-[10px] text-indigo-100 hover:bg-indigo-900/40 disabled:opacity-40"
+              className="px-1.5 py-0.5 rounded border border-indigo-300/60 text-[9px] text-indigo-100 hover:bg-indigo-900/40 disabled:opacity-40"
               disabled={!!pasteBusyKey || slotBusy || selectedCount === 0}
             >
               Копировать ({selectedCount})
@@ -1255,7 +1257,7 @@ export default function ObjectSettingsTabRefactored() {
             <button
               type="button"
               onClick={handleCancelMultiCopySelection}
-              className="px-2 py-0.5 rounded border border-white/20 text-[10px] text-zinc-300 hover:bg-white/10"
+              className="px-1.5 py-0.5 rounded border border-white/20 text-[9px] text-zinc-300 hover:bg-white/10"
               disabled={!!pasteBusyKey || slotBusy}
             >
               Отмена выбора
@@ -1266,7 +1268,7 @@ export default function ObjectSettingsTabRefactored() {
           <button
             type="button"
             onClick={() => handlePasteLocationBlocks(locationKind, locationId, title)}
-            className="px-2 py-0.5 rounded border border-sky-400/40 text-[10px] text-sky-200 hover:bg-sky-900/30"
+            className="px-1.5 py-0.5 rounded border border-sky-400/40 text-[9px] text-sky-200 hover:bg-sky-900/30"
             disabled={!!pasteBusyKey || slotBusy}
           >
             {locationBusy ? 'Вставка…' : 'Вставить блоки'}
@@ -1275,7 +1277,7 @@ export default function ObjectSettingsTabRefactored() {
         <button
           type="button"
           onClick={() => handleDeleteLocationBlocks(locationKind, locationId, title)}
-          className="px-2 py-0.5 rounded border border-rose-400/40 text-[10px] text-rose-200 hover:bg-rose-900/30 disabled:opacity-40"
+          className="px-1.5 py-0.5 rounded border border-rose-400/40 text-[9px] text-rose-200 hover:bg-rose-900/30 disabled:opacity-40"
           disabled={!!pasteBusyKey || slotBusy || blockCount === 0}
         >
           Удалить блоки
@@ -1340,15 +1342,15 @@ export default function ObjectSettingsTabRefactored() {
       .sort((a, b) => naturalCompare(a.systemName, b.systemName));
 
     return (
-      <div className="space-y-2">
-        <div className="space-y-2">
+      <div className="space-y-1.5">
+        <div className="space-y-1.5">
           {groupedRows.map((systemRow) => (
-            <div key={systemRow.systemKey} className="rounded-md border border-white/10 bg-black/20 p-1.5 space-y-1.5">
-              <p className="text-[10px] text-zinc-200 font-semibold">{systemRow.systemName}</p>
+            <div key={systemRow.systemKey} className="rounded-md border border-white/10 bg-black/20 p-1.5 space-y-1">
+              <p className="text-[10px] text-zinc-200 font-semibold tracking-wide">{systemRow.systemName}</p>
               {systemRow.categories.map((categoryRow) => (
-                <div key={`${systemRow.systemName}:${categoryRow.categoryName}`} className="space-y-1">
-                  <p className="text-[10px] text-zinc-400">{categoryRow.categoryName}</p>
-                  <div className="flex flex-wrap items-center gap-2">
+                <div key={`${systemRow.systemName}:${categoryRow.categoryName}`} className="space-y-0.5">
+                  <p className="text-[9px] text-zinc-400">{categoryRow.categoryName}</p>
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {categoryRow.items.map(({ slot, entries, entryNames, completeness }) => {
                       const selectedForMultiCopy = selectingMultiple && multiCopySelectedSlotIds.includes(String(slot.id));
                       return (
@@ -1412,16 +1414,18 @@ export default function ObjectSettingsTabRefactored() {
   if (loading) return <p className="text-zinc-500 text-sm">Загрузка настроек объектов…</p>;
 
   return (
-    <div className="space-y-4">
-      <p className="text-zinc-400 text-sm">
-        План монтажа по объектам: добавляйте системы в квартиры и помещения, затем в каждой системе фиксируйте нужные позиции и количество. Можно создавать одинаковые блоки, копировать отдельный блок, а также все блоки помещения или этажа.
-      </p>
+    <div className="space-y-3.5">
+      <div className="rounded-2xl border border-white/10 bg-zinc-900/65 p-3 shadow-[0_8px_24px_rgba(0,0,0,0.24)]">
+        <p className="text-zinc-300 text-xs leading-relaxed">
+          План монтажа по объектам: добавляйте системы в квартиры и помещения, затем в каждой системе фиксируйте нужные позиции и количество. Можно создавать одинаковые блоки, копировать отдельный блок, а также все блоки помещения или этажа.
+        </p>
+      </div>
       {error && <p className="text-rose-400 text-sm">{error}</p>}
       {notice && <p className="text-emerald-300 text-sm">{notice}</p>}
 
-      <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
-        <p className="text-zinc-200 text-sm font-medium">Фильтры блоков</p>
-        <div className="flex flex-wrap gap-2">
+      <div className="rounded-xl border border-white/10 bg-zinc-900/65 p-3 space-y-2 shadow-[0_8px_24px_rgba(0,0,0,0.2)]">
+        <p className="text-zinc-200 text-xs font-semibold tracking-wide uppercase">Фильтры блоков</p>
+        <div className="flex flex-wrap gap-1.5">
           <MultiSelectFilter
             label="Система"
             options={systemFilterOptions}
@@ -1449,7 +1453,7 @@ export default function ObjectSettingsTabRefactored() {
           {hasSlotFilters && (
             <button
               type="button"
-              className="btn-ghost text-sm"
+              className="btn-ghost text-xs"
               onClick={() => {
                 setSelectedSystemIds([]);
                 setSelectedCategoryIds([]);
@@ -1463,7 +1467,7 @@ export default function ObjectSettingsTabRefactored() {
         </div>
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-3">
         {sortedObjects.map((obj) => {
           const objectEntrances = entrancesByObject.get(obj.id) || [];
           const objectSummary = objectSummaryById.get(obj.id) || { entries: [], totalQty: 0 };
@@ -1481,23 +1485,23 @@ export default function ObjectSettingsTabRefactored() {
             ]))
             .sort((a, b) => naturalCompare(a[0], b[0]));
           return (
-            <article key={obj.id} className="rounded-2xl border border-sky-500/25 bg-sky-950/20 p-4 space-y-3">
+            <article key={obj.id} className="rounded-2xl border border-sky-500/20 bg-gradient-to-br from-slate-900/95 via-sky-950/30 to-black/70 p-3 space-y-2.5 shadow-[0_10px_28px_rgba(0,0,0,0.26)]">
               <div className="space-y-1">
-                <h3 className="text-white font-semibold">{obj.name}</h3>
-                <p className="text-zinc-400 text-xs">
+                <h3 className="text-white font-semibold text-sm tracking-wide">{obj.name}</h3>
+                <p className="text-zinc-400 text-[11px]">
                   Позиции: {objectSummary.entries.length} / {formatQty(objectSummary.totalQty)}
                 </p>
               </div>
 
               {!!objectSummary.entries.length && (
-                <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                  <p className="text-zinc-300 text-xs mb-1">Позиции для завершения</p>
+                <div className="rounded-lg border border-white/10 bg-black/25 p-2">
+                  <p className="text-zinc-300 text-[11px] mb-1 font-medium">Позиции для завершения</p>
                   <div className="space-y-2 max-h-48 overflow-auto pr-1">
                     {summarySystemGroups.map(([systemName, rows]) => (
                       <div key={systemName} className="rounded border border-white/10 bg-white/[0.02] p-1.5 space-y-1">
-                        <p className="text-zinc-300 text-2xs font-semibold">{systemName}</p>
+                        <p className="text-zinc-300 text-[10px] font-semibold tracking-wide">{systemName}</p>
                         {rows.map((row) => (
-                          <div key={row.key} className="text-[11px] text-zinc-200 flex items-center justify-between gap-2">
+                          <div key={row.key} className="text-[10px] text-zinc-200 flex items-center justify-between gap-2">
                             <span className="truncate">
                               {row.name} — <span className="text-zinc-400">{formatQty(row.quantity)}{row.unit ? ` ${row.unit}` : ''}</span>
                             </span>
@@ -1517,7 +1521,7 @@ export default function ObjectSettingsTabRefactored() {
               )}
 
               {objectEntrances.length ? (
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-2.5 md:grid-cols-2">
                   {objectEntrances.map((entrance) => {
                     const entranceFloors = floorsByEntrance.get(entrance.id) || [];
                     const entranceTransits = transitsByEntrance.get(entrance.id) || [];
@@ -1546,8 +1550,8 @@ export default function ObjectSettingsTabRefactored() {
                         return slots.some((slot) => slotMatchesFilters(slot));
                       });
                     return (
-                      <section key={entrance.id} className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-3 space-y-2">
-                        <p className="text-emerald-200 text-sm font-medium">Подъезд {entrance.name}</p>
+                      <section key={entrance.id} className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-2.5 space-y-2 shadow-[0_6px_18px_rgba(0,0,0,0.22)]">
+                        <p className="text-emerald-200 text-xs font-semibold tracking-wide">Подъезд {entrance.name}</p>
                         {entranceFloors.length ? (
                           <div className="min-w-0 overflow-x-auto">
                             <div
@@ -1567,7 +1571,7 @@ export default function ObjectSettingsTabRefactored() {
                                 return (
                                   <div
                                     key={`${locationRow._kind}:${locationRow.id}`}
-                                    className={`rounded-lg border px-2 py-2 space-y-1.5 ${
+                                    className={`rounded-lg border px-1.5 py-1.5 space-y-1 ${
                                       locationHasBlocks
                                         ? 'border-white/10 bg-black/20'
                                         : 'border-rose-500/45 bg-rose-950/15'
@@ -1577,8 +1581,8 @@ export default function ObjectSettingsTabRefactored() {
                                       gridRow: `${locationRow.startRow} / ${locationRow.endRow}`,
                                     }}
                                   >
-                                    <p className="text-zinc-100 text-[11px] font-semibold leading-tight break-words">{locationTitle}</p>
-                                    <p className="text-zinc-400 text-[10px] leading-tight">{locationRange}</p>
+                                    <p className="text-zinc-100 text-[10px] font-semibold leading-tight break-words uppercase tracking-wide">{locationTitle}</p>
+                                    <p className="text-zinc-400 text-[9px] leading-tight">{locationRange}</p>
                                     {renderLocationActions(locationRow._kind, locationRow.id, locationTitle)}
                                     {squares}
                                   </div>
@@ -1619,11 +1623,11 @@ export default function ObjectSettingsTabRefactored() {
                                           : 'border-rose-500/50 bg-rose-950/20'
                                       }`}
                                     >
-                                      <div className="flex flex-wrap items-center gap-2">
+                                      <div className="flex flex-wrap items-center gap-1.5">
                                         <button
                                           type="button"
                                           onClick={() => toggleFloor(floor.id)}
-                                          className="text-zinc-100 text-xs font-semibold hover:text-white"
+                                          className="text-zinc-100 text-xs font-semibold hover:text-white tracking-wide"
                                         >
                                           Этаж {floor.name}
                                         </button>
@@ -1652,8 +1656,8 @@ export default function ObjectSettingsTabRefactored() {
                                       {!collapsed && (
                                         <div className="space-y-2">
                                           {floorRooms.length ? (
-                                            <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 space-y-1.5">
-                                              <p className="text-zinc-200 text-2xs font-medium">Помещения на этаже</p>
+                                            <div className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5 space-y-1.5">
+                                              <p className="text-zinc-200 text-[10px] font-medium">Помещения на этаже</p>
                                               {floorRooms.map((room) => (
                                                 (() => {
                                                   const roomSquares = renderSystemSquares('room', room.id, `Пом. ${room.name}`);
@@ -1668,7 +1672,7 @@ export default function ObjectSettingsTabRefactored() {
                                                           : 'border-rose-500/50 bg-rose-950/20'
                                                       }`}
                                                     >
-                                                      <p className="text-zinc-200 text-2xs font-medium">Пом. {room.name}</p>
+                                                      <p className="text-zinc-200 text-[10px] font-medium">Пом. {room.name}</p>
                                                       {renderLocationActions('room', room.id, `Пом. ${room.name}`)}
                                                       {roomSquares}
                                                     </div>
@@ -1679,8 +1683,8 @@ export default function ObjectSettingsTabRefactored() {
                                           ) : null}
 
                                           {floorApartments.length ? (
-                                            <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 space-y-1.5">
-                                              <p className="text-zinc-200 text-2xs font-medium">Квартиры на этаже</p>
+                                            <div className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5 space-y-1.5">
+                                              <p className="text-zinc-200 text-[10px] font-medium">Квартиры на этаже</p>
                                               {floorApartments.map((apartment) => (
                                                 (() => {
                                                   const apartmentSquares = renderSystemSquares('apartment', apartment.id, `Кв. ${apartment.name}`);
@@ -1717,7 +1721,7 @@ export default function ObjectSettingsTabRefactored() {
                                                           : 'border-rose-500/50 bg-rose-950/20'
                                                       }`}
                                                     >
-                                                      <p className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</p>
+                                                      <p className="text-zinc-200 text-[10px] font-medium">Кв. {apartment.name}</p>
                                                       {apartmentSquares && (
                                                         <>
                                                           {renderLocationActions('apartment', apartment.id, `Кв. ${apartment.name}`)}
