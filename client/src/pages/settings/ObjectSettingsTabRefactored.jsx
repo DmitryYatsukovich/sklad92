@@ -15,6 +15,12 @@ function formatQty(value) {
   return Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 });
 }
 
+function parseDecimalInput(value) {
+  const normalized = String(value ?? '').trim().replace(',', '.');
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
 function floorSortRank(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
@@ -1361,7 +1367,7 @@ export default function ObjectSettingsTabRefactored() {
     const systemId = Number.parseInt(cableDraft.systemId, 10);
     const categoryId = cableDraft.categoryId === '' ? null : Number.parseInt(cableDraft.categoryId, 10);
     const name = String(cableDraft.name || '').trim();
-    const lengthM = Number.parseFloat(cableDraft.lengthM);
+    const lengthM = parseDecimalInput(cableDraft.lengthM);
     if (!systemId) return setError('Выберите систему кабельной линии');
     if (cableDraft.categoryId !== '' && !categoryId) return setError('Выберите корректную категорию');
     if (!fromSlotId || !toSlotId) return setError('Выберите два блока для кабельной линии');
@@ -1425,7 +1431,7 @@ export default function ObjectSettingsTabRefactored() {
     const systemId = Number.parseInt(cableEditDraft.systemId, 10);
     const categoryId = cableEditDraft.categoryId === '' ? null : Number.parseInt(cableEditDraft.categoryId, 10);
     const name = String(cableEditDraft.name || '').trim();
-    const lengthM = Number.parseFloat(cableEditDraft.lengthM);
+    const lengthM = parseDecimalInput(cableEditDraft.lengthM);
     if (!transitId || !fromSlotId || !toSlotId || !systemId || !name || !Number.isFinite(lengthM) || lengthM <= 0) {
       return setError('Проверьте поля редактирования кабеля');
     }
@@ -1950,7 +1956,7 @@ export default function ObjectSettingsTabRefactored() {
       ? 'Выбор блока: ОТ'
       : (cablePickTarget === 'to' ? 'Выбор блока: ДО' : '');
     return (
-      <div className="rounded-md border border-cyan-400/25 bg-cyan-950/15 p-1.5 space-y-1.5">
+      <div className="relative z-30 rounded-md border border-cyan-400/25 bg-cyan-950/15 p-1.5 space-y-1.5">
         <div className="flex flex-wrap items-center gap-1">
           {!isActive ? (
             <button
@@ -2485,6 +2491,7 @@ export default function ObjectSettingsTabRefactored() {
                               {entranceOverlay?.paths?.length ? (
                                 <svg
                                   className="absolute left-0 top-0 z-20"
+                                  style={{ pointerEvents: activeCableTransitId ? 'none' : 'auto' }}
                                   width={entranceOverlay.width}
                                   height={entranceOverlay.height}
                                   viewBox={`0 0 ${entranceOverlay.width} ${entranceOverlay.height}`}
