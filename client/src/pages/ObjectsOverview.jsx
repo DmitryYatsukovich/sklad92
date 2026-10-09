@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { objectsView as objectsApi, operations as operationsApi } from '../api';
 
@@ -285,6 +285,8 @@ export default function ObjectsOverview() {
   const [selectedCategories, setSelectedCategories] = useState([]);
   const [selectedStatuses, setSelectedStatuses] = useState([]);
   const [collapsedFloors, setCollapsedFloors] = useState([]);
+  const [collapsedFloorSections, setCollapsedFloorSections] = useState({});
+  const seenFloorIdsRef = useRef(new Set());
   const [expandedEntrance, setExpandedEntrance] = useState(null);
   const [editor, setEditor] = useState({
     open: false,
@@ -992,7 +994,41 @@ export default function ObjectsOverview() {
     isFloorVisible,
   ]);
 
+  const collapseFloorInnerSections = useCallback((floorId) => {
+    const key = String(floorId);
+    setCollapsedFloorSections((prev) => ({
+      ...prev,
+      [key]: {
+        rooms: true,
+        apartments: true,
+      },
+    }));
+  }, []);
+  const toggleFloorSectionCollapse = useCallback((floorId, section) => {
+    const key = String(floorId);
+    setCollapsedFloorSections((prev) => {
+      const current = prev?.[key] && typeof prev[key] === 'object'
+        ? prev[key]
+        : { rooms: true, apartments: true };
+      return {
+        ...prev,
+        [key]: {
+          ...current,
+          [section]: !Boolean(current[section]),
+        },
+      };
+    });
+  }, []);
+  const isFloorSectionCollapsed = useCallback((floorId, section) => {
+    const key = String(floorId);
+    const state = collapsedFloorSections?.[key];
+    if (!state || typeof state !== 'object') return true;
+    return state[section] !== false;
+  }, [collapsedFloorSections]);
+
   const toggleFloorCollapse = (floorId) => {
+    const willExpand = collapsedFloorSet.has(Number(floorId));
+    if (willExpand) collapseFloorInnerSections(floorId);
     setCollapsedFloors((prev) => toggleSelection(prev, floorId));
   };
   const visibleFloorIds = useMemo(() => {
@@ -1013,9 +1049,31 @@ export default function ObjectsOverview() {
     return visibleFloorIds.every((floorId) => collapsedFloorSet.has(Number(floorId)));
   }, [visibleFloorIds, collapsedFloorSet]);
 
+  useEffect(() => {
+    if (!visibleFloorIds.length) return;
+    const unseenFloorIds = visibleFloorIds.filter((floorId) => !seenFloorIdsRef.current.has(Number(floorId)));
+    if (!unseenFloorIds.length) return;
+    unseenFloorIds.forEach((floorId) => seenFloorIdsRef.current.add(Number(floorId)));
+    setCollapsedFloors((prev) => {
+      const next = new Set(prev.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0));
+      unseenFloorIds.forEach((floorId) => next.add(Number(floorId)));
+      return [...next].map((id) => String(id));
+    });
+  }, [visibleFloorIds]);
+
   const toggleAllFloors = useCallback(() => {
     if (!visibleFloorIds.length) return;
     if (allVisibleFloorsCollapsed) {
+      setCollapsedFloorSections((prev) => {
+        const next = { ...(prev || {}) };
+        visibleFloorIds.forEach((floorId) => {
+          next[String(floorId)] = {
+            rooms: true,
+            apartments: true,
+          };
+        });
+        return next;
+      });
       setCollapsedFloors((prev) => prev.filter((id) => !visibleFloorIds.includes(Number(id))));
       return;
     }
@@ -1478,43 +1536,48 @@ export default function ObjectsOverview() {
             className={`rounded-md border border-white/10 bg-black/25 shadow-[0_4px_12px_rgba(0,0,0,0.2)] ${compact ? 'p-1 space-y-0.5' : 'p-1.5 space-y-1'}`}
           >
             <p className={`${compact ? 'text-[8px]' : 'text-[9px]'} text-zinc-200 font-semibold tracking-wide truncate`}>{systemRow.systemName}</p>
-            {systemRow.categories.map((categoryRow) => (
-              <div key={categoryRow.key} className={`${compact ? 'space-y-0.5' : 'space-y-1'}`}>
-                <p className={`${compact ? 'text-[7px]' : 'text-[8px]'} text-zinc-400 truncate`}>{categoryRow.categoryName}</p>
-                <div className={`flex flex-wrap items-start ${compact ? 'gap-0.5' : 'gap-1'}`}>
-                  {categoryRow.slots.map((slot) => {
-                    const entries = entriesBySlot.get(slot.id) || [];
-                    const draft = productionDrafts[slot.id] || null;
-                    const committed = productionCommitted[slot.id] || null;
-                    const activeStatusId = draft?.statusId ?? committed?.statusId ?? null;
-                    const activeStatus = activeStatusId == null ? null : productionStatusById.get(Number(activeStatusId));
-                    const activeWorkerNames = draft
-                      ? normalizeIdList(draft.workerUserIds).map((id) => productionWorkersById.get(id) || `#${id}`).filter(Boolean)
-                      : (committed?.workerNames || []);
-                    const activeStatusName = activeStatus?.name || committed?.statusName || '';
-                    const hasMaterialQty = productionMaterialEntryBySlot.has(Number(slot.id));
-                    const selectionCaption = draft
-                      ? [...activeWorkerNames, activeStatusName, 'черновик'].filter(Boolean).join(' · ')
-                      : committed
-                        ? [...activeWorkerNames, activeStatusName, 'выполнено'].filter(Boolean).join(' · ')
-                        : (isProductionMode && !hasMaterialQty ? 'Нет количества материала' : '');
-                    return (
-                    <LocationSlotChip
-                      key={slot.id}
-                      slot={slot}
-                      entries={entries}
-                      onOpen={handleProductionSlotClick}
-                      selected={!!draft || !!committed}
-                      selectionCaption={selectionCaption}
-                      selectionColor={activeStatus?.color || ''}
-                      disabled={isProductionMode && !hasMaterialQty && !committed}
-                      compact={compact}
-                    />
-                    );
-                  })}
+            <div className={compact ? 'space-y-0.5' : 'grid gap-1 sm:grid-cols-2 xl:grid-cols-3'}>
+              {systemRow.categories.map((categoryRow) => (
+                <div
+                  key={categoryRow.key}
+                  className={`${compact ? 'space-y-0.5' : 'rounded border border-white/10 bg-black/20 p-1 space-y-0.5'}`}
+                >
+                  <p className={`${compact ? 'text-[7px]' : 'text-[8px]'} text-zinc-400 truncate`}>{categoryRow.categoryName}</p>
+                  <div className={`flex flex-wrap items-start ${compact ? 'gap-0.5' : 'gap-1'}`}>
+                    {categoryRow.slots.map((slot) => {
+                      const entries = entriesBySlot.get(slot.id) || [];
+                      const draft = productionDrafts[slot.id] || null;
+                      const committed = productionCommitted[slot.id] || null;
+                      const activeStatusId = draft?.statusId ?? committed?.statusId ?? null;
+                      const activeStatus = activeStatusId == null ? null : productionStatusById.get(Number(activeStatusId));
+                      const activeWorkerNames = draft
+                        ? normalizeIdList(draft.workerUserIds).map((id) => productionWorkersById.get(id) || `#${id}`).filter(Boolean)
+                        : (committed?.workerNames || []);
+                      const activeStatusName = activeStatus?.name || committed?.statusName || '';
+                      const hasMaterialQty = productionMaterialEntryBySlot.has(Number(slot.id));
+                      const selectionCaption = draft
+                        ? [...activeWorkerNames, activeStatusName, 'черновик'].filter(Boolean).join(' · ')
+                        : committed
+                          ? [...activeWorkerNames, activeStatusName, 'выполнено'].filter(Boolean).join(' · ')
+                          : (isProductionMode && !hasMaterialQty ? 'Нет количества материала' : '');
+                      return (
+                        <LocationSlotChip
+                          key={slot.id}
+                          slot={slot}
+                          entries={entries}
+                          onOpen={handleProductionSlotClick}
+                          selected={!!draft || !!committed}
+                          selectionCaption={selectionCaption}
+                          selectionColor={activeStatus?.color || ''}
+                          disabled={isProductionMode && !hasMaterialQty && !committed}
+                          compact={compact}
+                        />
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         ))}
       </div>
@@ -1591,6 +1654,8 @@ export default function ObjectsOverview() {
     entranceStairwells = [],
   ) => {
     const isCollapsed = collapsedFloorSet.has(floor.id);
+    const roomsSectionCollapsed = isFloorSectionCollapsed(floor.id, 'rooms');
+    const apartmentsSectionCollapsed = isFloorSectionCollapsed(floor.id, 'apartments');
     const floorRoomsBucket = floorApartments.find((apartment) => apartment.name === FLOOR_ROOMS_BUCKET_NAME);
     const regularApartmentsRaw = floorApartments.filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME);
     const floorOnlyRoomsRaw = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
@@ -1648,25 +1713,41 @@ export default function ObjectsOverview() {
             <div className="space-y-2">
               {floorOnlyRooms.length ? (
                 <div className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                  <p className="text-zinc-200 text-[10px] font-semibold tracking-wide uppercase">{FLOOR_ROOMS_DISPLAY_TITLE}</p>
-                  <div className="mt-1 space-y-1.5">
-                    {floorOnlyRooms.map((room) => (
-                      <div
-                        key={room.id}
-                        className="rounded border border-white/10 bg-zinc-950/60 px-2 py-1.5 space-y-1"
-                      >
-                        <p className="text-zinc-200 text-[10px] font-semibold tracking-wide">Пом. {room.name}</p>
-                        {renderLocationBlocks('room', room.id)}
-                      </div>
-                    ))}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => toggleFloorSectionCollapse(floor.id, 'rooms')}
+                    className="w-full flex items-center justify-between gap-2 text-left text-zinc-200 text-[10px] font-semibold tracking-wide uppercase hover:text-white"
+                  >
+                    <span>{FLOOR_ROOMS_DISPLAY_TITLE}</span>
+                    <span className="text-[9px] text-zinc-400">{roomsSectionCollapsed ? 'Развернуть' : 'Свернуть'}</span>
+                  </button>
+                  {!roomsSectionCollapsed && (
+                    <div className="mt-1 space-y-1.5">
+                      {floorOnlyRooms.map((room) => (
+                        <div
+                          key={room.id}
+                          className="rounded border border-white/10 bg-zinc-950/60 px-2 py-1.5 space-y-1"
+                        >
+                          <p className="text-zinc-200 text-[10px] font-semibold tracking-wide">Пом. {room.name}</p>
+                          {renderLocationBlocks('room', room.id)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ) : null}
 
               {regularApartments.length ? (
                 <div className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5 space-y-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                  <p className="text-zinc-200 text-[10px] font-semibold tracking-wide uppercase">Квартиры на этаже</p>
-                  {regularApartments.map((apartment) => {
+                  <button
+                    type="button"
+                    onClick={() => toggleFloorSectionCollapse(floor.id, 'apartments')}
+                    className="w-full flex items-center justify-between gap-2 text-left text-zinc-200 text-[10px] font-semibold tracking-wide uppercase hover:text-white"
+                  >
+                    <span>Квартиры на этаже</span>
+                    <span className="text-[9px] text-zinc-400">{apartmentsSectionCollapsed ? 'Развернуть' : 'Свернуть'}</span>
+                  </button>
+                  {!apartmentsSectionCollapsed && regularApartments.map((apartment) => {
                     const apartmentRoomsRaw = roomsByApartment.get(apartment.id) || [];
                     const apartmentRooms = slotFiltersActive
                       ? apartmentRoomsRaw.filter((room) => hasVisibleLocationSlots('room', room.id))
