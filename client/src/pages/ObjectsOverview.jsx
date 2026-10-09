@@ -96,6 +96,15 @@ function getTextColorForHex(hex) {
   return yiq >= 150 ? '#111827' : '#F9FAFB';
 }
 
+function hexToRgba(hex, alpha) {
+  if (!/^#[0-9a-fA-F]{6}$/.test(String(hex || ''))) return `rgba(71,85,105,${alpha})`;
+  const cleanHex = hex.slice(1);
+  const r = Number.parseInt(cleanHex.slice(0, 2), 16);
+  const g = Number.parseInt(cleanHex.slice(2, 4), 16);
+  const b = Number.parseInt(cleanHex.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 function blockSizeClass(level, score) {
   if (level === 'object') {
     if (score >= 18) return 'xl:col-span-2 min-h-[24rem]';
@@ -152,9 +161,12 @@ function LocationSlotChip({
   compact = false,
 }) {
   const entryLines = entries.map(formatEntryLabel).filter(Boolean);
+  const visibleEntryLines = compact ? entryLines.slice(0, 2) : entryLines;
+  const hiddenEntriesCount = compact ? Math.max(0, entryLines.length - visibleEntryLines.length) : 0;
   const statusName = slot.status_name || 'Без статуса';
   const statusColor = slot.status_color || DEFAULT_STATUS_COLOR;
-  const backgroundColor = selectionColor || statusColor;
+  const accentColor = selectionColor || statusColor;
+  const textColor = getTextColorForHex(accentColor);
   const title = [
     `Система: ${slot.system_name || '—'}`,
     `Категория: ${slot.category_name || '—'}`,
@@ -168,37 +180,44 @@ function LocationSlotChip({
       onClick={() => onOpen?.(slot)}
       title={title}
       disabled={disabled}
-      className={`rounded border shadow-sm text-left transition-transform ${
+      className={`rounded-md border shadow-sm text-left transition-transform ${
         compact
-          ? 'p-1 min-h-[3.75rem] min-w-0 w-full max-w-none'
-          : 'p-1.5 min-h-[5.5rem] min-w-[12rem] max-w-[12rem]'
+          ? 'p-1 min-h-[3.45rem] min-w-0 w-full max-w-none'
+          : 'p-1.5 min-h-[5rem] min-w-[10.5rem] max-w-[11.5rem]'
       } ${
-        disabled ? 'opacity-55 cursor-not-allowed' : 'hover:scale-[1.01]'
+        disabled ? 'opacity-55 cursor-not-allowed' : 'hover:scale-[1.01] hover:shadow-[0_6px_20px_rgba(0,0,0,0.25)]'
       } ${
-        selected ? 'ring-2 ring-emerald-300/70 border-emerald-200/70' : 'border-black/20'
+        selected ? 'ring-2 ring-emerald-300/70 border-emerald-200/70' : 'border-black/30'
       }`}
       style={{
-        backgroundColor,
-        color: getTextColorForHex(backgroundColor),
+        backgroundColor: hexToRgba(accentColor, compact ? 0.3 : 0.38),
+        borderColor: hexToRgba(accentColor, 0.65),
+        color: textColor,
       }}
     >
       <span className={`block space-y-0.5 leading-tight ${compact ? 'break-words' : ''}`}>
-        <span className={`block font-semibold uppercase ${compact ? 'text-[8px]' : 'text-[9px]'}`}>
+        <span className={`block font-semibold uppercase tracking-wide ${compact ? 'text-[8px]' : 'text-[9px]'}`}>
           {slot.system_name || 'Система'}
           {slot.category_name ? ` · ${slot.category_name}` : ''}
         </span>
-        {entryLines.length ? (
-          entryLines.map((line, idx) => (
-            <span key={`${slot.id}-entry-${idx}`} className={`block ${compact ? 'text-[9px]' : 'text-[10px]'}`}>
+        {visibleEntryLines.length ? (
+          visibleEntryLines.map((line, idx) => (
+            <span key={`${slot.id}-entry-${idx}`} className={`block ${compact ? 'text-[8px]' : 'text-[10px]'} leading-tight`}>
               {line}
             </span>
           ))
         ) : (
-          <span className={`block opacity-90 ${compact ? 'text-[9px]' : 'text-[10px]'}`}>Нет материалов</span>
+          <span className={`block opacity-90 ${compact ? 'text-[8px]' : 'text-[10px]'}`}>Нет материалов</span>
+        )}
+        {hiddenEntriesCount > 0 && (
+          <span className="block text-[8px] opacity-85">+{hiddenEntriesCount} поз.</span>
         )}
         {selectionCaption ? (
           <span className={`block font-semibold pt-0.5 ${compact ? 'text-[8px]' : 'text-[9px]'}`}>{selectionCaption}</span>
         ) : null}
+        <span className="inline-flex mt-0.5 rounded-full border border-black/20 px-1 py-0.5 text-[8px] font-semibold uppercase">
+          {statusName}
+        </span>
       </span>
     </button>
   );
@@ -1460,13 +1479,13 @@ export default function ObjectsOverview() {
         {groupedRows.map((systemRow) => (
           <div
             key={systemRow.key}
-            className={`rounded-md border border-white/10 bg-black/20 ${compact ? 'p-1 space-y-0.5' : 'p-1.5 space-y-1'}`}
+            className={`rounded-md border border-white/10 bg-black/25 shadow-[0_4px_12px_rgba(0,0,0,0.2)] ${compact ? 'p-1 space-y-0.5' : 'p-1.5 space-y-1'}`}
           >
             <p className={`${compact ? 'text-[9px]' : 'text-[10px]'} text-zinc-200 font-semibold tracking-wide`}>{systemRow.systemName}</p>
             {systemRow.categories.map((categoryRow) => (
               <div key={categoryRow.key} className={`${compact ? 'space-y-0.5' : 'space-y-1'}`}>
                 <p className={`${compact ? 'text-[8px]' : 'text-[9px]'} text-zinc-400`}>{categoryRow.categoryName}</p>
-                <div className={`flex ${compact ? 'flex-col' : 'flex-wrap'} gap-1`}>
+                <div className={`grid ${compact ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3'} gap-1`}>
                   {categoryRow.slots.map((slot) => {
                     const entries = entriesBySlot.get(slot.id) || [];
                     const draft = productionDrafts[slot.id] || null;
@@ -1598,7 +1617,7 @@ export default function ObjectsOverview() {
     return (
       <div
         key={floor.id}
-        className={`rounded-lg border border-white/10 bg-zinc-900/70 ${compact ? 'p-2.5' : 'p-2'} space-y-1.5 shadow-[0_4px_14px_rgba(0,0,0,0.2)]`}
+        className={`rounded-lg border border-white/10 bg-zinc-900/70 ${compact ? 'p-2.5' : 'p-2'} space-y-1.5 shadow-[0_6px_16px_rgba(0,0,0,0.22)]`}
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <button
@@ -1610,7 +1629,7 @@ export default function ObjectsOverview() {
             Этаж {floor.name}
           </button>
           <div className="flex flex-wrap items-center justify-end gap-1.5">
-            <span className="text-[10px] text-zinc-400">
+            <span className="text-[10px] text-zinc-400 rounded-full border border-white/10 px-1.5 py-0.5">
               Квартир: {regularApartments.length} · Помещений: {floorRooms}
             </span>
             {floorStatusStats.map((row) => (
@@ -1632,15 +1651,15 @@ export default function ObjectsOverview() {
           (regularApartments.length || floorOnlyRooms.length) ? (
             <div className="space-y-2">
               {floorOnlyRooms.length ? (
-                <div className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5">
-                  <p className="text-zinc-200 text-[10px] font-medium">{FLOOR_ROOMS_DISPLAY_TITLE}</p>
+                <div className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                  <p className="text-zinc-200 text-[10px] font-semibold tracking-wide uppercase">{FLOOR_ROOMS_DISPLAY_TITLE}</p>
                   <div className="mt-1 space-y-1.5">
                     {floorOnlyRooms.map((room) => (
                       <div
                         key={room.id}
-                        className="rounded border border-white/10 bg-black/20 px-2 py-1.5"
+                        className="rounded border border-white/10 bg-zinc-950/60 px-2 py-1.5 space-y-1"
                       >
-                        <p className="text-zinc-200 text-[10px] font-medium">Пом. {room.name}</p>
+                        <p className="text-zinc-200 text-[10px] font-semibold tracking-wide">Пом. {room.name}</p>
                         {renderLocationBlocks('room', room.id)}
                       </div>
                     ))}
@@ -1649,22 +1668,22 @@ export default function ObjectsOverview() {
               ) : null}
 
               {regularApartments.length ? (
-                <div className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5 space-y-1.5">
-                  <p className="text-zinc-200 text-[10px] font-medium">Квартиры на этаже</p>
+                <div className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5 space-y-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                  <p className="text-zinc-200 text-[10px] font-semibold tracking-wide uppercase">Квартиры на этаже</p>
                   {regularApartments.map((apartment) => {
                     const apartmentRoomsRaw = roomsByApartment.get(apartment.id) || [];
                     const apartmentRooms = slotFiltersActive
                       ? apartmentRoomsRaw.filter((room) => hasVisibleLocationSlots('room', room.id))
                       : apartmentRoomsRaw;
                     return (
-                      <div key={apartment.id} className="rounded border border-white/10 bg-black/20 px-2 py-1.5">
-                        <p className="text-zinc-200 text-[10px] font-medium">Кв. {apartment.name}</p>
+                      <div key={apartment.id} className="rounded border border-white/10 bg-zinc-950/60 px-2 py-1.5 space-y-1">
+                        <p className="text-zinc-200 text-[10px] font-semibold tracking-wide">Кв. {apartment.name}</p>
                         {renderLocationBlocks('apartment', apartment.id)}
                         {apartmentRooms.length ? (
                           <div className="mt-1 space-y-1">
                             {apartmentRooms.map((room) => (
-                              <div key={room.id} className="px-1.5 py-1 rounded bg-zinc-800/80 text-zinc-300 text-[10px] leading-none space-y-1">
-                                <p>Пом. {room.name}</p>
+                              <div key={room.id} className="px-1.5 py-1 rounded border border-white/10 bg-zinc-900/85 text-zinc-300 text-[10px] leading-none space-y-1">
+                                <p className="font-medium">Пом. {room.name}</p>
                                 {renderLocationBlocks('room', room.id)}
                               </div>
                             ))}
@@ -1858,9 +1877,9 @@ export default function ObjectsOverview() {
                                 return (
                                   <div
                                     key={`${locationRow._kind}:${locationRow.id}`}
-                                    className={`rounded-lg border px-1.5 py-2 space-y-1 ${
+                                    className={`rounded-lg border px-1.5 py-1.5 space-y-1 shadow-[0_6px_14px_rgba(0,0,0,0.22)] ${
                                       hasSlots
-                                        ? 'border-white/10 bg-black/20'
+                                        ? 'border-cyan-400/25 bg-gradient-to-b from-cyan-950/25 to-zinc-950/60'
                                         : 'border-white/10 bg-black/10'
                                     }`}
                                     style={{

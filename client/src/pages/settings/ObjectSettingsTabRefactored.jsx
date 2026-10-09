@@ -112,7 +112,7 @@ function SystemSquare({
         }
         onOpen(slot);
       }}
-      className={`relative w-[4.25rem] h-[4.25rem] rounded-md border p-1.5 text-left transition hover:bg-white/10 shadow-[0_4px_10px_rgba(0,0,0,0.18)] ${incomplete ? 'border-rose-500/70 bg-rose-950/35 text-rose-100' : 'border-white/15 bg-zinc-900/70 text-zinc-100'} ${selectionMode ? (selected ? 'ring-2 ring-white/70' : 'ring-1 ring-white/25') : ''}`}
+      className={`relative w-[5rem] h-[4.5rem] rounded-md border p-1.5 text-left transition hover:bg-white/10 hover:shadow-[0_8px_18px_rgba(0,0,0,0.24)] shadow-[0_4px_10px_rgba(0,0,0,0.18)] ${incomplete ? 'border-rose-500/70 bg-rose-950/35 text-rose-100' : 'border-white/15 bg-zinc-900/80 text-zinc-100'} ${selectionMode ? (selected ? 'ring-2 ring-white/70' : 'ring-1 ring-white/25') : ''}`}
       title={tooltip}
     >
       {selectionMode && (
@@ -123,12 +123,14 @@ function SystemSquare({
       )}
       <div className="flex h-full flex-col justify-between">
         <div className="space-y-0.5">
-          <p className="text-[8px] font-semibold leading-tight truncate tracking-wide">{slot.system_name}</p>
+          <p className="text-[8px] font-semibold leading-tight truncate tracking-wide uppercase">{slot.system_name}</p>
           <p className="text-[8px] text-zinc-400 leading-tight truncate">{slot.category_name || 'Без категории'}</p>
         </div>
         <div className="space-y-0.5">
           <p className="text-[8px] text-zinc-200/90 leading-tight overflow-hidden text-ellipsis">{previewText}</p>
-          <p className="text-[8px] text-zinc-400 leading-tight">Позиций: {totals?.positions || 0}</p>
+          <p className="inline-flex rounded-full border border-white/15 px-1 py-0.5 text-[8px] text-zinc-300 leading-tight">
+            Позиций: {totals?.positions || 0}
+          </p>
         </div>
       </div>
     </button>
@@ -1345,12 +1347,12 @@ export default function ObjectSettingsTabRefactored() {
       <div className="space-y-1.5">
         <div className="space-y-1.5">
           {groupedRows.map((systemRow) => (
-            <div key={systemRow.systemKey} className="rounded-md border border-white/10 bg-black/20 p-1.5 space-y-1">
+            <div key={systemRow.systemKey} className="rounded-md border border-white/10 bg-black/25 p-1.5 space-y-1 shadow-[0_4px_12px_rgba(0,0,0,0.2)]">
               <p className="text-[10px] text-zinc-200 font-semibold tracking-wide">{systemRow.systemName}</p>
               {systemRow.categories.map((categoryRow) => (
                 <div key={`${systemRow.systemName}:${categoryRow.categoryName}`} className="space-y-0.5">
                   <p className="text-[9px] text-zinc-400">{categoryRow.categoryName}</p>
-                  <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-1.5">
                     {categoryRow.items.map(({ slot, entries, entryNames, completeness }) => {
                       const selectedForMultiCopy = selectingMultiple && multiCopySelectedSlotIds.includes(String(slot.id));
                       return (
@@ -1381,7 +1383,7 @@ export default function ObjectSettingsTabRefactored() {
           <button
             type="button"
             onClick={() => openCreateSlotModal(locationKind, locationId, title)}
-            className="w-20 h-20 rounded-md border border-dashed border-white/20 bg-black/20 hover:bg-white/10 text-zinc-300 text-[11px]"
+            className="w-[5rem] h-[4.5rem] rounded-md border border-dashed border-white/20 bg-black/20 hover:bg-white/10 text-zinc-300 text-[10px] shadow-[0_4px_10px_rgba(0,0,0,0.18)]"
           >
             + Система
           </button>
@@ -1389,7 +1391,7 @@ export default function ObjectSettingsTabRefactored() {
             <button
               type="button"
               onClick={() => handlePasteSlotToLocation(locationKind, locationId, title)}
-              className="w-20 h-20 rounded-md border border-dashed border-sky-400/40 bg-sky-900/20 hover:bg-sky-800/30 text-sky-100 text-[11px]"
+              className="w-[5rem] h-[4.5rem] rounded-md border border-dashed border-sky-400/40 bg-sky-900/20 hover:bg-sky-800/30 text-sky-100 text-[10px] shadow-[0_4px_10px_rgba(0,0,0,0.18)]"
               disabled={!!pasteBusyKey || slotBusy}
               title={`Вставить блок: ${copiedSlotTemplate.systemName}`}
             >
@@ -1550,7 +1552,7 @@ export default function ObjectSettingsTabRefactored() {
                         return slots.some((slot) => slotMatchesFilters(slot));
                       });
                     return (
-                      <section key={entrance.id} className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-2.5 space-y-2 shadow-[0_6px_18px_rgba(0,0,0,0.22)]">
+                      <section key={entrance.id} className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-2.5 space-y-2 shadow-[0_8px_20px_rgba(0,0,0,0.22)]">
                         <p className="text-emerald-200 text-xs font-semibold tracking-wide">Подъезд {entrance.name}</p>
                         {entranceFloors.length ? (
                           <div className="min-w-0 overflow-x-auto">
@@ -1571,9 +1573,9 @@ export default function ObjectSettingsTabRefactored() {
                                 return (
                                   <div
                                     key={`${locationRow._kind}:${locationRow.id}`}
-                                    className={`rounded-lg border px-1.5 py-1.5 space-y-1 ${
+                                    className={`rounded-lg border px-1.5 py-1.5 space-y-1 shadow-[0_6px_14px_rgba(0,0,0,0.2)] ${
                                       locationHasBlocks
-                                        ? 'border-white/10 bg-black/20'
+                                        ? 'border-cyan-400/25 bg-gradient-to-b from-cyan-950/25 to-zinc-950/60'
                                         : 'border-rose-500/45 bg-rose-950/15'
                                     }`}
                                     style={{
@@ -1619,7 +1621,7 @@ export default function ObjectSettingsTabRefactored() {
                                     <div
                                       className={`rounded-lg border p-2.5 space-y-2 ${
                                         floorHasBlocks
-                                          ? 'border-white/10 bg-black/20'
+                                          ? 'border-white/10 bg-zinc-900/75'
                                           : 'border-rose-500/50 bg-rose-950/20'
                                       }`}
                                     >
@@ -1631,7 +1633,7 @@ export default function ObjectSettingsTabRefactored() {
                                         >
                                           Этаж {floor.name}
                                         </button>
-                                        <span className="text-[10px] text-zinc-400">
+                                        <span className="text-[10px] text-zinc-400 rounded-full border border-white/10 px-1.5 py-0.5">
                                           Квартир: {floorApartments.length} · Помещений: {floorRoomsCount}
                                         </span>
                                         <button
@@ -1656,8 +1658,8 @@ export default function ObjectSettingsTabRefactored() {
                                       {!collapsed && (
                                         <div className="space-y-2">
                                           {floorRooms.length ? (
-                                            <div className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5 space-y-1.5">
-                                              <p className="text-zinc-200 text-[10px] font-medium">Помещения на этаже</p>
+                                            <div className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5 space-y-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                                              <p className="text-zinc-200 text-[10px] font-semibold tracking-wide uppercase">Помещения на этаже</p>
                                               {floorRooms.map((room) => (
                                                 (() => {
                                                   const roomSquares = renderSystemSquares('room', room.id, `Пом. ${room.name}`);
@@ -1666,13 +1668,13 @@ export default function ObjectSettingsTabRefactored() {
                                                   return (
                                                     <div
                                                       key={room.id}
-                                                      className={`rounded border px-2 py-1.5 space-y-1.5 ${
+                                                      className={`rounded border px-2 py-1.5 space-y-1 ${
                                                         roomHasBlocks
-                                                          ? 'border-white/10 bg-black/20'
+                                                          ? 'border-white/10 bg-zinc-950/60'
                                                           : 'border-rose-500/50 bg-rose-950/20'
                                                       }`}
                                                     >
-                                                      <p className="text-zinc-200 text-[10px] font-medium">Пом. {room.name}</p>
+                                                      <p className="text-zinc-200 text-[10px] font-semibold tracking-wide">Пом. {room.name}</p>
                                                       {renderLocationActions('room', room.id, `Пом. ${room.name}`)}
                                                       {roomSquares}
                                                     </div>
@@ -1683,8 +1685,8 @@ export default function ObjectSettingsTabRefactored() {
                                           ) : null}
 
                                           {floorApartments.length ? (
-                                            <div className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5 space-y-1.5">
-                                              <p className="text-zinc-200 text-[10px] font-medium">Квартиры на этаже</p>
+                                            <div className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5 space-y-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                                              <p className="text-zinc-200 text-[10px] font-semibold tracking-wide uppercase">Квартиры на этаже</p>
                                               {floorApartments.map((apartment) => (
                                                 (() => {
                                                   const apartmentSquares = renderSystemSquares('apartment', apartment.id, `Кв. ${apartment.name}`);
@@ -1697,11 +1699,11 @@ export default function ObjectSettingsTabRefactored() {
                                                         key={room.id}
                                                         className={`rounded border px-2 py-1 space-y-1 ${
                                                           roomHasBlocks
-                                                            ? 'border-white/10 bg-zinc-800/70'
+                                                            ? 'border-white/10 bg-zinc-900/85'
                                                             : 'border-rose-500/50 bg-rose-950/30'
                                                         }`}
                                                       >
-                                                        <p className="text-zinc-300 text-[10px] font-medium">Пом. {room.name}</p>
+                                                        <p className="text-zinc-300 text-[10px] font-semibold">Пом. {room.name}</p>
                                                         {renderLocationActions('room', room.id, `Пом. ${room.name}`)}
                                                         {roomSquares}
                                                       </div>
@@ -1715,13 +1717,13 @@ export default function ObjectSettingsTabRefactored() {
                                                   return (
                                                     <div
                                                       key={apartment.id}
-                                                      className={`rounded border px-2 py-1.5 space-y-1.5 ${
+                                                      className={`rounded border px-2 py-1.5 space-y-1 ${
                                                         apartmentHasBlocks
-                                                          ? 'border-white/10 bg-black/20'
+                                                          ? 'border-white/10 bg-zinc-950/60'
                                                           : 'border-rose-500/50 bg-rose-950/20'
                                                       }`}
                                                     >
-                                                      <p className="text-zinc-200 text-[10px] font-medium">Кв. {apartment.name}</p>
+                                                      <p className="text-zinc-200 text-[10px] font-semibold tracking-wide">Кв. {apartment.name}</p>
                                                       {apartmentSquares && (
                                                         <>
                                                           {renderLocationActions('apartment', apartment.id, `Кв. ${apartment.name}`)}
