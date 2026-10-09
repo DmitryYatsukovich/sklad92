@@ -229,6 +229,9 @@ export default function ObjectSettingsTabRefactored() {
   });
   const [cableBusy, setCableBusy] = useState(false);
   const [cablePickTarget, setCablePickTarget] = useState('');
+  const [cableEditModalOpen, setCableEditModalOpen] = useState(false);
+  const [cableEditDraft, setCableEditDraft] = useState(null);
+  const [cableEditBusy, setCableEditBusy] = useState(false);
   const entranceGridRefs = useRef(new Map());
   const [entranceCableOverlay, setEntranceCableOverlay] = useState({});
 
@@ -514,6 +517,13 @@ export default function ObjectSettingsTabRefactored() {
     });
     return map;
   }, [data.transitCableLines]);
+  const transitCableLineById = useMemo(() => {
+    const map = new Map();
+    data.transitCableLines.forEach((line) => {
+      map.set(String(line.id), line);
+    });
+    return map;
+  }, [data.transitCableLines]);
 
   const slotPlacementById = useMemo(() => {
     const map = new Map();
@@ -528,18 +538,6 @@ export default function ObjectSettingsTabRefactored() {
     });
     return map;
   }, [data.locationSystems, apartmentById, roomById, transitById, stairwellById]);
-
-  const systemById = useMemo(() => {
-    const map = new Map();
-    data.systems.forEach((row) => map.set(Number(row.id), row));
-    return map;
-  }, [data.systems]);
-
-  const categoryById = useMemo(() => {
-    const map = new Map();
-    data.categories.forEach((row) => map.set(Number(row.id), row));
-    return map;
-  }, [data.categories]);
 
   const getSlotEntries = useCallback((slotId) => {
     const rows = [];
@@ -1254,13 +1252,13 @@ export default function ObjectSettingsTabRefactored() {
     return `${getLocationKindTitle(slot.location_kind)} ${location.name || ''} · ${slot.system_name}`;
   }, [slotPlacementById]);
 
-  const isSlotEligibleForCableTransit = useCallback((slot, transit) => {
+  const isSlotEligibleForTransitWithCriteria = useCallback((slot, transit, systemIdValue, categoryIdValue) => {
     if (!slot || !transit) return false;
     if (!['apartment', 'room'].includes(slot.location_kind)) return false;
-    const requiredSystemId = Number.parseInt(cableDraft.systemId, 10);
-    const requiredCategoryId = cableDraft.categoryId === ''
+    const requiredSystemId = Number.parseInt(systemIdValue, 10);
+    const requiredCategoryId = categoryIdValue === '' || categoryIdValue == null
       ? null
-      : Number.parseInt(cableDraft.categoryId, 10);
+      : Number.parseInt(categoryIdValue, 10);
     if (requiredSystemId && Number(slot.system_id || 0) !== requiredSystemId) return false;
     if (requiredCategoryId && Number(slot.category_id || 0) !== requiredCategoryId) return false;
     const placement = slotPlacementById.get(slot.id);
@@ -1275,7 +1273,11 @@ export default function ObjectSettingsTabRefactored() {
     if (Number(location.object_id || 0) !== Number(transit.object_id || 0)) return false;
     if (Number(location.entrance_id || 0) !== Number(transit.entrance_id || 0)) return false;
     return true;
-  }, [slotPlacementById, cableDraft.systemId, cableDraft.categoryId]);
+  }, [slotPlacementById]);
+
+  const isSlotEligibleForCableTransit = useCallback((slot, transit) => (
+    isSlotEligibleForTransitWithCriteria(slot, transit, cableDraft.systemId, cableDraft.categoryId)
+  ), [isSlotEligibleForTransitWithCriteria, cableDraft.systemId, cableDraft.categoryId]);
 
   const resetCableDraft = useCallback(() => {
     setCableDraft({
@@ -1363,34 +1365,22 @@ export default function ObjectSettingsTabRefactored() {
     if (!systemId) return setError('Выберите систему кабельной линии');
     if (cableDraft.categoryId !== '' && !categoryId) return setError('Выберите корректную категорию');
     if (!fromSlotId || !toSlotId) return setError('Выберите два блока для кабельной линии');
+    if (fromSlotId === toSlotId) return setError('Блоки «От» и «До» должны отличаться');
     if (!name) return setError('Укажите название кабельной линии');
     if (!Number.isFinite(lengthM) || lengthM <= 0) return setError('Укажите корректную длину кабеля (м)');
 
     setCableBusy(true);
     setError('');
     try {
-      if (cableDraft.lineId) {
-        await settingsApi.objectSettings.updateTransitCableLine(cableDraft.lineId, {
-          transit_id: activeCableTransitId,
-          from_location_system_id: fromSlotId,
-          to_location_system_id: toSlotId,
-          system_id: systemId,
-          category_id: categoryId,
-          name,
-          length_m: lengthM,
-        });
-        setNotice('Кабельная линия обновлена.');
-      } else {
-        await settingsApi.objectSettings.createTransitCableLine(activeCableTransitId, {
-          from_location_system_id: fromSlotId,
-          to_location_system_id: toSlotId,
-          system_id: systemId,
-          category_id: categoryId,
-          name,
-          length_m: lengthM,
-        });
-        setNotice('Кабельная линия добавлена.');
-      }
+      await settingsApi.objectSettings.createTransitCableLine(activeCableTransitId, {
+        from_location_system_id: fromSlotId,
+        to_location_system_id: toSlotId,
+        system_id: systemId,
+        category_id: categoryId,
+        name,
+        length_m: lengthM,
+      });
+      setNotice('Кабельная линия добавлена.');
       resetCableDraft();
       setCablePickTarget('from');
       await load({ silent: true });
@@ -1401,13 +1391,14 @@ export default function ObjectSettingsTabRefactored() {
     }
   };
 
-  const handleEditCableLine = (line) => {
+  const openCableEditModal = (line) => {
+    if (!line) return;
     const fromSlot = slotById.get(line.from_location_system_id);
     const inferredSystemId = line.system_id || fromSlot?.system_id || '';
     const inferredCategoryId = line.category_id ?? fromSlot?.category_id ?? '';
-    setActiveCableTransitId(line.transit_id);
-    setCableDraft({
+    setCableEditDraft({
       lineId: line.id,
+      transitId: line.transit_id,
       fromSlotId: line.from_location_system_id,
       toSlotId: line.to_location_system_id,
       systemId: String(inferredSystemId || ''),
@@ -1415,25 +1406,67 @@ export default function ObjectSettingsTabRefactored() {
       name: line.name || '',
       lengthM: String(line.length_m ?? ''),
     });
-    setCablePickTarget('');
+    setCableEditModalOpen(true);
     setError('');
-    setNotice('Отредактируйте параметры линии и нажмите «Сохранить кабель».');
   };
 
-  const handleDeleteCableLine = async (lineId) => {
-    if (!lineId) return;
-    if (!confirm('Удалить кабельную линию?')) return;
-    setCableBusy(true);
+  const closeCableEditModal = () => {
+    if (cableEditBusy) return;
+    setCableEditModalOpen(false);
+    setCableEditDraft(null);
+  };
+
+  const handleSaveCableEdit = async (e) => {
+    e.preventDefault();
+    if (!cableEditDraft?.lineId) return;
+    const transitId = Number.parseInt(cableEditDraft.transitId, 10);
+    const fromSlotId = Number.parseInt(cableEditDraft.fromSlotId, 10);
+    const toSlotId = Number.parseInt(cableEditDraft.toSlotId, 10);
+    const systemId = Number.parseInt(cableEditDraft.systemId, 10);
+    const categoryId = cableEditDraft.categoryId === '' ? null : Number.parseInt(cableEditDraft.categoryId, 10);
+    const name = String(cableEditDraft.name || '').trim();
+    const lengthM = Number.parseFloat(cableEditDraft.lengthM);
+    if (!transitId || !fromSlotId || !toSlotId || !systemId || !name || !Number.isFinite(lengthM) || lengthM <= 0) {
+      return setError('Проверьте поля редактирования кабеля');
+    }
+    if (fromSlotId === toSlotId) return setError('Блоки «От» и «До» должны отличаться');
+    if (cableEditDraft.categoryId !== '' && !categoryId) return setError('Выберите корректную категорию');
+    setCableEditBusy(true);
     setError('');
     try {
-      await settingsApi.objectSettings.deleteTransitCableLine(lineId);
-      if (Number(cableDraft.lineId) === Number(lineId)) resetCableDraft();
+      await settingsApi.objectSettings.updateTransitCableLine(cableEditDraft.lineId, {
+        transit_id: transitId,
+        from_location_system_id: fromSlotId,
+        to_location_system_id: toSlotId,
+        system_id: systemId,
+        category_id: categoryId,
+        name,
+        length_m: lengthM,
+      });
+      setNotice('Кабельная линия обновлена.');
+      closeCableEditModal();
+      await load({ silent: true });
+    } catch (err) {
+      setError(err.message || 'Не удалось обновить кабельную линию');
+    } finally {
+      setCableEditBusy(false);
+    }
+  };
+
+  const handleDeleteCableEdit = async () => {
+    if (!cableEditDraft?.lineId) return;
+    if (!confirm('Удалить кабельную линию?')) return;
+    setCableEditBusy(true);
+    setError('');
+    try {
+      await settingsApi.objectSettings.deleteTransitCableLine(cableEditDraft.lineId);
       setNotice('Кабельная линия удалена.');
+      closeCableEditModal();
       await load({ silent: true });
     } catch (err) {
       setError(err.message || 'Не удалось удалить кабельную линию');
     } finally {
-      setCableBusy(false);
+      setCableEditBusy(false);
     }
   };
 
@@ -1718,10 +1751,14 @@ export default function ObjectSettingsTabRefactored() {
     };
   };
 
-  const getSelectableTransitSlots = useCallback((transitRow) => {
+  const getSelectableTransitSlots = useCallback((transitRow, criteria = {}) => {
+    const criteriaSystemId = criteria.systemId ?? cableDraft.systemId;
+    const criteriaCategoryId = criteria.categoryId ?? cableDraft.categoryId;
     return [...data.locationSystems]
       .filter((slot) => ['apartment', 'room'].includes(slot.location_kind))
-      .filter((slot) => isSlotEligibleForCableTransit(slot, transitRow))
+      .filter((slot) => (
+        isSlotEligibleForTransitWithCriteria(slot, transitRow, criteriaSystemId, criteriaCategoryId)
+      ))
       .sort((a, b) => {
         const placementA = slotPlacementById.get(a.id);
         const placementB = slotPlacementById.get(b.id);
@@ -1735,7 +1772,7 @@ export default function ObjectSettingsTabRefactored() {
           || (a.id - b.id)
         );
       });
-  }, [data.locationSystems, isSlotEligibleForCableTransit, slotPlacementById]);
+  }, [data.locationSystems, isSlotEligibleForTransitWithCriteria, slotPlacementById, cableDraft.systemId, cableDraft.categoryId]);
 
   const setEntranceGridRef = useCallback((entranceId, node) => {
     if (!entranceId) return;
@@ -1864,6 +1901,7 @@ export default function ObjectSettingsTabRefactored() {
               : `hsl(${(hueSeed * 37) % 360} 85% 66%)`;
             paths.push({
               key: `${item.key}:${item.line.transit_id}`,
+              lineId: item.line.__overlay_preview ? null : item.line.id,
               d,
               color,
               preview: Boolean(item.line.__overlay_preview),
@@ -1901,107 +1939,12 @@ export default function ObjectSettingsTabRefactored() {
     activeCableTransitId,
   ]);
 
-  const buildOptimizedTransitLineRows = useCallback((lines, transitRow) => {
-    const prepared = (lines || []).map((line) => {
-      const fromPlacement = slotPlacementById.get(line.from_location_system_id) || null;
-      const toPlacement = slotPlacementById.get(line.to_location_system_id) || null;
-      const fromRank = floorSortRank({ sort_order: fromPlacement?.location?.floor_sort_order });
-      const toRank = floorSortRank({ sort_order: toPlacement?.location?.floor_sort_order });
-      const fromShort = fromPlacement
-        ? `${fromPlacement.slot.location_kind === 'room' ? 'Пом.' : 'Кв.'} ${fromPlacement.location.name}`
-        : '—';
-      const toShort = toPlacement
-        ? `${toPlacement.slot.location_kind === 'room' ? 'Пом.' : 'Кв.'} ${toPlacement.location.name}`
-        : '—';
-      return {
-        line,
-        fromPlacement,
-        toPlacement,
-        fromRank,
-        toRank,
-        fromShort,
-        toShort,
-      };
-    });
-
-    const fromOrdered = [...prepared].sort((a, b) => (
-      (a.fromRank - b.fromRank)
-      || naturalCompare(a.fromShort, b.fromShort)
-      || (a.line.id - b.line.id)
-    ));
-    const toOrdered = [...prepared].sort((a, b) => (
-      (a.toRank - b.toRank)
-      || naturalCompare(a.toShort, b.toShort)
-      || (a.line.id - b.line.id)
-    ));
-    const fromOrderMap = new Map();
-    const toOrderMap = new Map();
-    fromOrdered.forEach((item, index) => fromOrderMap.set(item.line.id, index));
-    toOrdered.forEach((item, index) => toOrderMap.set(item.line.id, index));
-
-    const laneOrdered = [...prepared].sort((a, b) => {
-      const aFrom = fromOrderMap.get(a.line.id) ?? 0;
-      const aTo = toOrderMap.get(a.line.id) ?? 0;
-      const bFrom = fromOrderMap.get(b.line.id) ?? 0;
-      const bTo = toOrderMap.get(b.line.id) ?? 0;
-      const aCenter = (aFrom + aTo) / 2;
-      const bCenter = (bFrom + bTo) / 2;
-      return (
-        (aCenter - bCenter)
-        || (Math.abs(aFrom - aTo) - Math.abs(bFrom - bTo))
-        || (aFrom - bFrom)
-        || naturalCompare(a.line.name || '', b.line.name || '')
-        || (a.line.id - b.line.id)
-      );
-    });
-
-    const transitFromRank = floorSortRank({ sort_order: transitRow?.from_floor_sort_order });
-    const transitToRank = floorSortRank({ sort_order: transitRow?.to_floor_sort_order });
-    const minRank = Math.min(transitFromRank, transitToRank);
-    const maxRank = Math.max(transitFromRank, transitToRank);
-    const spread = maxRank > minRank ? (maxRank - minRank) : 1;
-    const topPad = 14;
-    const bottomPad = 14;
-    const contentHeight = Math.max(120, laneOrdered.length * 24);
-    const usableHeight = Math.max(contentHeight - topPad - bottomPad, 1);
-    const laneStep = laneOrdered.length > 0 ? usableHeight / laneOrdered.length : usableHeight;
-    const rankToY = (rank) => {
-      const clamped = Number.isFinite(rank) ? rank : minRank;
-      return topPad + ((clamped - minRank) / spread) * usableHeight;
-    };
-
-    return {
-      contentHeight,
-      rows: laneOrdered.map((item, laneIndex) => {
-        const lineHueSeed = Number(item.line.system_id || item.line.id || 1);
-        const stroke = `hsl(${(lineHueSeed * 37) % 360} 85% 66%)`;
-        return {
-          ...item,
-          laneIndex,
-          laneY: topPad + (laneStep * laneIndex) + (laneStep / 2),
-          fromY: rankToY(item.fromRank),
-          toY: rankToY(item.toRank),
-          stroke,
-        };
-      }),
-    };
-  }, [slotPlacementById]);
-
   const renderTransitCablePanel = (transitRow) => {
     const transitId = transitRow.id;
     const lines = transitCableLinesByTransit.get(transitId) || [];
-    const optimized = buildOptimizedTransitLineRows(lines, transitRow);
-    const optimizedRows = optimized.rows;
-    const diagramHeight = optimized.contentHeight;
     const isActive = Number(activeCableTransitId) === Number(transitId);
     const fromLabel = cableDraft.fromSlotId ? describeSlot(cableDraft.fromSlotId) : 'Не выбран';
     const toLabel = cableDraft.toSlotId ? describeSlot(cableDraft.toSlotId) : 'Не выбран';
-    const selectedSystemName = cableDraft.systemId
-      ? (systemById.get(Number.parseInt(cableDraft.systemId, 10))?.name || '')
-      : '';
-    const selectedCategoryName = cableDraft.categoryId
-      ? (categoryById.get(Number.parseInt(cableDraft.categoryId, 10))?.name || '')
-      : '';
     const selectableSlots = isActive ? getSelectableTransitSlots(transitRow) : [];
     const pickTargetTitle = cablePickTarget === 'from'
       ? 'Выбор блока: ОТ'
@@ -2037,9 +1980,6 @@ export default function ObjectSettingsTabRefactored() {
 
         {isActive && (
           <form className="space-y-1.5" onSubmit={handleSaveCableLine}>
-            <p className="text-[9px] text-zinc-300 leading-tight">
-              Выберите систему/категорию линии, затем нажмите «От» или «До» и выберите блок из всех блоков подъезда.
-            </p>
             <div className="grid grid-cols-1 gap-1.5">
               <select
                 value={cableDraft.systemId}
@@ -2133,22 +2073,21 @@ export default function ObjectSettingsTabRefactored() {
                 </div>
               )}
             </div>
-            <div className="space-y-1 rounded border border-white/10 bg-black/20 p-1.5">
-              <p className="text-[9px] text-cyan-100">
-                {selectedSystemName || 'Система не выбрана'}
-                {selectedCategoryName ? ` • ${selectedCategoryName}` : ''}
-              </p>
-              <p className="text-[9px] text-zinc-200 truncate">От: {fromLabel}</p>
-              <div className="flex items-center gap-1 text-[9px] text-cyan-200">
-                <span className="inline-block h-px flex-1 bg-cyan-300/60" />
-                <span className="shrink-0 px-1 py-0.5 rounded border border-cyan-300/30 bg-cyan-900/35">
-                  Транзит {transitRow.name}
-                </span>
-                <span className="inline-block h-px flex-1 bg-cyan-300/60" />
-              </div>
-              <p className="text-[9px] text-zinc-200 truncate">До: {toLabel}</p>
-            </div>
             <div className="grid grid-cols-1 gap-1.5">
+              <input
+                type="text"
+                value={fromLabel}
+                className="input h-7 text-xs"
+                readOnly
+                placeholder="От"
+              />
+              <input
+                type="text"
+                value={toLabel}
+                className="input h-7 text-xs"
+                readOnly
+                placeholder="До"
+              />
               <input
                 type="text"
                 value={cableDraft.name}
@@ -2175,89 +2114,9 @@ export default function ObjectSettingsTabRefactored() {
               className="w-full rounded border border-cyan-300/40 bg-cyan-900/35 px-2 py-1 text-[10px] font-medium text-cyan-100 hover:bg-cyan-800/35 disabled:opacity-50"
               disabled={cableBusy}
             >
-              {cableBusy ? 'Сохранение…' : (cableDraft.lineId ? 'Сохранить кабель' : 'Добавить кабель')}
+              {cableBusy ? 'Сохранение…' : 'Сохранить'}
             </button>
           </form>
-        )}
-
-        {!!lines.length && (
-          <div className="space-y-1">
-            {optimizedRows.length > 1 && (
-              <div className="rounded border border-white/10 bg-black/20 p-1.5">
-                <p className="text-[8px] text-zinc-300 mb-1">
-                  Линии автоматически переставляются для минимизации визуальных пересечений.
-                </p>
-                <svg viewBox={`0 0 100 ${diagramHeight}`} className="w-full h-28 rounded bg-black/25 border border-white/5">
-                  {optimizedRows.map((row) => {
-                    const midX = 50;
-                    const leftX = 8;
-                    const rightX = 92;
-                    const d = [
-                      `M ${leftX} ${row.fromY}`,
-                      `C ${midX - 18} ${row.fromY}, ${midX - 10} ${row.laneY}, ${midX} ${row.laneY}`,
-                      `C ${midX + 10} ${row.laneY}, ${rightX - 18} ${row.toY}, ${rightX} ${row.toY}`,
-                    ].join(' ');
-                    return (
-                      <g key={`diagram-${row.line.id}`}>
-                        <path d={d} fill="none" stroke={row.stroke} strokeWidth="1.8" opacity="0.95" />
-                        <circle cx={leftX} cy={row.fromY} r="1.8" fill={row.stroke} />
-                        <circle cx={rightX} cy={row.toY} r="1.8" fill={row.stroke} />
-                      </g>
-                    );
-                  })}
-                </svg>
-              </div>
-            )}
-            {optimizedRows.map((row) => {
-              const line = row.line;
-              const lineSystemName = line.system_name
-                || systemById.get(Number(line.system_id || 0))?.name
-                || 'Без системы';
-              const lineCategoryName = line.category_name
-                || (line.category_id ? categoryById.get(Number(line.category_id))?.name : '')
-                || '';
-              return (
-              <div key={line.id} className="rounded border border-white/10 bg-black/25 p-1">
-                <div className="flex items-center justify-between gap-1">
-                  <p className="text-[9px] text-zinc-100 truncate font-medium">{line.name}</p>
-                  <p className="text-[9px] text-zinc-400 shrink-0">{formatQty(line.length_m)} м</p>
-                </div>
-                <p className="text-[8px] text-cyan-100/90 truncate">
-                  {lineSystemName}{lineCategoryName ? ` • ${lineCategoryName}` : ''}
-                </p>
-                <p className="text-[8px] text-zinc-300 truncate">
-                  {describeSlot(line.from_location_system_id)}
-                </p>
-                <div className="flex items-center gap-1 text-[8px] text-cyan-200 py-0.5">
-                  <span className="inline-block h-px flex-1 bg-cyan-300/55" />
-                  <span className="shrink-0 uppercase tracking-wide">через транзит</span>
-                  <span className="inline-block h-px flex-1 bg-cyan-300/55" />
-                </div>
-                <p className="text-[8px] text-zinc-300 truncate">
-                  {describeSlot(line.to_location_system_id)}
-                </p>
-                <div className="mt-1 flex gap-1">
-                  <button
-                    type="button"
-                    onClick={() => handleEditCableLine(line)}
-                    className="px-1.5 py-0.5 rounded border border-white/20 text-[8px] text-zinc-200 hover:bg-white/10"
-                    disabled={cableBusy}
-                  >
-                    Изм.
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteCableLine(line.id)}
-                    className="px-1.5 py-0.5 rounded border border-rose-400/45 text-[8px] text-rose-200 hover:bg-rose-900/30"
-                    disabled={cableBusy}
-                  >
-                    Удал.
-                  </button>
-                </div>
-              </div>
-            );
-            })}
-          </div>
         )}
       </div>
     );
@@ -2267,6 +2126,19 @@ export default function ObjectSettingsTabRefactored() {
   const activeSlotEntries = activeSlotId ? getSlotEntries(activeSlotId) : [];
   const slotLocked = !activeSlot;
   const canAddEntry = !slotBusy && !slotLocked && String(entryQuery || '').trim().length > 0;
+  const cableEditTransit = cableEditDraft?.transitId ? (transitById.get(Number(cableEditDraft.transitId)) || null) : null;
+  const cableEditSelectableSlots = cableEditTransit
+    ? getSelectableTransitSlots(
+      {
+        ...cableEditTransit,
+        id: Number(cableEditDraft?.transitId),
+      },
+      {
+        systemId: cableEditDraft?.systemId ?? '',
+        categoryId: cableEditDraft?.categoryId ?? '',
+      },
+    )
+    : [];
 
   if (loading) return <p className="text-zinc-500 text-sm">Загрузка настроек объектов…</p>;
 
@@ -2612,7 +2484,7 @@ export default function ObjectSettingsTabRefactored() {
                               </div>
                               {entranceOverlay?.paths?.length ? (
                                 <svg
-                                  className="pointer-events-none absolute left-0 top-0 z-20"
+                                  className="absolute left-0 top-0 z-20"
                                   width={entranceOverlay.width}
                                   height={entranceOverlay.height}
                                   viewBox={`0 0 ${entranceOverlay.width} ${entranceOverlay.height}`}
@@ -2628,6 +2500,14 @@ export default function ObjectSettingsTabRefactored() {
                                       strokeLinecap="round"
                                       strokeLinejoin="round"
                                       opacity={pathItem.preview ? 0.98 : 0.85}
+                                      className={pathItem.preview ? '' : 'cursor-pointer'}
+                                      pointerEvents={pathItem.preview ? 'none' : 'stroke'}
+                                      onClick={() => {
+                                        if (!pathItem.lineId) return;
+                                        const line = transitCableLineById.get(String(pathItem.lineId));
+                                        if (!line) return;
+                                        openCableEditModal(line);
+                                      }}
                                     />
                                   ))}
                                 </svg>
@@ -2648,6 +2528,142 @@ export default function ObjectSettingsTabRefactored() {
           );
         })}
       </div>
+
+      {cableEditModalOpen && cableEditDraft && (
+        <div className="modal-backdrop z-50" onClick={closeCableEditModal} role="dialog" aria-modal="true">
+          <div className="card p-5 max-w-xl w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-white text-lg font-medium">Редактирование кабельной линии</h3>
+            <form className="space-y-3 mt-4" onSubmit={handleSaveCableEdit}>
+              <div>
+                <label className="label">Система</label>
+                <select
+                  value={cableEditDraft.systemId}
+                  onChange={(e) => {
+                    const systemId = e.target.value;
+                    setCableEditDraft((prev) => ({
+                      ...prev,
+                      systemId,
+                      fromSlotId: null,
+                      toSlotId: null,
+                    }));
+                  }}
+                  className="input"
+                  disabled={cableEditBusy}
+                  required
+                >
+                  <option value="">— Выберите систему —</option>
+                  {data.systems.map((system) => (
+                    <option key={system.id} value={system.id}>{system.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Категория</label>
+                <select
+                  value={cableEditDraft.categoryId}
+                  onChange={(e) => {
+                    const categoryId = e.target.value;
+                    setCableEditDraft((prev) => ({
+                      ...prev,
+                      categoryId,
+                      fromSlotId: null,
+                      toSlotId: null,
+                    }));
+                  }}
+                  className="input"
+                  disabled={cableEditBusy}
+                >
+                  <option value="">Без категории</option>
+                  {data.categories.map((category) => (
+                    <option key={category.id} value={category.id}>{category.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="label">От</label>
+                  <select
+                    value={cableEditDraft.fromSlotId || ''}
+                    onChange={(e) => setCableEditDraft((prev) => ({ ...prev, fromSlotId: e.target.value }))}
+                    className="input"
+                    disabled={cableEditBusy}
+                    required
+                  >
+                    <option value="">— Выберите блок —</option>
+                    {cableEditSelectableSlots.map((slot) => (
+                      <option key={`edit-from-${slot.id}`} value={slot.id}>{describeSlot(slot.id)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">До</label>
+                  <select
+                    value={cableEditDraft.toSlotId || ''}
+                    onChange={(e) => setCableEditDraft((prev) => ({ ...prev, toSlotId: e.target.value }))}
+                    className="input"
+                    disabled={cableEditBusy}
+                    required
+                  >
+                    <option value="">— Выберите блок —</option>
+                    {cableEditSelectableSlots.map((slot) => (
+                      <option key={`edit-to-${slot.id}`} value={slot.id}>{describeSlot(slot.id)}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="label">Название</label>
+                  <input
+                    type="text"
+                    className="input"
+                    value={cableEditDraft.name}
+                    onChange={(e) => setCableEditDraft((prev) => ({ ...prev, name: e.target.value }))}
+                    disabled={cableEditBusy}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label">Длина, м</label>
+                  <input
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    className="input"
+                    value={cableEditDraft.lengthM}
+                    onChange={(e) => setCableEditDraft((prev) => ({ ...prev, lengthM: e.target.value }))}
+                    disabled={cableEditBusy}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap justify-between gap-2 pt-2">
+                <button
+                  type="button"
+                  className="btn-ghost text-rose-300 text-sm"
+                  onClick={handleDeleteCableEdit}
+                  disabled={cableEditBusy}
+                >
+                  Удалить линию
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="btn-secondary text-sm"
+                    onClick={closeCableEditModal}
+                    disabled={cableEditBusy}
+                  >
+                    Отмена
+                  </button>
+                  <button type="submit" className="btn-primary text-sm" disabled={cableEditBusy}>
+                    {cableEditBusy ? 'Сохранение…' : 'Сохранить'}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {summaryEditOpen && (
         <div className="modal-backdrop z-50" onClick={closeSummaryEditModal} role="dialog" aria-modal="true">
