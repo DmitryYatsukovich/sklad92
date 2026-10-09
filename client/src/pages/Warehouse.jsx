@@ -2212,7 +2212,7 @@ export default function Warehouse({ user }) {
                     {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
                   </select>
                 </div>
-                {(!editing || (!isMaterialPart(editing) && !isMaterialGroupRow(editing))) && (
+                {(!editing || !isMaterialGroupRow(editing)) && (
                   <div>
                     <label className="label">
                       {splitEnabled || !editing ? 'Общее количество' : 'Количество'}
