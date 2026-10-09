@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { settings as settingsApi } from '../../api';
 
 const FLOOR_ROOMS_BUCKET_NAME = 'Помещения этажа';
@@ -113,6 +113,9 @@ function SystemSquare({
   return (
     <button
       type="button"
+      data-slot-id={slot.id}
+      data-slot-location-kind={slot.location_kind}
+      data-slot-location-id={slot.location_id}
       onClick={() => {
         if (selectionMode) {
           if (!selectionEnabled) return;
@@ -226,6 +229,8 @@ export default function ObjectSettingsTabRefactored() {
   });
   const [cableBusy, setCableBusy] = useState(false);
   const [cablePickTarget, setCablePickTarget] = useState('');
+  const entranceGridRefs = useRef(new Map());
+  const [entranceCableOverlay, setEntranceCableOverlay] = useState({});
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -1331,6 +1336,12 @@ export default function ObjectSettingsTabRefactored() {
         fromSlotId: Number(prev.fromSlotId) === pickedId ? null : prev.fromSlotId,
       };
     });
+    const placement = slotPlacementById.get(Number(slot.id));
+    const floorId = placement?.location?.floor_id;
+    if (floorId) {
+      const floorKey = String(floorId);
+      setCollapsedFloors((prev) => prev.filter((value) => value !== floorKey));
+    }
     if (cablePickTarget === 'from') {
       setCablePickTarget('to');
       setNotice('Блок «От» выбран. Выберите блок «До».');
@@ -1338,7 +1349,7 @@ export default function ObjectSettingsTabRefactored() {
       setCablePickTarget('');
       setNotice('Блок «До» выбран. При необходимости выберите другой «От» или «До».');
     }
-  }, [activeCableTransit, cablePickTarget, isSlotEligibleForCableTransit]);
+  }, [activeCableTransit, cablePickTarget, isSlotEligibleForCableTransit, slotPlacementById]);
 
   const handleSaveCableLine = async (e) => {
     e.preventDefault();
@@ -1726,6 +1737,170 @@ export default function ObjectSettingsTabRefactored() {
       });
   }, [data.locationSystems, isSlotEligibleForCableTransit, slotPlacementById]);
 
+  const setEntranceGridRef = useCallback((entranceId, node) => {
+    if (!entranceId) return;
+    if (node) entranceGridRefs.current.set(entranceId, node);
+    else entranceGridRefs.current.delete(entranceId);
+  }, []);
+
+  const overlayCableLines = useMemo(() => {
+    const base = (data.transitCableLines || []).map((line) => ({
+      ...line,
+      __overlay_preview: false,
+    }));
+    const fromId = Number.parseInt(cableDraft.fromSlotId, 10);
+    const toId = Number.parseInt(cableDraft.toSlotId, 10);
+    const transitId = Number.parseInt(activeCableTransitId, 10);
+    if (transitId && fromId && toId) {
+      base.push({
+        id: `draft-${transitId}-${fromId}-${toId}`,
+        transit_id: transitId,
+        from_location_system_id: fromId,
+        to_location_system_id: toId,
+        system_id: Number.parseInt(cableDraft.systemId, 10) || null,
+        __overlay_preview: true,
+      });
+    }
+    return base;
+  }, [
+    data.transitCableLines,
+    cableDraft.fromSlotId,
+    cableDraft.toSlotId,
+    cableDraft.systemId,
+    activeCableTransitId,
+  ]);
+
+  useEffect(() => {
+    let rafId = 0;
+    const recompute = () => {
+      const next = {};
+      const linesByEntrance = new Map();
+      overlayCableLines.forEach((line) => {
+        const transit = transitById.get(Number(line.transit_id));
+        if (!transit?.entrance_id) return;
+        const list = linesByEntrance.get(transit.entrance_id) || [];
+        list.push(line);
+        linesByEntrance.set(transit.entrance_id, list);
+      });
+
+      linesByEntrance.forEach((lines, entranceId) => {
+        const gridEl = entranceGridRefs.current.get(entranceId);
+        if (!gridEl) return;
+        const gridRect = gridEl.getBoundingClientRect();
+        if (!gridRect.width || !gridRect.height) return;
+
+        const itemsByTransit = new Map();
+        lines.forEach((line) => {
+          const fromEl = gridEl.querySelector(`[data-slot-id="${Number(line.from_location_system_id)}"]`);
+          const toEl = gridEl.querySelector(`[data-slot-id="${Number(line.to_location_system_id)}"]`);
+          const transitEl = gridEl.querySelector(`[data-transit-id="${Number(line.transit_id)}"]`);
+          if (!(fromEl instanceof HTMLElement) || !(toEl instanceof HTMLElement) || !(transitEl instanceof HTMLElement)) return;
+
+          const fromRect = fromEl.getBoundingClientRect();
+          const toRect = toEl.getBoundingClientRect();
+          const transitRect = transitEl.getBoundingClientRect();
+          const fromPoint = {
+            x: fromRect.left - gridRect.left + (fromRect.width / 2),
+            y: fromRect.top - gridRect.top + (fromRect.height / 2),
+          };
+          const toPoint = {
+            x: toRect.left - gridRect.left + (toRect.width / 2),
+            y: toRect.top - gridRect.top + (toRect.height / 2),
+          };
+          const transitPoint = {
+            x: transitRect.left - gridRect.left + (transitRect.width / 2),
+            y: transitRect.top - gridRect.top + (transitRect.height / 2),
+          };
+
+          const list = itemsByTransit.get(Number(line.transit_id)) || [];
+          list.push({
+            key: String(line.id),
+            line,
+            from: fromPoint,
+            to: toPoint,
+            transit: transitPoint,
+          });
+          itemsByTransit.set(Number(line.transit_id), list);
+        });
+
+        const paths = [];
+        itemsByTransit.forEach((items) => {
+          const fromOrdered = [...items].sort((a, b) => (a.from.y - b.from.y) || naturalCompare(a.key, b.key));
+          const toOrdered = [...items].sort((a, b) => (a.to.y - b.to.y) || naturalCompare(a.key, b.key));
+          const fromOrder = new Map(fromOrdered.map((item, index) => [item.key, index]));
+          const toOrder = new Map(toOrdered.map((item, index) => [item.key, index]));
+          const arranged = [...items].sort((a, b) => {
+            const aFrom = fromOrder.get(a.key) ?? 0;
+            const aTo = toOrder.get(a.key) ?? 0;
+            const bFrom = fromOrder.get(b.key) ?? 0;
+            const bTo = toOrder.get(b.key) ?? 0;
+            return (
+              (((aFrom + aTo) / 2) - ((bFrom + bTo) / 2))
+              || (Math.abs(aFrom - aTo) - Math.abs(bFrom - bTo))
+              || (a.from.y - b.from.y)
+            );
+          });
+
+          let upLane = 0;
+          let downLane = 0;
+          arranged.forEach((item) => {
+            const goingUp = item.to.y < item.from.y;
+            const laneOffset = 16 + (goingUp ? upLane++ : downLane++) * 9;
+            const transitX = item.transit.x;
+            const liftRaw = goingUp
+              ? (Math.min(item.from.y, item.to.y) - laneOffset)
+              : (Math.max(item.from.y, item.to.y) + laneOffset);
+            const liftY = Math.max(6, Math.min(gridRect.height - 6, liftRaw));
+            const d = [
+              `M ${item.from.x} ${item.from.y}`,
+              `L ${transitX} ${item.from.y}`,
+              `L ${transitX} ${liftY}`,
+              `L ${item.to.x} ${liftY}`,
+              `L ${item.to.x} ${item.to.y}`,
+            ].join(' ');
+            const hueSeed = Number(item.line.system_id || item.line.id || 1);
+            const color = item.line.__overlay_preview
+              ? '#7DD3FC'
+              : `hsl(${(hueSeed * 37) % 360} 85% 66%)`;
+            paths.push({
+              key: `${item.key}:${item.line.transit_id}`,
+              d,
+              color,
+              preview: Boolean(item.line.__overlay_preview),
+            });
+          });
+        });
+
+        next[entranceId] = {
+          width: gridRect.width,
+          height: gridRect.height,
+          paths,
+        };
+      });
+      setEntranceCableOverlay(next);
+    };
+
+    const schedule = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(recompute);
+    };
+    schedule();
+    window.addEventListener('resize', schedule);
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', schedule);
+    };
+  }, [
+    overlayCableLines,
+    transitById,
+    collapsedFloors,
+    selectedSystemIds,
+    selectedCategoryIds,
+    selectedApartmentScopes,
+    selectedRoomNames,
+    activeCableTransitId,
+  ]);
+
   const buildOptimizedTransitLineRows = useCallback((lines, transitRow) => {
     const prepared = (lines || []).map((line) => {
       const fromPlacement = slotPlacementById.get(line.from_location_system_id) || null;
@@ -1882,7 +2057,7 @@ export default function ObjectSettingsTabRefactored() {
                 disabled={cableBusy}
                 required
               >
-                <option value="">Система кабельной линии</option>
+                <option value="">Система</option>
                 {data.systems.map((system) => (
                   <option key={system.id} value={system.id}>{system.name}</option>
                 ))}
@@ -2231,82 +2406,86 @@ export default function ObjectSettingsTabRefactored() {
                         const slots = slotsByLocation.get(`${row._kind}:${row.id}`) || [];
                         return slots.some((slot) => slotMatchesFilters(slot));
                       });
+                    const entranceOverlay = entranceCableOverlay[entrance.id] || null;
                     return (
                       <section key={entrance.id} className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-2.5 space-y-2 shadow-[0_8px_20px_rgba(0,0,0,0.22)]">
                         <p className="text-emerald-200 text-xs font-semibold tracking-wide">Подъезд {entrance.name}</p>
                         {entranceFloors.length ? (
                           <div className="min-w-0 overflow-x-auto">
-                            <div
-                              className="grid gap-1.5 min-w-0"
-                              style={{
-                                gridTemplateColumns: `${entranceLinearLayoutRows.length ? `repeat(${entranceLinearLayoutRows.length}, minmax(7.5rem, 9rem)) ` : ''}minmax(16rem, 1fr)`,
-                                alignItems: 'stretch',
-                              }}
-                            >
-                              {entranceLinearLayoutRows.map((locationRow, laneIndex) => {
-                                const prefix = locationRow._kind === 'transit' ? 'Транзит' : 'ЛК';
-                                const locationTitle = `${prefix} ${locationRow.name}`;
-                                const locationRange = `Этаж ${locationRow.from_floor_name}–${locationRow.to_floor_name}`;
-                                const squares = renderSystemSquares(locationRow._kind, locationRow.id, locationTitle);
-                                if (!squares && hasSlotFilters && !activeCableTransitId) return null;
-                                const locationHasBlocks = hasLocationBlocks(locationRow._kind, locationRow.id);
-                                return (
-                                  <div
-                                    key={`${locationRow._kind}:${locationRow.id}`}
-                                    className={`rounded-lg border px-1 py-1 space-y-1 shadow-[0_6px_14px_rgba(0,0,0,0.2)] ${
-                                      locationHasBlocks
-                                        ? 'border-cyan-400/25 bg-gradient-to-b from-cyan-950/25 to-zinc-950/60'
-                                        : 'border-rose-500/45 bg-rose-950/15'
-                                    }`}
-                                    style={{
-                                      gridColumn: laneIndex + 1,
-                                      gridRow: `${locationRow.startRow} / ${locationRow.endRow}`,
-                                    }}
-                                  >
-                                    <p className="text-zinc-100 text-[9px] font-semibold leading-tight break-words uppercase tracking-wide">{locationTitle}</p>
-                                    <p className="text-zinc-400 text-[8px] leading-tight">{locationRange}</p>
-                                    {renderLocationActions(locationRow._kind, locationRow.id, locationTitle)}
-                                    {locationRow._kind === 'transit' ? renderTransitCablePanel(locationRow) : null}
-                                    {squares}
-                                  </div>
-                                );
-                              })}
-
-                              {entranceFloors.map((floor, floorIndex) => {
-                                const floorApartmentsRaw = apartmentsByFloor.get(floor.id) || [];
-                                const floorRoomsBucket = floorApartmentsRaw.find((x) => x.name === FLOOR_ROOMS_BUCKET_NAME);
-                                const floorApartments = floorApartmentsRaw.filter((x) => x.name !== FLOOR_ROOMS_BUCKET_NAME);
-                                const floorRooms = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
-                                const floorApartmentRoomsCount = floorApartments.reduce(
-                                  (acc, apartment) => acc + (roomsByApartment.get(apartment.id) || []).length,
-                                  0,
-                                );
-                                const floorRoomsCount = floorRooms.length + floorApartmentRoomsCount;
-                                const collapsed = collapsedFloorSet.has(floor.id);
-                                const floorHasBlocks = (
-                                  floorRooms.some((room) => hasLocationBlocks('room', room.id))
-                                  || floorApartments.some((apartment) => (
-                                    hasLocationBlocks('apartment', apartment.id)
-                                    || (roomsByApartment.get(apartment.id) || []).some((room) => hasLocationBlocks('room', room.id))
-                                  ))
-                                );
-                                return (
-                                  <div
-                                    key={floor.id}
-                                    style={{
-                                      gridColumn: entranceLinearLayoutRows.length + 1,
-                                      gridRow: floorIndex + 1,
-                                    }}
-                                    className="min-w-0"
-                                  >
+                            <div className="relative w-max min-w-full">
+                              <div
+                                ref={(node) => setEntranceGridRef(entrance.id, node)}
+                                className="grid gap-1.5 min-w-0 relative z-10"
+                                style={{
+                                  gridTemplateColumns: `${entranceLinearLayoutRows.length ? `repeat(${entranceLinearLayoutRows.length}, minmax(7.5rem, 9rem)) ` : ''}minmax(16rem, 1fr)`,
+                                  alignItems: 'stretch',
+                                }}
+                              >
+                                {entranceLinearLayoutRows.map((locationRow, laneIndex) => {
+                                  const prefix = locationRow._kind === 'transit' ? 'Транзит' : 'ЛК';
+                                  const locationTitle = `${prefix} ${locationRow.name}`;
+                                  const locationRange = `Этаж ${locationRow.from_floor_name}–${locationRow.to_floor_name}`;
+                                  const squares = renderSystemSquares(locationRow._kind, locationRow.id, locationTitle);
+                                  if (!squares && hasSlotFilters && !activeCableTransitId) return null;
+                                  const locationHasBlocks = hasLocationBlocks(locationRow._kind, locationRow.id);
+                                  return (
                                     <div
-                                      className={`rounded-lg border p-2.5 space-y-2 ${
-                                        floorHasBlocks
-                                          ? 'border-white/10 bg-zinc-900/75'
-                                          : 'border-rose-500/50 bg-rose-950/20'
+                                      key={`${locationRow._kind}:${locationRow.id}`}
+                                      data-transit-id={locationRow._kind === 'transit' ? locationRow.id : undefined}
+                                      className={`rounded-lg border px-1 py-1 space-y-1 shadow-[0_6px_14px_rgba(0,0,0,0.2)] ${
+                                        locationHasBlocks
+                                          ? 'border-cyan-400/25 bg-gradient-to-b from-cyan-950/25 to-zinc-950/60'
+                                          : 'border-rose-500/45 bg-rose-950/15'
                                       }`}
+                                      style={{
+                                        gridColumn: laneIndex + 1,
+                                        gridRow: `${locationRow.startRow} / ${locationRow.endRow}`,
+                                      }}
                                     >
-                                      <div className="flex flex-wrap items-center gap-1.5">
+                                      <p className="text-zinc-100 text-[9px] font-semibold leading-tight break-words uppercase tracking-wide">{locationTitle}</p>
+                                      <p className="text-zinc-400 text-[8px] leading-tight">{locationRange}</p>
+                                      {renderLocationActions(locationRow._kind, locationRow.id, locationTitle)}
+                                      {locationRow._kind === 'transit' ? renderTransitCablePanel(locationRow) : null}
+                                      {squares}
+                                    </div>
+                                  );
+                                })}
+
+                                {entranceFloors.map((floor, floorIndex) => {
+                                  const floorApartmentsRaw = apartmentsByFloor.get(floor.id) || [];
+                                  const floorRoomsBucket = floorApartmentsRaw.find((x) => x.name === FLOOR_ROOMS_BUCKET_NAME);
+                                  const floorApartments = floorApartmentsRaw.filter((x) => x.name !== FLOOR_ROOMS_BUCKET_NAME);
+                                  const floorRooms = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
+                                  const floorApartmentRoomsCount = floorApartments.reduce(
+                                    (acc, apartment) => acc + (roomsByApartment.get(apartment.id) || []).length,
+                                    0,
+                                  );
+                                  const floorRoomsCount = floorRooms.length + floorApartmentRoomsCount;
+                                  const collapsed = collapsedFloorSet.has(floor.id);
+                                  const floorHasBlocks = (
+                                    floorRooms.some((room) => hasLocationBlocks('room', room.id))
+                                    || floorApartments.some((apartment) => (
+                                      hasLocationBlocks('apartment', apartment.id)
+                                      || (roomsByApartment.get(apartment.id) || []).some((room) => hasLocationBlocks('room', room.id))
+                                    ))
+                                  );
+                                  return (
+                                    <div
+                                      key={floor.id}
+                                      style={{
+                                        gridColumn: entranceLinearLayoutRows.length + 1,
+                                        gridRow: floorIndex + 1,
+                                      }}
+                                      className="min-w-0"
+                                    >
+                                      <div
+                                        className={`rounded-lg border p-2.5 space-y-2 ${
+                                          floorHasBlocks
+                                            ? 'border-white/10 bg-zinc-900/75'
+                                            : 'border-rose-500/50 bg-rose-950/20'
+                                        }`}
+                                      >
+                                        <div className="flex flex-wrap items-center gap-1.5">
                                         <button
                                           type="button"
                                           onClick={() => toggleFloor(floor.id)}
@@ -2335,9 +2514,9 @@ export default function ObjectSettingsTabRefactored() {
                                             {pasteBusyKey === `floor:${floor.id}` ? 'Вставка…' : 'Вставить этаж'}
                                           </button>
                                         )}
-                                      </div>
-                                      {!collapsed && (
-                                        <div className="space-y-2">
+                                        </div>
+                                        {!collapsed && (
+                                          <div className="space-y-2">
                                           {floorRooms.length ? (
                                             <div className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5 space-y-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                                               <p className="text-zinc-200 text-[10px] font-semibold tracking-wide uppercase">Помещения на этаже</p>
@@ -2424,12 +2603,35 @@ export default function ObjectSettingsTabRefactored() {
                                           ) : (
                                             <p className="text-zinc-500 text-2xs">Квартиры на этаже не добавлены</p>
                                           )}
-                                        </div>
-                                      )}
+                                          </div>
+                                        )}
+                                      </div>
                                     </div>
-                                  </div>
-                                );
-                              })}
+                                  );
+                                })}
+                              </div>
+                              {entranceOverlay?.paths?.length ? (
+                                <svg
+                                  className="pointer-events-none absolute left-0 top-0 z-20"
+                                  width={entranceOverlay.width}
+                                  height={entranceOverlay.height}
+                                  viewBox={`0 0 ${entranceOverlay.width} ${entranceOverlay.height}`}
+                                  preserveAspectRatio="none"
+                                >
+                                  {entranceOverlay.paths.map((pathItem) => (
+                                    <path
+                                      key={pathItem.key}
+                                      d={pathItem.d}
+                                      fill="none"
+                                      stroke={pathItem.color}
+                                      strokeWidth={pathItem.preview ? 2.2 : 1.8}
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      opacity={pathItem.preview ? 0.98 : 0.85}
+                                    />
+                                  ))}
+                                </svg>
+                              ) : null}
                             </div>
                           </div>
                         ) : (
