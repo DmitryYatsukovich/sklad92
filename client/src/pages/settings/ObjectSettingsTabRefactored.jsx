@@ -2500,9 +2500,10 @@ export default function ObjectSettingsTabRefactored() {
                                       strokeLinecap="round"
                                       strokeLinejoin="round"
                                       opacity={pathItem.preview ? 0.98 : 0.85}
-                                      className={pathItem.preview ? '' : 'cursor-pointer'}
-                                      pointerEvents={pathItem.preview ? 'none' : 'stroke'}
+                                      className={pathItem.preview || activeCableTransitId ? '' : 'cursor-pointer'}
+                                      pointerEvents={pathItem.preview || activeCableTransitId ? 'none' : 'stroke'}
                                       onClick={() => {
+                                        if (activeCableTransitId) return;
                                         if (!pathItem.lineId) return;
                                         const line = transitCableLineById.get(String(pathItem.lineId));
                                         if (!line) return;
