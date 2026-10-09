@@ -107,14 +107,9 @@ function hexToRgba(hex, alpha) {
 
 function blockSizeClass(level, score) {
   if (level === 'object') {
-    if (score >= 18) return 'xl:col-span-2 min-h-[24rem]';
-    if (score >= 10) return 'min-h-[21rem]';
-    return 'min-h-[18rem]';
-  }
-  if (level === 'entrance') {
-    if (score >= 12) return 'min-h-[14rem]';
-    if (score >= 6) return 'min-h-[12rem]';
-    return 'min-h-[10rem]';
+    if (score >= 18) return 'min-h-[16rem]';
+    if (score >= 10) return 'min-h-[13rem]';
+    return 'min-h-[11rem]';
   }
   if (level === 'floor') return '';
   return '';
@@ -182,8 +177,8 @@ function LocationSlotChip({
       disabled={disabled}
       className={`rounded-md border shadow-sm text-left transition-transform ${
         compact
-          ? 'p-1 min-h-[3.45rem] min-w-0 w-full max-w-none'
-          : 'p-1.5 min-h-[4.5rem] min-w-0 w-full max-w-none'
+          ? 'p-1 min-h-[3.2rem] min-w-0 w-full max-w-none'
+          : 'p-1.25 min-h-[4rem] min-w-0 w-full max-w-none'
       } ${
         disabled ? 'opacity-55 cursor-not-allowed' : 'hover:scale-[1.01] hover:shadow-[0_6px_20px_rgba(0,0,0,0.25)]'
       } ${
@@ -196,26 +191,26 @@ function LocationSlotChip({
       }}
     >
       <span className={`block space-y-0.5 leading-tight ${compact ? 'break-words' : ''}`}>
-        <span className={`block font-semibold uppercase tracking-wide ${compact ? 'text-[8px]' : 'text-[9px]'}`}>
+        <span className={`block font-semibold uppercase tracking-wide ${compact ? 'text-[7px]' : 'text-[8px]'}`}>
           {slot.system_name || 'Система'}
           {slot.category_name ? ` · ${slot.category_name}` : ''}
         </span>
         {visibleEntryLines.length ? (
           visibleEntryLines.map((line, idx) => (
-            <span key={`${slot.id}-entry-${idx}`} className={`block ${compact ? 'text-[8px]' : 'text-[10px]'} leading-tight`}>
+            <span key={`${slot.id}-entry-${idx}`} className={`block ${compact ? 'text-[7px]' : 'text-[9px]'} leading-tight`}>
               {line}
             </span>
           ))
         ) : (
-          <span className={`block opacity-90 ${compact ? 'text-[8px]' : 'text-[10px]'}`}>Нет материалов</span>
+          <span className={`block opacity-90 ${compact ? 'text-[7px]' : 'text-[9px]'}`}>Нет материалов</span>
         )}
         {hiddenEntriesCount > 0 && (
-          <span className="block text-[8px] opacity-85">+{hiddenEntriesCount} поз.</span>
+          <span className="block text-[7px] opacity-85">+{hiddenEntriesCount} поз.</span>
         )}
         {selectionCaption ? (
-          <span className={`block font-semibold pt-0.5 ${compact ? 'text-[8px]' : 'text-[9px]'}`}>{selectionCaption}</span>
+          <span className={`block font-semibold pt-0.5 ${compact ? 'text-[7px]' : 'text-[8px]'}`}>{selectionCaption}</span>
         ) : null}
-        <span className="inline-flex mt-0.5 rounded-full border border-black/20 px-1 py-0.5 text-[8px] font-semibold uppercase">
+        <span className="inline-flex mt-0.5 rounded-full border border-black/20 px-1 py-0.5 text-[7px] font-semibold uppercase">
           {statusName}
         </span>
       </span>
@@ -1720,7 +1715,7 @@ export default function ObjectsOverview() {
     }
 
     return (
-      <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+      <div className="space-y-3">
         {filteredObjects.map((objectRow) => {
           const objectEntrancesRaw = (entrancesByObject.get(objectRow.id) || [])
             .filter((entry) => !entranceIdSet.size || entranceIdSet.has(entry.id));
@@ -1791,7 +1786,7 @@ export default function ObjectsOverview() {
               )}
 
               {objectEntrances.length ? (
-                <div className="grid gap-2.5 2xl:grid-cols-2">
+                <div className="space-y-2.5">
                   {objectEntrances.map((entry) => {
                     const entranceFloors = entry._visibleFloors || [];
                     const entranceTransits = transitsByEntrance.get(Number(entry.id)) || [];
@@ -1836,11 +1831,10 @@ export default function ObjectsOverview() {
                     }, { apartmentsCount: 0, roomsCount: 0 });
                     const entranceApartments = entranceCounts.apartmentsCount;
                     const entranceRooms = entranceCounts.roomsCount;
-                    const entranceScore = entranceFloors.length + (entranceApartments * 0.6) + (entranceRooms * 0.3);
                     return (
                       <section
                         key={entry.id}
-                        className={`rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-2.5 space-y-2 shadow-[0_6px_20px_rgba(0,0,0,0.22)] ${blockSizeClass('entrance', entranceScore)}`}
+                        className="w-full rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-2.5 space-y-2 shadow-[0_6px_20px_rgba(0,0,0,0.22)]"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <button
@@ -1864,7 +1858,7 @@ export default function ObjectsOverview() {
                             <div
                               className="grid gap-1.5 min-w-0"
                               style={{
-                                gridTemplateColumns: `${entranceLinearLayoutRows.length ? `repeat(${entranceLinearLayoutRows.length}, minmax(5.5rem, 6.5rem)) ` : ''}minmax(14rem, 1fr)`,
+                                gridTemplateColumns: `${entranceLinearLayoutRows.length ? `repeat(${entranceLinearLayoutRows.length}, minmax(5rem, 6rem)) ` : ''}minmax(16rem, 1fr)`,
                                 alignItems: 'stretch',
                               }}
                             >
