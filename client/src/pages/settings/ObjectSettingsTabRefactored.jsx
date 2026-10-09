@@ -101,7 +101,9 @@ function SystemSquare({
 }) {
   const entriesPreview = Array.isArray(slot.entryNames) ? slot.entryNames.filter(Boolean) : [];
   const previewText = entriesPreview.length ? entriesPreview.slice(0, 2).join(', ') : 'Позиции не добавлены';
+  const previewCount = entriesPreview.length;
   const tooltip = `${slot.system_name || 'Без системы'}${slot.category_name ? ` • ${slot.category_name}` : ''}${slot.missingFieldsText ? `\nНе заполнено: ${slot.missingFieldsText}` : ''}`;
+  const systemShort = String(slot.system_name || 'Сист').slice(0, 5);
   return (
     <button
       type="button"
@@ -112,7 +114,7 @@ function SystemSquare({
         }
         onOpen(slot);
       }}
-      className={`relative w-[3.4rem] h-[3.4rem] rounded-md border p-0.5 text-left transition hover:bg-white/10 hover:shadow-[0_8px_18px_rgba(0,0,0,0.24)] shadow-[0_4px_10px_rgba(0,0,0,0.18)] ${incomplete ? 'border-rose-500/70 bg-rose-950/35 text-rose-100' : 'border-white/15 bg-zinc-900/80 text-zinc-100'} ${selectionMode ? (selected ? 'ring-2 ring-white/70' : 'ring-1 ring-white/25') : ''}`}
+      className={`relative w-[2.9rem] h-[2.9rem] rounded-md border p-0.5 text-left transition hover:bg-white/10 hover:shadow-[0_8px_18px_rgba(0,0,0,0.24)] shadow-[0_4px_10px_rgba(0,0,0,0.18)] ${incomplete ? 'border-rose-500/70 bg-rose-950/35 text-rose-100' : 'border-white/15 bg-zinc-900/80 text-zinc-100'} ${selectionMode ? (selected ? 'ring-2 ring-white/70' : 'ring-1 ring-white/25') : ''}`}
       title={tooltip}
     >
       {selectionMode && (
@@ -123,13 +125,13 @@ function SystemSquare({
       )}
       <div className="flex h-full flex-col justify-between">
         <div className="space-y-0.5">
-          <p className="text-[6px] font-semibold leading-tight truncate tracking-wide uppercase">{slot.system_name}</p>
-          <p className="text-[6px] text-zinc-400 leading-tight truncate">{slot.category_name || 'Без категории'}</p>
+          <p className="text-[5px] font-semibold leading-tight truncate tracking-wide uppercase">{systemShort}</p>
+          <p className="text-[5px] text-zinc-400 leading-tight truncate">{slot.category_name || 'Без'}</p>
         </div>
         <div className="space-y-0.5">
-          <p className="text-[6px] text-zinc-200/90 leading-tight truncate">{previewText}</p>
-          <p className="inline-flex rounded-full border border-white/15 px-0.5 py-0.5 text-[6px] text-zinc-300 leading-tight">
-            Позиций: {totals?.positions || 0}
+          <p className="text-[5px] text-zinc-200/90 leading-tight truncate">{previewText}</p>
+          <p className="inline-flex rounded-full border border-white/15 px-0.5 py-0.5 text-[5px] text-zinc-300 leading-tight">
+            {totals?.positions || previewCount || 0} поз.
           </p>
         </div>
       </div>
@@ -1352,7 +1354,7 @@ export default function ObjectSettingsTabRefactored() {
               {systemRow.categories.map((categoryRow) => (
                 <div key={`${systemRow.systemName}:${categoryRow.categoryName}`} className="space-y-0.5">
                   <p className="text-[9px] text-zinc-400">{categoryRow.categoryName}</p>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-1">
+                  <div className="grid grid-cols-3 sm:grid-cols-4 xl:grid-cols-6 gap-1">
                     {categoryRow.items.map(({ slot, entries, entryNames, completeness }) => {
                       const selectedForMultiCopy = selectingMultiple && multiCopySelectedSlotIds.includes(String(slot.id));
                       return (
@@ -1383,7 +1385,7 @@ export default function ObjectSettingsTabRefactored() {
           <button
             type="button"
             onClick={() => openCreateSlotModal(locationKind, locationId, title)}
-            className="w-[3.4rem] h-[3.4rem] rounded-md border border-dashed border-white/20 bg-black/20 hover:bg-white/10 text-zinc-300 text-[8px] shadow-[0_4px_10px_rgba(0,0,0,0.18)]"
+            className="w-[2.9rem] h-[2.9rem] rounded-md border border-dashed border-white/20 bg-black/20 hover:bg-white/10 text-zinc-300 text-[7px] shadow-[0_4px_10px_rgba(0,0,0,0.18)]"
           >
             +Сист.
           </button>
@@ -1391,7 +1393,7 @@ export default function ObjectSettingsTabRefactored() {
             <button
               type="button"
               onClick={() => handlePasteSlotToLocation(locationKind, locationId, title)}
-              className="w-[3.4rem] h-[3.4rem] rounded-md border border-dashed border-sky-400/40 bg-sky-900/20 hover:bg-sky-800/30 text-sky-100 text-[8px] shadow-[0_4px_10px_rgba(0,0,0,0.18)]"
+              className="w-[2.9rem] h-[2.9rem] rounded-md border border-dashed border-sky-400/40 bg-sky-900/20 hover:bg-sky-800/30 text-sky-100 text-[7px] shadow-[0_4px_10px_rgba(0,0,0,0.18)]"
               disabled={!!pasteBusyKey || slotBusy}
               title={`Вставить блок: ${copiedSlotTemplate.systemName}`}
             >

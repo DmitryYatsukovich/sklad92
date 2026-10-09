@@ -162,7 +162,8 @@ function LocationSlotChip({
   const statusColor = slot.status_color || DEFAULT_STATUS_COLOR;
   const accentColor = selectionColor || statusColor;
   const textColor = getTextColorForHex(accentColor);
-  const statusShort = statusName.length > 7 ? `${statusName.slice(0, 7)}…` : statusName;
+  const statusShort = statusName.length > 4 ? `${statusName.slice(0, 4)}…` : statusName;
+  const systemShort = String(slot.system_name || 'Сист').slice(0, compact ? 5 : 8);
   const title = [
     `Система: ${slot.system_name || '—'}`,
     `Категория: ${slot.category_name || '—'}`,
@@ -178,8 +179,8 @@ function LocationSlotChip({
       disabled={disabled}
       className={`rounded-md border shadow-sm text-left transition-transform overflow-hidden ${
         compact
-          ? 'h-[3.25rem] w-[3.25rem] p-0.5'
-          : 'h-[3.9rem] w-[3.9rem] p-0.75'
+          ? 'h-[2.8rem] w-[2.8rem] p-0.5'
+          : 'h-[3.3rem] w-[3.3rem] p-0.5'
       } ${
         disabled ? 'opacity-55 cursor-not-allowed' : 'hover:scale-[1.01] hover:shadow-[0_6px_20px_rgba(0,0,0,0.25)]'
       } ${
@@ -193,17 +194,23 @@ function LocationSlotChip({
     >
       <span className="flex h-full flex-col justify-between leading-tight">
         <span className={`block font-semibold uppercase tracking-wide truncate ${compact ? 'text-[6px]' : 'text-[7px]'}`}>
-          {slot.system_name || 'Система'}
+          {systemShort}
         </span>
-        <span className={`block truncate opacity-90 ${compact ? 'text-[6px]' : 'text-[7px]'}`}>
-          {primaryEntry}
-        </span>
-        {hiddenEntriesCount > 0 && (
-          <span className={`${compact ? 'text-[6px]' : 'text-[7px]'} opacity-85`}>+{hiddenEntriesCount}</span>
+        {compact ? (
+          <span className="block text-[6px] opacity-90">{entryLines.length || 0} поз.</span>
+        ) : (
+          <>
+            <span className="block truncate opacity-90 text-[7px]">
+              {primaryEntry}
+            </span>
+            {hiddenEntriesCount > 0 && (
+              <span className="text-[7px] opacity-85">+{hiddenEntriesCount}</span>
+            )}
+            {selectionCaption ? (
+              <span className="block truncate font-semibold text-[7px]">{selectionCaption}</span>
+            ) : null}
+          </>
         )}
-        {selectionCaption ? (
-          <span className={`block truncate font-semibold ${compact ? 'text-[6px]' : 'text-[7px]'}`}>{selectionCaption}</span>
-        ) : null}
         <span className={`inline-flex rounded-full border border-black/20 px-1 py-0.5 font-semibold uppercase max-w-full truncate ${compact ? 'text-[6px]' : 'text-[7px]'}`}>
           {statusShort}
         </span>
