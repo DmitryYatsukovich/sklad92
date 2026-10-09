@@ -1536,14 +1536,14 @@ export default function ObjectsOverview() {
             className={`rounded-md border border-white/10 bg-black/25 shadow-[0_4px_12px_rgba(0,0,0,0.2)] ${compact ? 'p-1 space-y-0.5' : 'p-1.5 space-y-1'}`}
           >
             <p className={`${compact ? 'text-[8px]' : 'text-[9px]'} text-zinc-200 font-semibold tracking-wide truncate`}>{systemRow.systemName}</p>
-            <div className={compact ? 'space-y-0.5' : 'grid gap-1 sm:grid-cols-2 xl:grid-cols-3'}>
+            <div className={compact ? 'space-y-0.5' : 'flex flex-wrap items-start gap-1.5'}>
               {systemRow.categories.map((categoryRow) => (
                 <div
                   key={categoryRow.key}
-                  className={`${compact ? 'space-y-0.5' : 'rounded border border-white/10 bg-black/20 p-1 space-y-0.5'}`}
+                  className={`${compact ? 'space-y-0.5' : 'rounded border border-white/10 bg-black/20 p-1 space-y-0.5 w-fit max-w-full'}`}
                 >
                   <p className={`${compact ? 'text-[7px]' : 'text-[8px]'} text-zinc-400 truncate`}>{categoryRow.categoryName}</p>
-                  <div className={`flex flex-wrap items-start ${compact ? 'gap-0.5' : 'gap-1'}`}>
+                  <div className={`flex flex-wrap items-start w-fit max-w-full ${compact ? 'gap-0.5' : 'gap-1'}`}>
                     {categoryRow.slots.map((slot) => {
                       const entries = entriesBySlot.get(slot.id) || [];
                       const draft = productionDrafts[slot.id] || null;
