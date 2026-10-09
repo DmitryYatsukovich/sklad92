@@ -125,6 +125,22 @@ function floorSortRank(value) {
   return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
 }
 
+function getVisibleRangeSpanRows(visibleFloors, minRank, maxRank) {
+  let startIndex = -1;
+  let endIndex = -1;
+  visibleFloors.forEach((floorRow, index) => {
+    const rank = floorSortRank(floorRow?.sort_order);
+    if (rank < minRank || rank > maxRank) return;
+    if (startIndex === -1) startIndex = index;
+    endIndex = index;
+  });
+  if (startIndex === -1 || endIndex === -1) return null;
+  return {
+    startRow: startIndex + 1,
+    endRow: endIndex + 2,
+  };
+}
+
 function LocationSlotChip({
   slot,
   entries,
@@ -133,6 +149,7 @@ function LocationSlotChip({
   selectionCaption = '',
   selectionColor = '',
   disabled = false,
+  compact = false,
 }) {
   const entryLines = entries.map(formatEntryLabel).filter(Boolean);
   const statusName = slot.status_name || 'Без статуса';
@@ -151,7 +168,11 @@ function LocationSlotChip({
       onClick={() => onOpen?.(slot)}
       title={title}
       disabled={disabled}
-      className={`rounded border shadow-sm p-1.5 text-left transition-transform min-h-[5.5rem] min-w-[12rem] max-w-[12rem] ${
+      className={`rounded border shadow-sm text-left transition-transform ${
+        compact
+          ? 'p-1 min-h-[3.75rem] min-w-0 w-full max-w-none'
+          : 'p-1.5 min-h-[5.5rem] min-w-[12rem] max-w-[12rem]'
+      } ${
         disabled ? 'opacity-55 cursor-not-allowed' : 'hover:scale-[1.01]'
       } ${
         selected ? 'ring-2 ring-emerald-300/70 border-emerald-200/70' : 'border-black/20'
@@ -161,22 +182,22 @@ function LocationSlotChip({
         color: getTextColorForHex(backgroundColor),
       }}
     >
-      <span className="block space-y-0.5 leading-tight">
-        <span className="block text-[9px] font-semibold uppercase">
+      <span className={`block space-y-0.5 leading-tight ${compact ? 'break-words' : ''}`}>
+        <span className={`block font-semibold uppercase ${compact ? 'text-[8px]' : 'text-[9px]'}`}>
           {slot.system_name || 'Система'}
           {slot.category_name ? ` · ${slot.category_name}` : ''}
         </span>
         {entryLines.length ? (
           entryLines.map((line, idx) => (
-            <span key={`${slot.id}-entry-${idx}`} className="block text-[10px]">
+            <span key={`${slot.id}-entry-${idx}`} className={`block ${compact ? 'text-[9px]' : 'text-[10px]'}`}>
               {line}
             </span>
           ))
         ) : (
-          <span className="block text-[10px] opacity-90">Нет материалов</span>
+          <span className={`block opacity-90 ${compact ? 'text-[9px]' : 'text-[10px]'}`}>Нет материалов</span>
         )}
         {selectionCaption ? (
-          <span className="block text-[9px] font-semibold pt-0.5">{selectionCaption}</span>
+          <span className={`block font-semibold pt-0.5 ${compact ? 'text-[8px]' : 'text-[9px]'}`}>{selectionCaption}</span>
         ) : null}
       </span>
     </button>
@@ -1394,7 +1415,7 @@ export default function ObjectsOverview() {
     }
   };
 
-  const renderLocationBlocks = (locationKind, locationId) => {
+  const renderLocationBlocks = (locationKind, locationId, { compact = false } = {}) => {
     let slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
     slots = slots.filter((slot) => slotMatchesFilters(slot));
     if (!slots.length) return null;
@@ -1435,14 +1456,17 @@ export default function ObjectsOverview() {
       .sort((a, b) => naturalCompare(a.systemName, b.systemName));
 
     return (
-      <div className="mt-1.5 space-y-1.5">
+      <div className={`${compact ? 'mt-1 space-y-1' : 'mt-1.5 space-y-1.5'}`}>
         {groupedRows.map((systemRow) => (
-          <div key={systemRow.key} className="rounded-md border border-white/10 bg-white/[0.02] p-1.5 space-y-1">
-            <p className="text-[10px] text-zinc-200 font-semibold">{systemRow.systemName}</p>
+          <div
+            key={systemRow.key}
+            className={`rounded-md border border-white/10 bg-white/[0.02] ${compact ? 'p-1 space-y-0.5' : 'p-1.5 space-y-1'}`}
+          >
+            <p className={`${compact ? 'text-[9px]' : 'text-[10px]'} text-zinc-200 font-semibold`}>{systemRow.systemName}</p>
             {systemRow.categories.map((categoryRow) => (
-              <div key={categoryRow.key} className="space-y-1">
-                <p className="text-[9px] text-zinc-400">{categoryRow.categoryName}</p>
-                <div className="flex flex-wrap gap-1">
+              <div key={categoryRow.key} className={`${compact ? 'space-y-0.5' : 'space-y-1'}`}>
+                <p className={`${compact ? 'text-[8px]' : 'text-[9px]'} text-zinc-400`}>{categoryRow.categoryName}</p>
+                <div className={`flex ${compact ? 'flex-col' : 'flex-wrap'} gap-1`}>
                   {categoryRow.slots.map((slot) => {
                     const entries = entriesBySlot.get(slot.id) || [];
                     const draft = productionDrafts[slot.id] || null;
@@ -1469,6 +1493,7 @@ export default function ObjectsOverview() {
                       selectionCaption={selectionCaption}
                       selectionColor={activeStatus?.color || ''}
                       disabled={isProductionMode && !hasMaterialQty && !committed}
+                      compact={compact}
                     />
                     );
                   })}
@@ -1769,6 +1794,21 @@ export default function ObjectsOverview() {
                       ...entranceTransits.map((row) => ({ ...row, _kind: 'transit' })),
                       ...entranceStairwells.map((row) => ({ ...row, _kind: 'stairwell' })),
                     ].filter((row) => locationIntersectsVisibleFloors(row));
+                    const entranceLinearLayoutRows = entranceLinearLocations
+                      .map((row) => {
+                        const fromRank = floorSortRank(row.from_floor_sort_order);
+                        const toRank = floorSortRank(row.to_floor_sort_order);
+                        const minRank = Math.min(fromRank, toRank);
+                        const maxRank = Math.max(fromRank, toRank);
+                        const spanRows = getVisibleRangeSpanRows(entranceFloors, minRank, maxRank);
+                        if (!spanRows) return null;
+                        return {
+                          ...row,
+                          ...spanRows,
+                        };
+                      })
+                      .filter(Boolean)
+                      .filter((row) => (!slotFiltersActive || hasVisibleLocationSlots(row._kind, row.id)));
                     const entranceCounts = entranceFloors.reduce((acc, floor) => {
                       const floorCounts = getFloorCounts(floor.id);
                       acc.apartmentsCount += floorCounts.apartmentsCount;
@@ -1800,53 +1840,69 @@ export default function ObjectsOverview() {
                             Этажей: {entranceFloors.length} · Кв.: {entranceApartments} · Пом.: {entranceRooms}
                           </span>
                         </div>
-                        <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
-                          {entranceLinearLocations.length ? (
-                            <div className="xl:w-fit xl:max-w-[24rem] space-y-2">
-                              {entranceLinearLocations.map((locationRow) => {
+                        {entranceFloors.length ? (
+                          <div className="min-w-0 overflow-x-auto">
+                            <div
+                              className="grid gap-2 min-w-[22rem]"
+                              style={{
+                                gridTemplateColumns: `${entranceLinearLayoutRows.length ? `repeat(${entranceLinearLayoutRows.length}, minmax(6.75rem, 8rem)) ` : ''}minmax(0, 1fr)`,
+                                alignItems: 'stretch',
+                              }}
+                            >
+                              {entranceLinearLayoutRows.map((locationRow, laneIndex) => {
                                 const prefix = locationRow._kind === 'transit' ? 'Транзит' : 'ЛК';
                                 const title = `${prefix} ${locationRow.name}`;
                                 const subtitle = `Этаж ${locationRow.from_floor_name}–${locationRow.to_floor_name}`;
-                                const blocks = renderLocationBlocks(locationRow._kind, locationRow.id);
-                                if (!blocks && slotFiltersActive) return null;
+                                const blocks = renderLocationBlocks(locationRow._kind, locationRow.id, { compact: true });
                                 const hasSlots = (slotsByLocation.get(`${locationRow._kind}:${locationRow.id}`) || []).length > 0;
                                 return (
                                   <div
                                     key={`${locationRow._kind}:${locationRow.id}`}
-                                    className={`w-fit min-w-[13rem] max-w-[24rem] rounded-lg border px-2.5 py-2 space-y-1.5 ${
+                                    className={`rounded-lg border px-1.5 py-2 space-y-1 ${
                                       hasSlots
                                         ? 'border-white/10 bg-black/20'
                                         : 'border-white/10 bg-black/10'
                                     }`}
+                                    style={{
+                                      gridColumn: laneIndex + 1,
+                                      gridRow: `${locationRow.startRow} / ${locationRow.endRow}`,
+                                    }}
                                   >
-                                    <p className="text-zinc-100 text-xs font-semibold">{title}</p>
-                                    <p className="text-zinc-400 text-2xs">{subtitle}</p>
-                                    {blocks || <p className="text-zinc-500 text-2xs">Блоки не добавлены</p>}
+                                    <p className="text-zinc-100 text-[10px] font-semibold leading-tight break-words">{title}</p>
+                                    <p className="text-zinc-400 text-[9px] leading-tight">{subtitle}</p>
+                                    {blocks || <p className="text-zinc-500 text-[9px]">Блоки не добавлены</p>}
+                                  </div>
+                                );
+                              })}
+                              {entranceFloors.map((floor, floorIndex) => {
+                                const floorApartments = apartmentsByFloor.get(floor.id) || [];
+                                const floorCounts = getFloorCounts(floor.id);
+                                const floorRooms = floorCounts.roomsCount;
+                                return (
+                                  <div
+                                    key={floor.id}
+                                    style={{
+                                      gridColumn: entranceLinearLayoutRows.length + 1,
+                                      gridRow: floorIndex + 1,
+                                    }}
+                                    className="min-w-0"
+                                  >
+                                    {renderFloorCard(
+                                      floor,
+                                      floorApartments,
+                                      floorRooms,
+                                      false,
+                                      entranceTransits,
+                                      entranceStairwells,
+                                    )}
                                   </div>
                                 );
                               })}
                             </div>
-                          ) : null}
-                          {entranceFloors.length ? (
-                            <div className="space-y-2 min-w-0 flex-1">
-                              {entranceFloors.map((floor) => {
-                                const floorApartments = apartmentsByFloor.get(floor.id) || [];
-                                const floorCounts = getFloorCounts(floor.id);
-                                const floorRooms = floorCounts.roomsCount;
-                                return renderFloorCard(
-                                  floor,
-                                  floorApartments,
-                                  floorRooms,
-                                  false,
-                                  entranceTransits,
-                                  entranceStairwells,
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <p className="text-zinc-500 text-xs">Этажи ещё не добавлены</p>
-                          )}
-                        </div>
+                          </div>
+                        ) : (
+                          <p className="text-zinc-500 text-xs">Этажи ещё не добавлены</p>
+                        )}
                       </section>
                     );
                   })}

@@ -15,6 +15,27 @@ function formatQty(value) {
   return Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 });
 }
 
+function floorSortRank(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+}
+
+function getVisibleRangeSpanRows(visibleFloors, minRank, maxRank) {
+  let startIndex = -1;
+  let endIndex = -1;
+  visibleFloors.forEach((floorRow, index) => {
+    const rank = floorSortRank(floorRow?.sort_order);
+    if (rank < minRank || rank > maxRank) return;
+    if (startIndex === -1) startIndex = index;
+    endIndex = index;
+  });
+  if (startIndex === -1 || endIndex === -1) return null;
+  return {
+    startRow: startIndex + 1,
+    endRow: endIndex + 2,
+  };
+}
+
 function slotCompleteness(slot, entryNames = []) {
   const hasSystem = Boolean(String(slot?.system_name || '').trim());
   const hasCategory = Boolean(String(slot?.category_name || '').trim());
@@ -1505,13 +1526,38 @@ export default function ObjectSettingsTabRefactored() {
                       ...entranceTransits.map((row) => ({ ...row, _kind: 'transit' })),
                       ...entranceStairwells.map((row) => ({ ...row, _kind: 'stairwell' })),
                     ];
+                    const entranceLinearLayoutRows = entranceLinearLocations
+                      .map((row) => {
+                        const fromRank = floorSortRank(row.from_floor_sort_order);
+                        const toRank = floorSortRank(row.to_floor_sort_order);
+                        const minRank = Math.min(fromRank, toRank);
+                        const maxRank = Math.max(fromRank, toRank);
+                        const spanRows = getVisibleRangeSpanRows(entranceFloors, minRank, maxRank);
+                        if (!spanRows) return null;
+                        return {
+                          ...row,
+                          ...spanRows,
+                        };
+                      })
+                      .filter(Boolean)
+                      .filter((row) => {
+                        if (!hasSlotFilters) return true;
+                        const slots = slotsByLocation.get(`${row._kind}:${row.id}`) || [];
+                        return slots.some((slot) => slotMatchesFilters(slot));
+                      });
                     return (
                       <section key={entrance.id} className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-3 space-y-2">
                         <p className="text-emerald-200 text-sm font-medium">Подъезд {entrance.name}</p>
-                        <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
-                          {entranceLinearLocations.length ? (
-                            <div className="xl:w-fit xl:max-w-[26rem] space-y-2">
-                              {entranceLinearLocations.map((locationRow) => {
+                        {entranceFloors.length ? (
+                          <div className="min-w-0 overflow-x-auto">
+                            <div
+                              className="grid gap-2 min-w-[26rem]"
+                              style={{
+                                gridTemplateColumns: `${entranceLinearLayoutRows.length ? `repeat(${entranceLinearLayoutRows.length}, minmax(11rem, 12rem)) ` : ''}minmax(0, 1fr)`,
+                                alignItems: 'stretch',
+                              }}
+                            >
+                              {entranceLinearLayoutRows.map((locationRow, laneIndex) => {
                                 const prefix = locationRow._kind === 'transit' ? 'Транзит' : 'ЛК';
                                 const locationTitle = `${prefix} ${locationRow.name}`;
                                 const locationRange = `Этаж ${locationRow.from_floor_name}–${locationRow.to_floor_name}`;
@@ -1521,179 +1567,187 @@ export default function ObjectSettingsTabRefactored() {
                                 return (
                                   <div
                                     key={`${locationRow._kind}:${locationRow.id}`}
-                                    className={`w-fit min-w-[13rem] max-w-[26rem] rounded-lg border px-2.5 py-2 space-y-1.5 ${
+                                    className={`rounded-lg border px-2 py-2 space-y-1.5 ${
                                       locationHasBlocks
                                         ? 'border-white/10 bg-black/20'
                                         : 'border-rose-500/45 bg-rose-950/15'
                                     }`}
+                                    style={{
+                                      gridColumn: laneIndex + 1,
+                                      gridRow: `${locationRow.startRow} / ${locationRow.endRow}`,
+                                    }}
                                   >
-                                    <p className="text-zinc-100 text-xs font-semibold leading-tight">{locationTitle}</p>
-                                    <p className="text-zinc-400 text-2xs">{locationRange}</p>
+                                    <p className="text-zinc-100 text-[11px] font-semibold leading-tight break-words">{locationTitle}</p>
+                                    <p className="text-zinc-400 text-[10px] leading-tight">{locationRange}</p>
                                     {renderLocationActions(locationRow._kind, locationRow.id, locationTitle)}
                                     {squares}
                                   </div>
                                 );
                               })}
-                            </div>
-                          ) : null}
 
-                          {entranceFloors.length ? (
-                            <div className="space-y-2 min-w-0 flex-1">
-                              {entranceFloors.map((floor) => {
-                              const floorApartmentsRaw = apartmentsByFloor.get(floor.id) || [];
-                              const floorRoomsBucket = floorApartmentsRaw.find((x) => x.name === FLOOR_ROOMS_BUCKET_NAME);
-                              const floorApartments = floorApartmentsRaw.filter((x) => x.name !== FLOOR_ROOMS_BUCKET_NAME);
-                              const floorRooms = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
-                              const floorApartmentRoomsCount = floorApartments.reduce(
-                                (acc, apartment) => acc + (roomsByApartment.get(apartment.id) || []).length,
-                                0,
-                              );
-                              const floorRoomsCount = floorRooms.length + floorApartmentRoomsCount;
-                              const collapsed = collapsedFloorSet.has(floor.id);
-                              const floorHasBlocks = (
-                                floorRooms.some((room) => hasLocationBlocks('room', room.id))
-                                || floorApartments.some((apartment) => (
-                                  hasLocationBlocks('apartment', apartment.id)
-                                  || (roomsByApartment.get(apartment.id) || []).some((room) => hasLocationBlocks('room', room.id))
-                                ))
-                              );
+                              {entranceFloors.map((floor, floorIndex) => {
+                                const floorApartmentsRaw = apartmentsByFloor.get(floor.id) || [];
+                                const floorRoomsBucket = floorApartmentsRaw.find((x) => x.name === FLOOR_ROOMS_BUCKET_NAME);
+                                const floorApartments = floorApartmentsRaw.filter((x) => x.name !== FLOOR_ROOMS_BUCKET_NAME);
+                                const floorRooms = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
+                                const floorApartmentRoomsCount = floorApartments.reduce(
+                                  (acc, apartment) => acc + (roomsByApartment.get(apartment.id) || []).length,
+                                  0,
+                                );
+                                const floorRoomsCount = floorRooms.length + floorApartmentRoomsCount;
+                                const collapsed = collapsedFloorSet.has(floor.id);
+                                const floorHasBlocks = (
+                                  floorRooms.some((room) => hasLocationBlocks('room', room.id))
+                                  || floorApartments.some((apartment) => (
+                                    hasLocationBlocks('apartment', apartment.id)
+                                    || (roomsByApartment.get(apartment.id) || []).some((room) => hasLocationBlocks('room', room.id))
+                                  ))
+                                );
                                 return (
                                   <div
                                     key={floor.id}
-                                    className={`rounded-lg border p-2.5 space-y-2 ${
-                                      floorHasBlocks
-                                        ? 'border-white/10 bg-black/20'
-                                        : 'border-rose-500/50 bg-rose-950/20'
-                                    }`}
+                                    style={{
+                                      gridColumn: entranceLinearLayoutRows.length + 1,
+                                      gridRow: floorIndex + 1,
+                                    }}
+                                    className="min-w-0"
                                   >
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleFloor(floor.id)}
-                                      className="text-zinc-100 text-xs font-semibold hover:text-white"
+                                    <div
+                                      className={`rounded-lg border p-2.5 space-y-2 ${
+                                        floorHasBlocks
+                                          ? 'border-white/10 bg-black/20'
+                                          : 'border-rose-500/50 bg-rose-950/20'
+                                      }`}
                                     >
-                                      Этаж {floor.name}
-                                    </button>
-                                    <span className="text-[10px] text-zinc-400">
-                                      Квартир: {floorApartments.length} · Помещений: {floorRoomsCount}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleCopyFloorBlocks(floor)}
-                                      className="px-2 py-0.5 rounded border border-white/15 text-[10px] text-zinc-200 hover:bg-white/10"
-                                      disabled={!!pasteBusyKey || slotBusy}
-                                    >
-                                      Копировать этаж
-                                    </button>
-                                    {copiedFloorTemplate && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handlePasteFloorBlocks(floor)}
-                                        className="px-2 py-0.5 rounded border border-sky-400/40 text-[10px] text-sky-200 hover:bg-sky-900/30"
-                                        disabled={!!pasteBusyKey || slotBusy}
-                                      >
-                                        {pasteBusyKey === `floor:${floor.id}` ? 'Вставка…' : 'Вставить этаж'}
-                                      </button>
-                                    )}
-                                  </div>
-                                  {!collapsed && (
-                                    <div className="space-y-2">
-                                      {floorRooms.length ? (
-                                        <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 space-y-1.5">
-                                          <p className="text-zinc-200 text-2xs font-medium">Помещения на этаже</p>
-                                          {floorRooms.map((room) => (
-                                            (() => {
-                                              const roomSquares = renderSystemSquares('room', room.id, `Пом. ${room.name}`);
-                                              if (!roomSquares) return null;
-                                              const roomHasBlocks = hasLocationBlocks('room', room.id);
-                                              return (
-                                                <div
-                                                  key={room.id}
-                                                  className={`rounded border px-2 py-1.5 space-y-1.5 ${
-                                                    roomHasBlocks
-                                                      ? 'border-white/10 bg-black/20'
-                                                      : 'border-rose-500/50 bg-rose-950/20'
-                                                  }`}
-                                                >
-                                                  <p className="text-zinc-200 text-2xs font-medium">Пом. {room.name}</p>
-                                                  {renderLocationActions('room', room.id, `Пом. ${room.name}`)}
-                                                  {roomSquares}
-                                                </div>
-                                              );
-                                            })()
-                                          ))}
-                                        </div>
-                                      ) : null}
-
-                                      {floorApartments.length ? (
-                                        <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 space-y-1.5">
-                                          <p className="text-zinc-200 text-2xs font-medium">Квартиры на этаже</p>
-                                          {floorApartments.map((apartment) => (
-                                            (() => {
-                                              const apartmentSquares = renderSystemSquares('apartment', apartment.id, `Кв. ${apartment.name}`);
-                                              const apartmentRoomCards = (roomsByApartment.get(apartment.id) || []).map((room) => {
-                                                const roomSquares = renderSystemSquares('room', room.id, `Пом. ${room.name}`);
-                                                if (!roomSquares) return null;
-                                                const roomHasBlocks = hasLocationBlocks('room', room.id);
-                                                return (
-                                                  <div
-                                                    key={room.id}
-                                                    className={`rounded border px-2 py-1 space-y-1 ${
-                                                      roomHasBlocks
-                                                        ? 'border-white/10 bg-zinc-800/70'
-                                                        : 'border-rose-500/50 bg-rose-950/30'
-                                                    }`}
-                                                  >
-                                                    <p className="text-zinc-300 text-[10px] font-medium">Пом. {room.name}</p>
-                                                    {renderLocationActions('room', room.id, `Пом. ${room.name}`)}
-                                                    {roomSquares}
-                                                  </div>
-                                                );
-                                              }).filter(Boolean);
-                                              if (!apartmentSquares && apartmentRoomCards.length === 0) return null;
-                                              const apartmentHasBlocks = (
-                                                hasLocationBlocks('apartment', apartment.id)
-                                                || (roomsByApartment.get(apartment.id) || []).some((room) => hasLocationBlocks('room', room.id))
-                                              );
-                                              return (
-                                                <div
-                                                  key={apartment.id}
-                                                  className={`rounded border px-2 py-1.5 space-y-1.5 ${
-                                                    apartmentHasBlocks
-                                                      ? 'border-white/10 bg-black/20'
-                                                      : 'border-rose-500/50 bg-rose-950/20'
-                                                  }`}
-                                                >
-                                                  <p className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</p>
-                                                  {apartmentSquares && (
-                                                    <>
-                                                      {renderLocationActions('apartment', apartment.id, `Кв. ${apartment.name}`)}
-                                                      {apartmentSquares}
-                                                    </>
-                                                  )}
-                                                  {!!apartmentRoomCards.length && (
-                                                    <div className="mt-1 space-y-1">
-                                                      {apartmentRoomCards}
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleFloor(floor.id)}
+                                          className="text-zinc-100 text-xs font-semibold hover:text-white"
+                                        >
+                                          Этаж {floor.name}
+                                        </button>
+                                        <span className="text-[10px] text-zinc-400">
+                                          Квартир: {floorApartments.length} · Помещений: {floorRoomsCount}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleCopyFloorBlocks(floor)}
+                                          className="px-2 py-0.5 rounded border border-white/15 text-[10px] text-zinc-200 hover:bg-white/10"
+                                          disabled={!!pasteBusyKey || slotBusy}
+                                        >
+                                          Копировать этаж
+                                        </button>
+                                        {copiedFloorTemplate && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handlePasteFloorBlocks(floor)}
+                                            className="px-2 py-0.5 rounded border border-sky-400/40 text-[10px] text-sky-200 hover:bg-sky-900/30"
+                                            disabled={!!pasteBusyKey || slotBusy}
+                                          >
+                                            {pasteBusyKey === `floor:${floor.id}` ? 'Вставка…' : 'Вставить этаж'}
+                                          </button>
+                                        )}
+                                      </div>
+                                      {!collapsed && (
+                                        <div className="space-y-2">
+                                          {floorRooms.length ? (
+                                            <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 space-y-1.5">
+                                              <p className="text-zinc-200 text-2xs font-medium">Помещения на этаже</p>
+                                              {floorRooms.map((room) => (
+                                                (() => {
+                                                  const roomSquares = renderSystemSquares('room', room.id, `Пом. ${room.name}`);
+                                                  if (!roomSquares) return null;
+                                                  const roomHasBlocks = hasLocationBlocks('room', room.id);
+                                                  return (
+                                                    <div
+                                                      key={room.id}
+                                                      className={`rounded border px-2 py-1.5 space-y-1.5 ${
+                                                        roomHasBlocks
+                                                          ? 'border-white/10 bg-black/20'
+                                                          : 'border-rose-500/50 bg-rose-950/20'
+                                                      }`}
+                                                    >
+                                                      <p className="text-zinc-200 text-2xs font-medium">Пом. {room.name}</p>
+                                                      {renderLocationActions('room', room.id, `Пом. ${room.name}`)}
+                                                      {roomSquares}
                                                     </div>
-                                                  )}
-                                                </div>
-                                              );
-                                            })()
-                                          ))}
+                                                  );
+                                                })()
+                                              ))}
+                                            </div>
+                                          ) : null}
+
+                                          {floorApartments.length ? (
+                                            <div className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 space-y-1.5">
+                                              <p className="text-zinc-200 text-2xs font-medium">Квартиры на этаже</p>
+                                              {floorApartments.map((apartment) => (
+                                                (() => {
+                                                  const apartmentSquares = renderSystemSquares('apartment', apartment.id, `Кв. ${apartment.name}`);
+                                                  const apartmentRoomCards = (roomsByApartment.get(apartment.id) || []).map((room) => {
+                                                    const roomSquares = renderSystemSquares('room', room.id, `Пом. ${room.name}`);
+                                                    if (!roomSquares) return null;
+                                                    const roomHasBlocks = hasLocationBlocks('room', room.id);
+                                                    return (
+                                                      <div
+                                                        key={room.id}
+                                                        className={`rounded border px-2 py-1 space-y-1 ${
+                                                          roomHasBlocks
+                                                            ? 'border-white/10 bg-zinc-800/70'
+                                                            : 'border-rose-500/50 bg-rose-950/30'
+                                                        }`}
+                                                      >
+                                                        <p className="text-zinc-300 text-[10px] font-medium">Пом. {room.name}</p>
+                                                        {renderLocationActions('room', room.id, `Пом. ${room.name}`)}
+                                                        {roomSquares}
+                                                      </div>
+                                                    );
+                                                  }).filter(Boolean);
+                                                  if (!apartmentSquares && apartmentRoomCards.length === 0) return null;
+                                                  const apartmentHasBlocks = (
+                                                    hasLocationBlocks('apartment', apartment.id)
+                                                    || (roomsByApartment.get(apartment.id) || []).some((room) => hasLocationBlocks('room', room.id))
+                                                  );
+                                                  return (
+                                                    <div
+                                                      key={apartment.id}
+                                                      className={`rounded border px-2 py-1.5 space-y-1.5 ${
+                                                        apartmentHasBlocks
+                                                          ? 'border-white/10 bg-black/20'
+                                                          : 'border-rose-500/50 bg-rose-950/20'
+                                                      }`}
+                                                    >
+                                                      <p className="text-zinc-200 text-2xs font-medium">Кв. {apartment.name}</p>
+                                                      {apartmentSquares && (
+                                                        <>
+                                                          {renderLocationActions('apartment', apartment.id, `Кв. ${apartment.name}`)}
+                                                          {apartmentSquares}
+                                                        </>
+                                                      )}
+                                                      {!!apartmentRoomCards.length && (
+                                                        <div className="mt-1 space-y-1">
+                                                          {apartmentRoomCards}
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  );
+                                                })()
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <p className="text-zinc-500 text-2xs">Квартиры на этаже не добавлены</p>
+                                          )}
                                         </div>
-                                      ) : (
-                                        <p className="text-zinc-500 text-2xs">Квартиры на этаже не добавлены</p>
                                       )}
                                     </div>
-                                  )}
                                   </div>
                                 );
                               })}
                             </div>
-                          ) : (
-                            <p className="text-zinc-500 text-xs">Этажи еще не добавлены</p>
-                          )}
-                        </div>
+                          </div>
+                        ) : (
+                          <p className="text-zinc-500 text-xs">Этажи еще не добавлены</p>
+                        )}
                       </section>
                     );
                   })}
