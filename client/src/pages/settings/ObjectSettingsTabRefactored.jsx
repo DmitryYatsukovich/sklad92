@@ -112,7 +112,7 @@ function SystemSquare({
         }
         onOpen(slot);
       }}
-      className={`relative w-[5rem] h-[4.5rem] rounded-md border p-1.5 text-left transition hover:bg-white/10 hover:shadow-[0_8px_18px_rgba(0,0,0,0.24)] shadow-[0_4px_10px_rgba(0,0,0,0.18)] ${incomplete ? 'border-rose-500/70 bg-rose-950/35 text-rose-100' : 'border-white/15 bg-zinc-900/80 text-zinc-100'} ${selectionMode ? (selected ? 'ring-2 ring-white/70' : 'ring-1 ring-white/25') : ''}`}
+      className={`relative w-[4.25rem] h-[3.9rem] rounded-md border p-1 text-left transition hover:bg-white/10 hover:shadow-[0_8px_18px_rgba(0,0,0,0.24)] shadow-[0_4px_10px_rgba(0,0,0,0.18)] ${incomplete ? 'border-rose-500/70 bg-rose-950/35 text-rose-100' : 'border-white/15 bg-zinc-900/80 text-zinc-100'} ${selectionMode ? (selected ? 'ring-2 ring-white/70' : 'ring-1 ring-white/25') : ''}`}
       title={tooltip}
     >
       {selectionMode && (
@@ -123,12 +123,12 @@ function SystemSquare({
       )}
       <div className="flex h-full flex-col justify-between">
         <div className="space-y-0.5">
-          <p className="text-[8px] font-semibold leading-tight truncate tracking-wide uppercase">{slot.system_name}</p>
-          <p className="text-[8px] text-zinc-400 leading-tight truncate">{slot.category_name || 'Без категории'}</p>
+          <p className="text-[7px] font-semibold leading-tight truncate tracking-wide uppercase">{slot.system_name}</p>
+          <p className="text-[7px] text-zinc-400 leading-tight truncate">{slot.category_name || 'Без категории'}</p>
         </div>
         <div className="space-y-0.5">
-          <p className="text-[8px] text-zinc-200/90 leading-tight overflow-hidden text-ellipsis">{previewText}</p>
-          <p className="inline-flex rounded-full border border-white/15 px-1 py-0.5 text-[8px] text-zinc-300 leading-tight">
+          <p className="text-[7px] text-zinc-200/90 leading-tight overflow-hidden text-ellipsis">{previewText}</p>
+          <p className="inline-flex rounded-full border border-white/15 px-1 py-0.5 text-[7px] text-zinc-300 leading-tight">
             Позиций: {totals?.positions || 0}
           </p>
         </div>
@@ -1228,41 +1228,41 @@ export default function ObjectSettingsTabRefactored() {
     const selectingMultiple = multiCopyLocationKey === key;
     const selectedCount = selectingMultiple ? multiCopySelectedSlotIds.length : 0;
     return (
-      <div className="flex flex-wrap items-center gap-1">
+      <div className="grid grid-cols-2 gap-1">
         <button
           type="button"
           onClick={() => handleCopyLocationBlocks(locationKind, locationId, title)}
-          className="px-1.5 py-0.5 rounded border border-white/15 text-[9px] text-zinc-200 hover:bg-white/10"
+          className="px-1 py-0.5 rounded border border-white/15 text-[8px] text-zinc-200 hover:bg-white/10 leading-tight"
           disabled={!!pasteBusyKey || slotBusy}
         >
-          Копировать все блоки
+          Коп. все
         </button>
         {!selectingMultiple ? (
           <button
             type="button"
             onClick={() => handleStartMultiCopySelection(locationKind, locationId)}
-            className="px-1.5 py-0.5 rounded border border-indigo-400/40 text-[9px] text-indigo-200 hover:bg-indigo-900/30"
+            className="px-1 py-0.5 rounded border border-indigo-400/40 text-[8px] text-indigo-200 hover:bg-indigo-900/30 leading-tight"
             disabled={!!pasteBusyKey || slotBusy || blockCount === 0}
           >
-            Копировать несколько
+            Коп. выбор
           </button>
         ) : (
           <>
             <button
               type="button"
               onClick={() => handleCopySelectedBlocks(locationKind, locationId, title)}
-              className="px-1.5 py-0.5 rounded border border-indigo-300/60 text-[9px] text-indigo-100 hover:bg-indigo-900/40 disabled:opacity-40"
+              className="px-1 py-0.5 rounded border border-indigo-300/60 text-[8px] text-indigo-100 hover:bg-indigo-900/40 disabled:opacity-40 leading-tight"
               disabled={!!pasteBusyKey || slotBusy || selectedCount === 0}
             >
-              Копировать ({selectedCount})
+              Коп. ({selectedCount})
             </button>
             <button
               type="button"
               onClick={handleCancelMultiCopySelection}
-              className="px-1.5 py-0.5 rounded border border-white/20 text-[9px] text-zinc-300 hover:bg-white/10"
+              className="px-1 py-0.5 rounded border border-white/20 text-[8px] text-zinc-300 hover:bg-white/10 leading-tight"
               disabled={!!pasteBusyKey || slotBusy}
             >
-              Отмена выбора
+              Снять выбор
             </button>
           </>
         )}
@@ -1270,19 +1270,19 @@ export default function ObjectSettingsTabRefactored() {
           <button
             type="button"
             onClick={() => handlePasteLocationBlocks(locationKind, locationId, title)}
-            className="px-1.5 py-0.5 rounded border border-sky-400/40 text-[9px] text-sky-200 hover:bg-sky-900/30"
+            className="px-1 py-0.5 rounded border border-sky-400/40 text-[8px] text-sky-200 hover:bg-sky-900/30 leading-tight"
             disabled={!!pasteBusyKey || slotBusy}
           >
-            {locationBusy ? 'Вставка…' : 'Вставить блоки'}
+            {locationBusy ? 'Вставка…' : 'Вставить'}
           </button>
         )}
         <button
           type="button"
           onClick={() => handleDeleteLocationBlocks(locationKind, locationId, title)}
-          className="px-1.5 py-0.5 rounded border border-rose-400/40 text-[9px] text-rose-200 hover:bg-rose-900/30 disabled:opacity-40"
+          className={`px-1 py-0.5 rounded border border-rose-400/40 text-[8px] text-rose-200 hover:bg-rose-900/30 disabled:opacity-40 leading-tight ${canPaste ? 'col-span-2' : ''}`}
           disabled={!!pasteBusyKey || slotBusy || blockCount === 0}
         >
-          Удалить блоки
+          Удалить
         </button>
       </div>
     );
@@ -1352,7 +1352,7 @@ export default function ObjectSettingsTabRefactored() {
               {systemRow.categories.map((categoryRow) => (
                 <div key={`${systemRow.systemName}:${categoryRow.categoryName}`} className="space-y-0.5">
                   <p className="text-[9px] text-zinc-400">{categoryRow.categoryName}</p>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-1.5">
                     {categoryRow.items.map(({ slot, entries, entryNames, completeness }) => {
                       const selectedForMultiCopy = selectingMultiple && multiCopySelectedSlotIds.includes(String(slot.id));
                       return (
@@ -1383,7 +1383,7 @@ export default function ObjectSettingsTabRefactored() {
           <button
             type="button"
             onClick={() => openCreateSlotModal(locationKind, locationId, title)}
-            className="w-[5rem] h-[4.5rem] rounded-md border border-dashed border-white/20 bg-black/20 hover:bg-white/10 text-zinc-300 text-[10px] shadow-[0_4px_10px_rgba(0,0,0,0.18)]"
+            className="w-[4.25rem] h-[3.9rem] rounded-md border border-dashed border-white/20 bg-black/20 hover:bg-white/10 text-zinc-300 text-[9px] shadow-[0_4px_10px_rgba(0,0,0,0.18)]"
           >
             + Система
           </button>
@@ -1391,7 +1391,7 @@ export default function ObjectSettingsTabRefactored() {
             <button
               type="button"
               onClick={() => handlePasteSlotToLocation(locationKind, locationId, title)}
-              className="w-[5rem] h-[4.5rem] rounded-md border border-dashed border-sky-400/40 bg-sky-900/20 hover:bg-sky-800/30 text-sky-100 text-[10px] shadow-[0_4px_10px_rgba(0,0,0,0.18)]"
+              className="w-[4.25rem] h-[3.9rem] rounded-md border border-dashed border-sky-400/40 bg-sky-900/20 hover:bg-sky-800/30 text-sky-100 text-[9px] shadow-[0_4px_10px_rgba(0,0,0,0.18)]"
               disabled={!!pasteBusyKey || slotBusy}
               title={`Вставить блок: ${copiedSlotTemplate.systemName}`}
             >
@@ -1523,7 +1523,7 @@ export default function ObjectSettingsTabRefactored() {
               )}
 
               {objectEntrances.length ? (
-                <div className="grid gap-2.5 md:grid-cols-2">
+                <div className="grid gap-2.5 2xl:grid-cols-2">
                   {objectEntrances.map((entrance) => {
                     const entranceFloors = floorsByEntrance.get(entrance.id) || [];
                     const entranceTransits = transitsByEntrance.get(entrance.id) || [];
@@ -1557,9 +1557,9 @@ export default function ObjectSettingsTabRefactored() {
                         {entranceFloors.length ? (
                           <div className="min-w-0 overflow-x-auto">
                             <div
-                              className="grid gap-2 min-w-[26rem]"
+                              className="grid gap-1.5 min-w-0"
                               style={{
-                                gridTemplateColumns: `${entranceLinearLayoutRows.length ? `repeat(${entranceLinearLayoutRows.length}, minmax(11rem, 12rem)) ` : ''}minmax(0, 1fr)`,
+                                gridTemplateColumns: `${entranceLinearLayoutRows.length ? `repeat(${entranceLinearLayoutRows.length}, minmax(7.5rem, 9rem)) ` : ''}minmax(16rem, 1fr)`,
                                 alignItems: 'stretch',
                               }}
                             >
@@ -1573,7 +1573,7 @@ export default function ObjectSettingsTabRefactored() {
                                 return (
                                   <div
                                     key={`${locationRow._kind}:${locationRow.id}`}
-                                    className={`rounded-lg border px-1.5 py-1.5 space-y-1 shadow-[0_6px_14px_rgba(0,0,0,0.2)] ${
+                                    className={`rounded-lg border px-1 py-1 space-y-1 shadow-[0_6px_14px_rgba(0,0,0,0.2)] ${
                                       locationHasBlocks
                                         ? 'border-cyan-400/25 bg-gradient-to-b from-cyan-950/25 to-zinc-950/60'
                                         : 'border-rose-500/45 bg-rose-950/15'
@@ -1583,8 +1583,8 @@ export default function ObjectSettingsTabRefactored() {
                                       gridRow: `${locationRow.startRow} / ${locationRow.endRow}`,
                                     }}
                                   >
-                                    <p className="text-zinc-100 text-[10px] font-semibold leading-tight break-words uppercase tracking-wide">{locationTitle}</p>
-                                    <p className="text-zinc-400 text-[9px] leading-tight">{locationRange}</p>
+                                    <p className="text-zinc-100 text-[9px] font-semibold leading-tight break-words uppercase tracking-wide">{locationTitle}</p>
+                                    <p className="text-zinc-400 text-[8px] leading-tight">{locationRange}</p>
                                     {renderLocationActions(locationRow._kind, locationRow.id, locationTitle)}
                                     {squares}
                                   </div>

@@ -183,7 +183,7 @@ function LocationSlotChip({
       className={`rounded-md border shadow-sm text-left transition-transform ${
         compact
           ? 'p-1 min-h-[3.45rem] min-w-0 w-full max-w-none'
-          : 'p-1.5 min-h-[5rem] min-w-[10.5rem] max-w-[11.5rem]'
+          : 'p-1.5 min-h-[4.5rem] min-w-0 w-full max-w-none'
       } ${
         disabled ? 'opacity-55 cursor-not-allowed' : 'hover:scale-[1.01] hover:shadow-[0_6px_20px_rgba(0,0,0,0.25)]'
       } ${
@@ -1485,7 +1485,7 @@ export default function ObjectsOverview() {
             {systemRow.categories.map((categoryRow) => (
               <div key={categoryRow.key} className={`${compact ? 'space-y-0.5' : 'space-y-1'}`}>
                 <p className={`${compact ? 'text-[8px]' : 'text-[9px]'} text-zinc-400`}>{categoryRow.categoryName}</p>
-                <div className={`grid ${compact ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3'} gap-1`}>
+                <div className={`grid ${compact ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-2'} gap-1`}>
                   {categoryRow.slots.map((slot) => {
                     const entries = entriesBySlot.get(slot.id) || [];
                     const draft = productionDrafts[slot.id] || null;
@@ -1720,7 +1720,7 @@ export default function ObjectsOverview() {
     }
 
     return (
-      <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+      <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
         {filteredObjects.map((objectRow) => {
           const objectEntrancesRaw = (entrancesByObject.get(objectRow.id) || [])
             .filter((entry) => !entranceIdSet.size || entranceIdSet.has(entry.id));
@@ -1791,7 +1791,7 @@ export default function ObjectsOverview() {
               )}
 
               {objectEntrances.length ? (
-                <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-2.5 2xl:grid-cols-2">
                   {objectEntrances.map((entry) => {
                     const entranceFloors = entry._visibleFloors || [];
                     const entranceTransits = transitsByEntrance.get(Number(entry.id)) || [];
@@ -1862,9 +1862,9 @@ export default function ObjectsOverview() {
                         {entranceFloors.length ? (
                           <div className="min-w-0 overflow-x-auto">
                             <div
-                              className="grid gap-2 min-w-[22rem]"
+                              className="grid gap-1.5 min-w-0"
                               style={{
-                                gridTemplateColumns: `${entranceLinearLayoutRows.length ? `repeat(${entranceLinearLayoutRows.length}, minmax(6.75rem, 8rem)) ` : ''}minmax(0, 1fr)`,
+                                gridTemplateColumns: `${entranceLinearLayoutRows.length ? `repeat(${entranceLinearLayoutRows.length}, minmax(5.5rem, 6.5rem)) ` : ''}minmax(14rem, 1fr)`,
                                 alignItems: 'stretch',
                               }}
                             >
@@ -1877,7 +1877,7 @@ export default function ObjectsOverview() {
                                 return (
                                   <div
                                     key={`${locationRow._kind}:${locationRow.id}`}
-                                    className={`rounded-lg border px-1.5 py-1.5 space-y-1 shadow-[0_6px_14px_rgba(0,0,0,0.22)] ${
+                                    className={`rounded-lg border px-1 py-1 space-y-1 shadow-[0_6px_14px_rgba(0,0,0,0.22)] ${
                                       hasSlots
                                         ? 'border-cyan-400/25 bg-gradient-to-b from-cyan-950/25 to-zinc-950/60'
                                         : 'border-white/10 bg-black/10'
@@ -1887,8 +1887,8 @@ export default function ObjectsOverview() {
                                       gridRow: `${locationRow.startRow} / ${locationRow.endRow}`,
                                     }}
                                   >
-                                    <p className="text-zinc-100 text-[10px] font-semibold leading-tight break-words uppercase tracking-wide">{title}</p>
-                                    <p className="text-zinc-400 text-[9px] leading-tight">{subtitle}</p>
+                                    <p className="text-zinc-100 text-[9px] font-semibold leading-tight break-words uppercase tracking-wide">{title}</p>
+                                    <p className="text-zinc-400 text-[8px] leading-tight">{subtitle}</p>
                                     {blocks || <p className="text-zinc-500 text-[9px]">Блоки не добавлены</p>}
                                   </div>
                                 );
