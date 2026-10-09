@@ -89,7 +89,7 @@ function sendServerWinsConflict(res, row) {
 }
 
 async function loadWorkLocationCatalog() {
-  const [objects, workEntrances, workFloors, workApartments, workRooms] = await Promise.all([
+  const [objects, workEntrances, workFloors, workApartments, workRooms, workTransits, workStairwells] = await Promise.all([
     pool.query('SELECT id, name FROM warehouse_objects ORDER BY name'),
     pool.query(
       `SELECT e.id, e.name, e.object_id, o.name AS object_name
@@ -124,6 +124,28 @@ async function loadWorkLocationCatalog() {
        LEFT JOIN warehouse_objects o ON o.id = e.object_id
        ORDER BY o.name NULLS LAST, e.name, f.name, a.name, r.name`,
     ),
+    pool.query(
+      `SELECT t.id, t.name, t.object_id, o.name AS object_name, t.entrance_id, e.name AS entrance_name,
+              t.from_floor_id, ff.name AS from_floor_name,
+              t.to_floor_id, tf.name AS to_floor_name
+       FROM work_transits t
+       JOIN work_entrances e ON e.id = t.entrance_id
+       JOIN work_floors ff ON ff.id = t.from_floor_id
+       JOIN work_floors tf ON tf.id = t.to_floor_id
+       LEFT JOIN warehouse_objects o ON o.id = t.object_id
+       ORDER BY o.name NULLS LAST, e.name, ff.name, tf.name, t.name`,
+    ),
+    pool.query(
+      `SELECT s.id, s.name, s.object_id, o.name AS object_name, s.entrance_id, e.name AS entrance_name,
+              s.from_floor_id, ff.name AS from_floor_name,
+              s.to_floor_id, tf.name AS to_floor_name
+       FROM work_stairwells s
+       JOIN work_entrances e ON e.id = s.entrance_id
+       JOIN work_floors ff ON ff.id = s.from_floor_id
+       JOIN work_floors tf ON tf.id = s.to_floor_id
+       LEFT JOIN warehouse_objects o ON o.id = s.object_id
+       ORDER BY o.name NULLS LAST, e.name, ff.name, tf.name, s.name`,
+    ),
   ]);
   return {
     objects: objects.rows,
@@ -131,6 +153,8 @@ async function loadWorkLocationCatalog() {
     work_floors: workFloors.rows,
     work_apartments: workApartments.rows,
     work_rooms: workRooms.rows,
+    work_transits: workTransits.rows,
+    work_stairwells: workStairwells.rows,
   };
 }
 
@@ -140,6 +164,26 @@ function findById(list, id) {
 
 function formatAllocationLocationLabel(catalog, locationKind, locationId) {
   if (!catalog || !locationKind || !locationId) return '';
+  if (locationKind === 'transit') {
+    const row = findById(catalog.work_transits, locationId);
+    if (!row) return '';
+    return [
+      row.object_name || null,
+      row.entrance_name ? `подъезд ${row.entrance_name}` : null,
+      (row.from_floor_name || row.to_floor_name) ? `этаж ${row.from_floor_name || '?'}-${row.to_floor_name || '?'}` : null,
+      row.name ? `транзит ${row.name}` : null,
+    ].filter(Boolean).join(' · ');
+  }
+  if (locationKind === 'stairwell') {
+    const row = findById(catalog.work_stairwells, locationId);
+    if (!row) return '';
+    return [
+      row.object_name || null,
+      row.entrance_name ? `подъезд ${row.entrance_name}` : null,
+      (row.from_floor_name || row.to_floor_name) ? `этаж ${row.from_floor_name || '?'}-${row.to_floor_name || '?'}` : null,
+      row.name ? `лк ${row.name}` : null,
+    ].filter(Boolean).join(' · ');
+  }
   let apartment = null;
   let room = null;
   if (locationKind === 'room') {
@@ -206,14 +250,30 @@ const PRODUCTION_SELECT = `
         ', '
       ) AS workers,
       STRING_AGG(
-        DISTINCT TRIM(BOTH ' ' FROM CONCAT_WS(
-          ' · ',
-          wo.name,
-          CASE WHEN we.name IS NOT NULL THEN CONCAT('подъезд ', we.name) ELSE NULL END,
-          CASE WHEN wf.name IS NOT NULL THEN CONCAT('этаж ', wf.name) ELSE NULL END,
-          CASE WHEN wa.name IS NOT NULL THEN CONCAT('кв. ', wa.name) ELSE NULL END,
-          CASE WHEN wr.name IS NOT NULL THEN CONCAT('пом. ', wr.name) ELSE NULL END
-        )),
+        DISTINCT CASE
+          WHEN ls.location_kind = 'transit' THEN TRIM(BOTH ' ' FROM CONCAT_WS(
+            ' · ',
+            wot.name,
+            CASE WHEN wet.name IS NOT NULL THEN CONCAT('подъезд ', wet.name) ELSE NULL END,
+            CASE WHEN wft_from.name IS NOT NULL OR wft_to.name IS NOT NULL THEN CONCAT('этаж ', COALESCE(wft_from.name, '?'), '-', COALESCE(wft_to.name, '?')) ELSE NULL END,
+            CASE WHEN wt.name IS NOT NULL THEN CONCAT('транзит ', wt.name) ELSE NULL END
+          ))
+          WHEN ls.location_kind = 'stairwell' THEN TRIM(BOTH ' ' FROM CONCAT_WS(
+            ' · ',
+            wos.name,
+            CASE WHEN wes.name IS NOT NULL THEN CONCAT('подъезд ', wes.name) ELSE NULL END,
+            CASE WHEN wfs_from.name IS NOT NULL OR wfs_to.name IS NOT NULL THEN CONCAT('этаж ', COALESCE(wfs_from.name, '?'), '-', COALESCE(wfs_to.name, '?')) ELSE NULL END,
+            CASE WHEN ws.name IS NOT NULL THEN CONCAT('лк ', ws.name) ELSE NULL END
+          ))
+          ELSE TRIM(BOTH ' ' FROM CONCAT_WS(
+            ' · ',
+            wo.name,
+            CASE WHEN we.name IS NOT NULL THEN CONCAT('подъезд ', we.name) ELSE NULL END,
+            CASE WHEN wf.name IS NOT NULL THEN CONCAT('этаж ', wf.name) ELSE NULL END,
+            CASE WHEN wa.name IS NOT NULL THEN CONCAT('кв. ', wa.name) ELSE NULL END,
+            CASE WHEN wr.name IS NOT NULL THEN CONCAT('пом. ', wr.name) ELSE NULL END
+          ))
+        END,
         ' | '
       ) AS locations
     FROM issuance_production_allocations ipa
@@ -226,6 +286,16 @@ const PRODUCTION_SELECT = `
     LEFT JOIN work_floors wf ON wf.id = wa.floor_id
     LEFT JOIN work_entrances we ON we.id = wf.entrance_id
     LEFT JOIN warehouse_objects wo ON wo.id = we.object_id
+    LEFT JOIN work_transits wt ON ls.location_kind = 'transit' AND wt.id = ls.location_id
+    LEFT JOIN work_stairwells ws ON ls.location_kind = 'stairwell' AND ws.id = ls.location_id
+    LEFT JOIN work_entrances wet ON wet.id = wt.entrance_id
+    LEFT JOIN work_entrances wes ON wes.id = ws.entrance_id
+    LEFT JOIN warehouse_objects wot ON wot.id = wt.object_id
+    LEFT JOIN warehouse_objects wos ON wos.id = ws.object_id
+    LEFT JOIN work_floors wft_from ON wft_from.id = wt.from_floor_id
+    LEFT JOIN work_floors wft_to ON wft_to.id = wt.to_floor_id
+    LEFT JOIN work_floors wfs_from ON wfs_from.id = ws.from_floor_id
+    LEFT JOIN work_floors wfs_to ON wfs_to.id = ws.to_floor_id
     WHERE ipa.issuance_id = i.id
   ) pa ON true
 `;

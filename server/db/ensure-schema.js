@@ -150,6 +150,26 @@ const statements = [
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (apartment_id, name)
   )`,
+  `CREATE TABLE IF NOT EXISTS work_transits (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    object_id INTEGER NOT NULL REFERENCES warehouse_objects(id) ON DELETE RESTRICT,
+    entrance_id INTEGER NOT NULL REFERENCES work_entrances(id) ON DELETE RESTRICT,
+    from_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+    to_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (entrance_id, name)
+  )`,
+  `CREATE TABLE IF NOT EXISTS work_stairwells (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    object_id INTEGER NOT NULL REFERENCES warehouse_objects(id) ON DELETE RESTRICT,
+    entrance_id INTEGER NOT NULL REFERENCES work_entrances(id) ON DELETE RESTRICT,
+    from_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+    to_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (entrance_id, name)
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_work_floors_entrance ON work_floors(entrance_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_floors_sort_order ON work_floors(entrance_id, sort_order)`,
   `WITH ranked AS (
@@ -166,6 +186,14 @@ const statements = [
      AND (wf.sort_order IS NULL OR wf.sort_order <> ranked.rn)`,
   `CREATE INDEX IF NOT EXISTS idx_work_apartments_floor ON work_apartments(floor_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_rooms_apartment ON work_rooms(apartment_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_work_transits_object ON work_transits(object_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_work_transits_entrance ON work_transits(entrance_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_work_transits_from_floor ON work_transits(from_floor_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_work_transits_to_floor ON work_transits(to_floor_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_work_stairwells_object ON work_stairwells(object_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_work_stairwells_entrance ON work_stairwells(entrance_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_work_stairwells_from_floor ON work_stairwells(from_floor_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_work_stairwells_to_floor ON work_stairwells(to_floor_id)`,
   `CREATE TABLE IF NOT EXISTS work_block_statuses (
     id SERIAL PRIMARY KEY,
     name VARCHAR(200) NOT NULL UNIQUE,
@@ -188,10 +216,12 @@ const statements = [
     assigned_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    CHECK (location_kind IN ('apartment', 'room')),
+    CHECK (location_kind IN ('apartment', 'room', 'transit', 'stairwell')),
     UNIQUE (location_kind, location_id, system_id)
   )`,
   `ALTER TABLE work_location_systems DROP CONSTRAINT IF EXISTS work_location_systems_location_kind_location_id_system_id_key`,
+  `ALTER TABLE work_location_systems DROP CONSTRAINT IF EXISTS work_location_systems_location_kind_check`,
+  `ALTER TABLE work_location_systems ADD CONSTRAINT work_location_systems_location_kind_check CHECK (location_kind IN ('apartment', 'room', 'transit', 'stairwell'))`,
   `ALTER TABLE work_location_systems ADD COLUMN IF NOT EXISTS status_id INTEGER REFERENCES work_block_statuses(id) ON DELETE SET NULL`,
   `ALTER TABLE work_location_systems ADD COLUMN IF NOT EXISTS assigned_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`,
   `CREATE INDEX IF NOT EXISTS idx_wls_location ON work_location_systems(location_kind, location_id)`,

@@ -32,6 +32,38 @@ async function ensureObjectStatusSchema() {
   if (!ensureObjectStatusSchemaPromise) {
     ensureObjectStatusSchemaPromise = (async () => {
       await pool.query(
+        `CREATE TABLE IF NOT EXISTS work_transits (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(200) NOT NULL,
+          object_id INTEGER NOT NULL REFERENCES warehouse_objects(id) ON DELETE RESTRICT,
+          entrance_id INTEGER NOT NULL REFERENCES work_entrances(id) ON DELETE RESTRICT,
+          from_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+          to_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          UNIQUE (entrance_id, name)
+        )`,
+      );
+      await pool.query(
+        `CREATE TABLE IF NOT EXISTS work_stairwells (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(200) NOT NULL,
+          object_id INTEGER NOT NULL REFERENCES warehouse_objects(id) ON DELETE RESTRICT,
+          entrance_id INTEGER NOT NULL REFERENCES work_entrances(id) ON DELETE RESTRICT,
+          from_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+          to_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          UNIQUE (entrance_id, name)
+        )`,
+      );
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_object ON work_transits(object_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_entrance ON work_transits(entrance_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_from_floor ON work_transits(from_floor_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_to_floor ON work_transits(to_floor_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_object ON work_stairwells(object_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_entrance ON work_stairwells(entrance_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_from_floor ON work_stairwells(from_floor_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_to_floor ON work_stairwells(to_floor_id)');
+      await pool.query(
         `CREATE TABLE IF NOT EXISTS work_block_statuses (
           id SERIAL PRIMARY KEY,
           name VARCHAR(200) NOT NULL UNIQUE,
@@ -54,6 +86,14 @@ async function ensureObjectStatusSchema() {
       );
       await pool.query(
         'ALTER TABLE work_location_systems ADD COLUMN IF NOT EXISTS assigned_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
+      );
+      await pool.query(
+        'ALTER TABLE work_location_systems DROP CONSTRAINT IF EXISTS work_location_systems_location_kind_check',
+      );
+      await pool.query(
+        `ALTER TABLE work_location_systems
+         ADD CONSTRAINT work_location_systems_location_kind_check
+         CHECK (location_kind IN ('apartment', 'room', 'transit', 'stairwell'))`,
       );
       await pool.query(
         'CREATE INDEX IF NOT EXISTS idx_wls_status ON work_location_systems(status_id)',
@@ -97,6 +137,8 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
       floors,
       apartments,
       rooms,
+      transits,
+      stairwells,
       locationSystems,
       locationSystemMaterials,
       locationSystemEquipment,
@@ -144,6 +186,28 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
         `SELECT id, name, apartment_id
          FROM work_rooms
          ORDER BY apartment_id, name`,
+      ),
+      pool.query(
+        `SELECT t.id, t.name, t.object_id, o.name AS object_name, t.entrance_id, e.name AS entrance_name,
+                t.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
+                t.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order
+         FROM work_transits t
+         JOIN work_entrances e ON e.id = t.entrance_id
+         JOIN work_floors ff ON ff.id = t.from_floor_id
+         JOIN work_floors tf ON tf.id = t.to_floor_id
+         LEFT JOIN warehouse_objects o ON o.id = t.object_id
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), t.name`,
+      ),
+      pool.query(
+        `SELECT s.id, s.name, s.object_id, o.name AS object_name, s.entrance_id, e.name AS entrance_name,
+                s.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
+                s.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order
+         FROM work_stairwells s
+         JOIN work_entrances e ON e.id = s.entrance_id
+         JOIN work_floors ff ON ff.id = s.from_floor_id
+         JOIN work_floors tf ON tf.id = s.to_floor_id
+         LEFT JOIN warehouse_objects o ON o.id = s.object_id
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), s.name`,
       ),
       pool.query(
         `SELECT ls.id, ls.location_kind, ls.location_id, ls.system_id, ls.category_id, ls.status_id, ls.assigned_user_id, ls.created_at, ls.updated_at,
@@ -228,6 +292,8 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
       floors: floors.rows,
       apartments: apartments.rows,
       rooms: rooms.rows,
+      transits: transits.rows,
+      stairwells: stairwells.rows,
       location_systems: locationSystems.rows,
       location_system_materials: locationSystemMaterials.rows,
       location_system_equipment: locationSystemEquipment.rows,

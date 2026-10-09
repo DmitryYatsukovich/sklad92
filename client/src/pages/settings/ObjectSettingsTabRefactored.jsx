@@ -50,6 +50,8 @@ function normalizePayload(payload) {
     floors: asObjects(safe.floors),
     apartments: asObjects(safe.apartments),
     rooms: asObjects(safe.rooms),
+    transits: asObjects(safe.transits),
+    stairwells: asObjects(safe.stairwells),
     systems: asObjects(safe.systems),
     categories: asObjects(safe.categories),
     locationSystems: asObjects(safe.location_systems),
@@ -57,6 +59,14 @@ function normalizePayload(payload) {
     locationSystemEquipment: asObjects(safe.location_system_equipment),
     locationSystemWorks: asObjects(safe.location_system_works),
   };
+}
+
+function getLocationKindTitle(kind) {
+  if (kind === 'room') return 'Помещение';
+  if (kind === 'apartment') return 'Квартира';
+  if (kind === 'transit') return 'Транзит';
+  if (kind === 'stairwell') return 'Лестничная клетка';
+  return 'Локация';
 }
 
 function SystemSquare({
@@ -226,6 +236,20 @@ export default function ObjectSettingsTabRefactored() {
     || naturalCompare(a.apartment_name, b.apartment_name)
     || naturalCompare(a.name, b.name)
   )), [data.rooms]);
+  const sortedTransits = useMemo(() => [...data.transits].sort((a, b) => (
+    naturalCompare(a.object_name, b.object_name)
+    || naturalCompare(a.entrance_name, b.entrance_name)
+    || ((a.from_floor_sort_order ?? Number.MAX_SAFE_INTEGER) - (b.from_floor_sort_order ?? Number.MAX_SAFE_INTEGER))
+    || ((a.to_floor_sort_order ?? Number.MAX_SAFE_INTEGER) - (b.to_floor_sort_order ?? Number.MAX_SAFE_INTEGER))
+    || naturalCompare(a.name, b.name)
+  )), [data.transits]);
+  const sortedStairwells = useMemo(() => [...data.stairwells].sort((a, b) => (
+    naturalCompare(a.object_name, b.object_name)
+    || naturalCompare(a.entrance_name, b.entrance_name)
+    || ((a.from_floor_sort_order ?? Number.MAX_SAFE_INTEGER) - (b.from_floor_sort_order ?? Number.MAX_SAFE_INTEGER))
+    || ((a.to_floor_sort_order ?? Number.MAX_SAFE_INTEGER) - (b.to_floor_sort_order ?? Number.MAX_SAFE_INTEGER))
+    || naturalCompare(a.name, b.name)
+  )), [data.stairwells]);
 
   const collapsedFloorSet = useMemo(() => new Set(
     collapsedFloors
@@ -272,6 +296,26 @@ export default function ObjectSettingsTabRefactored() {
     });
     return map;
   }, [sortedRooms]);
+
+  const transitsByEntrance = useMemo(() => {
+    const map = new Map();
+    sortedTransits.forEach((row) => {
+      const list = map.get(row.entrance_id) || [];
+      list.push(row);
+      map.set(row.entrance_id, list);
+    });
+    return map;
+  }, [sortedTransits]);
+
+  const stairwellsByEntrance = useMemo(() => {
+    const map = new Map();
+    sortedStairwells.forEach((row) => {
+      const list = map.get(row.entrance_id) || [];
+      list.push(row);
+      map.set(row.entrance_id, list);
+    });
+    return map;
+  }, [sortedStairwells]);
 
   const roomNameById = useMemo(() => {
     const map = new Map();
@@ -329,6 +373,8 @@ export default function ObjectSettingsTabRefactored() {
         if (!selectedRoomNames.length) return false;
         const roomNameKey = normalizeNameKey(roomNameById.get(slot.location_id));
         if (!selectedRoomNames.includes(roomNameKey)) return false;
+      } else {
+        return false;
       }
     }
     return true;
@@ -395,6 +441,16 @@ export default function ObjectSettingsTabRefactored() {
     sortedRooms.forEach((row) => map.set(row.id, row));
     return map;
   }, [sortedRooms]);
+  const transitById = useMemo(() => {
+    const map = new Map();
+    sortedTransits.forEach((row) => map.set(row.id, row));
+    return map;
+  }, [sortedTransits]);
+  const stairwellById = useMemo(() => {
+    const map = new Map();
+    sortedStairwells.forEach((row) => map.set(row.id, row));
+    return map;
+  }, [sortedStairwells]);
 
   const getSlotEntries = useCallback((slotId) => {
     const rows = [];
@@ -512,6 +568,8 @@ export default function ObjectSettingsTabRefactored() {
       if (!slot) return null;
       if (slot.location_kind === 'apartment') return apartmentById.get(slot.location_id)?.object_id || null;
       if (slot.location_kind === 'room') return roomById.get(slot.location_id)?.object_id || null;
+      if (slot.location_kind === 'transit') return transitById.get(slot.location_id)?.object_id || null;
+      if (slot.location_kind === 'stairwell') return stairwellById.get(slot.location_id)?.object_id || null;
       return null;
     };
     const pushEntry = (objectId, slot, name, quantity, unit = '') => {
@@ -593,6 +651,8 @@ export default function ObjectSettingsTabRefactored() {
     slotById,
     apartmentById,
     roomById,
+    transitById,
+    stairwellById,
     slotMatchesFilters,
   ]);
 
@@ -666,7 +726,7 @@ export default function ObjectSettingsTabRefactored() {
     setSlotDraft({
       locationKind: slot.location_kind,
       locationId: slot.location_id,
-      title: slot.locationTitle || (slot.location_kind === 'room' ? 'Помещение' : 'Квартира'),
+      title: slot.locationTitle || getLocationKindTitle(slot.location_kind),
     });
     setSlotSystemId(String(slot.system_id || ''));
     setSlotCategoryId(slot.category_id == null ? '' : String(slot.category_id));
@@ -1439,12 +1499,47 @@ export default function ObjectSettingsTabRefactored() {
                 <div className="grid gap-3 md:grid-cols-2">
                   {objectEntrances.map((entrance) => {
                     const entranceFloors = floorsByEntrance.get(entrance.id) || [];
+                    const entranceTransits = transitsByEntrance.get(entrance.id) || [];
+                    const entranceStairwells = stairwellsByEntrance.get(entrance.id) || [];
+                    const entranceLinearLocations = [
+                      ...entranceTransits.map((row) => ({ ...row, _kind: 'transit' })),
+                      ...entranceStairwells.map((row) => ({ ...row, _kind: 'stairwell' })),
+                    ];
                     return (
                       <section key={entrance.id} className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-3 space-y-2">
                         <p className="text-emerald-200 text-sm font-medium">Подъезд {entrance.name}</p>
-                        {entranceFloors.length ? (
-                          <div className="space-y-2">
-                            {entranceFloors.map((floor) => {
+                        <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
+                          {entranceLinearLocations.length ? (
+                            <div className="xl:w-fit xl:max-w-[26rem] space-y-2">
+                              {entranceLinearLocations.map((locationRow) => {
+                                const prefix = locationRow._kind === 'transit' ? 'Транзит' : 'ЛК';
+                                const locationTitle = `${prefix} ${locationRow.name}`;
+                                const locationRange = `Этаж ${locationRow.from_floor_name}–${locationRow.to_floor_name}`;
+                                const squares = renderSystemSquares(locationRow._kind, locationRow.id, locationTitle);
+                                if (!squares && hasSlotFilters) return null;
+                                const locationHasBlocks = hasLocationBlocks(locationRow._kind, locationRow.id);
+                                return (
+                                  <div
+                                    key={`${locationRow._kind}:${locationRow.id}`}
+                                    className={`w-fit min-w-[13rem] max-w-[26rem] rounded-lg border px-2.5 py-2 space-y-1.5 ${
+                                      locationHasBlocks
+                                        ? 'border-white/10 bg-black/20'
+                                        : 'border-rose-500/45 bg-rose-950/15'
+                                    }`}
+                                  >
+                                    <p className="text-zinc-100 text-xs font-semibold leading-tight">{locationTitle}</p>
+                                    <p className="text-zinc-400 text-2xs">{locationRange}</p>
+                                    {renderLocationActions(locationRow._kind, locationRow.id, locationTitle)}
+                                    {squares}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+
+                          {entranceFloors.length ? (
+                            <div className="space-y-2 min-w-0 flex-1">
+                              {entranceFloors.map((floor) => {
                               const floorApartmentsRaw = apartmentsByFloor.get(floor.id) || [];
                               const floorRoomsBucket = floorApartmentsRaw.find((x) => x.name === FLOOR_ROOMS_BUCKET_NAME);
                               const floorApartments = floorApartmentsRaw.filter((x) => x.name !== FLOOR_ROOMS_BUCKET_NAME);
@@ -1462,15 +1557,15 @@ export default function ObjectSettingsTabRefactored() {
                                   || (roomsByApartment.get(apartment.id) || []).some((room) => hasLocationBlocks('room', room.id))
                                 ))
                               );
-                              return (
-                                <div
-                                  key={floor.id}
-                                  className={`rounded-lg border p-2.5 space-y-2 ${
-                                    floorHasBlocks
-                                      ? 'border-white/10 bg-black/20'
-                                      : 'border-rose-500/50 bg-rose-950/20'
-                                  }`}
-                                >
+                                return (
+                                  <div
+                                    key={floor.id}
+                                    className={`rounded-lg border p-2.5 space-y-2 ${
+                                      floorHasBlocks
+                                        ? 'border-white/10 bg-black/20'
+                                        : 'border-rose-500/50 bg-rose-950/20'
+                                    }`}
+                                  >
                                   <div className="flex flex-wrap items-center gap-2">
                                     <button
                                       type="button"
@@ -1591,13 +1686,14 @@ export default function ObjectSettingsTabRefactored() {
                                       )}
                                     </div>
                                   )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <p className="text-zinc-500 text-xs">Этажи еще не добавлены</p>
-                        )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p className="text-zinc-500 text-xs">Этажи еще не добавлены</p>
+                          )}
+                        </div>
                       </section>
                     );
                   })}
@@ -1687,7 +1783,7 @@ export default function ObjectSettingsTabRefactored() {
                   {activeSlot ? `Настройка системы: ${activeSlot.system_name}` : 'Добавить систему'}
                 </h3>
                 <p className="text-zinc-400 text-sm">
-                  {slotDraft.title || (activeSlot?.location_kind === 'room' ? 'Помещение' : 'Квартира')}
+                  {slotDraft.title || getLocationKindTitle(activeSlot?.location_kind)}
                 </p>
               </div>
               {activeSlot && (

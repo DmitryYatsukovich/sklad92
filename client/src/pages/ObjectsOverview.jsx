@@ -8,6 +8,8 @@ const EMPTY_DATA = {
   floors: [],
   apartments: [],
   rooms: [],
+  transits: [],
+  stairwells: [],
   location_systems: [],
   location_system_materials: [],
   location_system_equipment: [],
@@ -36,6 +38,8 @@ function normalizeHierarchy(value) {
     floors: normalizeList(safe.floors),
     apartments: normalizeList(safe.apartments),
     rooms: normalizeList(safe.rooms),
+    transits: normalizeList(safe.transits),
+    stairwells: normalizeList(safe.stairwells),
     location_systems: normalizeList(safe.location_systems),
     location_system_materials: normalizeList(safe.location_system_materials),
     location_system_equipment: normalizeList(safe.location_system_equipment),
@@ -114,6 +118,11 @@ function formatEntryLabel(entry) {
     ? `${qty.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}${unit ? ` ${unit}` : ''}`
     : '';
   return `${entry?.name || '—'}${qtyLabel ? ` — ${qtyLabel}` : ''}`;
+}
+
+function floorSortRank(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
 }
 
 function LocationSlotChip({
@@ -384,6 +393,26 @@ export default function ObjectsOverview() {
     () => [...data.rooms].sort((a, b) => naturalCompare(a.name, b.name)),
     [data.rooms],
   );
+  const transits = useMemo(
+    () => [...data.transits].sort((a, b) => (
+      naturalCompare(a.object_name, b.object_name)
+      || naturalCompare(a.entrance_name, b.entrance_name)
+      || (floorSortRank(a.from_floor_sort_order) - floorSortRank(b.from_floor_sort_order))
+      || (floorSortRank(a.to_floor_sort_order) - floorSortRank(b.to_floor_sort_order))
+      || naturalCompare(a.name, b.name)
+    )),
+    [data.transits],
+  );
+  const stairwells = useMemo(
+    () => [...data.stairwells].sort((a, b) => (
+      naturalCompare(a.object_name, b.object_name)
+      || naturalCompare(a.entrance_name, b.entrance_name)
+      || (floorSortRank(a.from_floor_sort_order) - floorSortRank(b.from_floor_sort_order))
+      || (floorSortRank(a.to_floor_sort_order) - floorSortRank(b.to_floor_sort_order))
+      || naturalCompare(a.name, b.name)
+    )),
+    [data.stairwells],
+  );
   const apartmentsById = useMemo(() => {
     const map = new Map();
     apartments.forEach((row) => map.set(Number(row.id), row));
@@ -394,6 +423,16 @@ export default function ObjectsOverview() {
     rooms.forEach((row) => map.set(Number(row.id), row));
     return map;
   }, [rooms]);
+  const transitsById = useMemo(() => {
+    const map = new Map();
+    transits.forEach((row) => map.set(Number(row.id), row));
+    return map;
+  }, [transits]);
+  const stairwellsById = useMemo(() => {
+    const map = new Map();
+    stairwells.forEach((row) => map.set(Number(row.id), row));
+    return map;
+  }, [stairwells]);
   const blockStatuses = useMemo(
     () => [...data.block_statuses].sort((a, b) => (
       Number(a.sort_order || 0) - Number(b.sort_order || 0)
@@ -492,6 +531,24 @@ export default function ObjectsOverview() {
     });
     return map;
   }, [rooms]);
+  const transitsByEntrance = useMemo(() => {
+    const map = new Map();
+    transits.forEach((row) => {
+      const list = map.get(Number(row.entrance_id)) || [];
+      list.push(row);
+      map.set(Number(row.entrance_id), list);
+    });
+    return map;
+  }, [transits]);
+  const stairwellsByEntrance = useMemo(() => {
+    const map = new Map();
+    stairwells.forEach((row) => {
+      const list = map.get(Number(row.entrance_id)) || [];
+      list.push(row);
+      map.set(Number(row.entrance_id), list);
+    });
+    return map;
+  }, [stairwells]);
 
   const slotsByLocation = useMemo(() => {
     const map = new Map();
@@ -742,18 +799,35 @@ export default function ObjectsOverview() {
       const slotId = Number(slot.id || 0);
       if (!slotId) return;
       let apartment = null;
+      let rangeLocation = null;
       if (slot.location_kind === 'apartment') {
         apartment = apartmentsById.get(Number(slot.location_id || 0)) || null;
       } else if (slot.location_kind === 'room') {
         const room = roomsById.get(Number(slot.location_id || 0)) || null;
         apartment = room ? (apartmentsById.get(Number(room.apartment_id || 0)) || null) : null;
+      } else if (slot.location_kind === 'transit') {
+        rangeLocation = transitsById.get(Number(slot.location_id || 0)) || null;
+      } else if (slot.location_kind === 'stairwell') {
+        rangeLocation = stairwellsById.get(Number(slot.location_id || 0)) || null;
       }
       const floor = apartment ? (floorById.get(Number(apartment.floor_id || 0)) || null) : null;
-      const entrance = floor ? (entranceById.get(Number(floor.entrance_id || 0)) || null) : null;
+      const rangeEntrance = rangeLocation ? (entranceById.get(Number(rangeLocation.entrance_id || 0)) || null) : null;
+      const entrance = floor
+        ? (entranceById.get(Number(floor.entrance_id || 0)) || null)
+        : rangeEntrance;
+      const fromFloor = rangeLocation ? (floorById.get(Number(rangeLocation.from_floor_id || 0)) || null) : null;
+      const toFloor = rangeLocation ? (floorById.get(Number(rangeLocation.to_floor_id || 0)) || null) : null;
+      const fromRankRaw = floorSortRank(fromFloor?.sort_order);
+      const toRankRaw = floorSortRank(toFloor?.sort_order);
+      const fromFloorRank = Math.min(fromRankRaw, toRankRaw);
+      const toFloorRank = Math.max(fromRankRaw, toRankRaw);
       map.set(slotId, {
+        locationKind: slot.location_kind,
         objectId: entrance ? Number(entrance.object_id || 0) : 0,
-        entranceId: floor ? Number(floor.entrance_id || 0) : 0,
+        entranceId: entrance ? Number(entrance.id || 0) : 0,
         floorId: apartment ? Number(apartment.floor_id || 0) : 0,
+        fromFloorRank: Number.isFinite(fromFloorRank) ? fromFloorRank : null,
+        toFloorRank: Number.isFinite(toFloorRank) ? toFloorRank : null,
       });
     });
     return map;
@@ -761,6 +835,8 @@ export default function ObjectsOverview() {
     data.location_systems,
     apartmentsById,
     roomsById,
+    transitsById,
+    stairwellsById,
     floorById,
     entranceById,
   ]);
@@ -790,9 +866,22 @@ export default function ObjectsOverview() {
     const meta = slotLocationMetaById.get(slotId);
     if (objectIdSet.size && !objectIdSet.has(Number(meta?.objectId || 0))) return false;
     if (entranceIdSet.size && !entranceIdSet.has(Number(meta?.entranceId || 0))) return false;
-    if (floorIdSet.size && !floorIdSet.has(Number(meta?.floorId || 0))) return false;
+    if (floorIdSet.size) {
+      if (meta?.locationKind === 'transit' || meta?.locationKind === 'stairwell') {
+        const matchesRange = [...floorIdSet].some((floorId) => {
+          const floorRow = floorById.get(Number(floorId));
+          if (!floorRow) return false;
+          if (Number(floorRow.entrance_id || 0) !== Number(meta?.entranceId || 0)) return false;
+          const rank = floorSortRank(floorRow.sort_order);
+          return rank >= Number(meta?.fromFloorRank) && rank <= Number(meta?.toFloorRank);
+        });
+        if (!matchesRange) return false;
+      } else if (!floorIdSet.has(Number(meta?.floorId || 0))) {
+        return false;
+      }
+    }
     return true;
-  }, [slotLocationMetaById, objectIdSet, entranceIdSet, floorIdSet]);
+  }, [slotLocationMetaById, objectIdSet, entranceIdSet, floorIdSet, floorById]);
 
   const hasVisibleLocationSlots = useCallback((locationKind, locationId) => {
     const slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
@@ -803,6 +892,29 @@ export default function ObjectsOverview() {
   const isFloorVisible = useCallback((floorId) => {
     if (floorIdSet.size && !floorIdSet.has(Number(floorId))) return false;
     if (!slotFiltersActive) return true;
+    const floorRow = floorById.get(Number(floorId));
+    if (floorRow) {
+      const entranceTransits = transitsByEntrance.get(Number(floorRow.entrance_id)) || [];
+      const entranceStairwells = stairwellsByEntrance.get(Number(floorRow.entrance_id)) || [];
+      const currentRank = floorSortRank(floorRow.sort_order);
+      const locationMatchesFloor = (locationRow) => {
+        const fromFloor = floorById.get(Number(locationRow.from_floor_id || 0));
+        const toFloor = floorById.get(Number(locationRow.to_floor_id || 0));
+        const fromRank = floorSortRank(fromFloor?.sort_order);
+        const toRank = floorSortRank(toFloor?.sort_order);
+        const minRank = Math.min(fromRank, toRank);
+        const maxRank = Math.max(fromRank, toRank);
+        return currentRank >= minRank && currentRank <= maxRank;
+      };
+      const hasTransitBlocks = entranceTransits.some((locationRow) => (
+        locationMatchesFloor(locationRow) && hasVisibleLocationSlots('transit', locationRow.id)
+      ));
+      if (hasTransitBlocks) return true;
+      const hasStairwellBlocks = entranceStairwells.some((locationRow) => (
+        locationMatchesFloor(locationRow) && hasVisibleLocationSlots('stairwell', locationRow.id)
+      ));
+      if (hasStairwellBlocks) return true;
+    }
     const floorApartments = apartmentsByFloor.get(Number(floorId)) || [];
     const floorRoomsBucket = floorApartments.find((apartment) => apartment.name === FLOOR_ROOMS_BUCKET_NAME);
     const floorOnlyRooms = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
@@ -813,7 +925,16 @@ export default function ObjectsOverview() {
         hasVisibleLocationSlots('apartment', apartment.id)
         || (roomsByApartment.get(apartment.id) || []).some((room) => hasVisibleLocationSlots('room', room.id))
       ));
-  }, [floorIdSet, slotFiltersActive, apartmentsByFloor, roomsByApartment, hasVisibleLocationSlots]);
+  }, [
+    floorIdSet,
+    slotFiltersActive,
+    floorById,
+    transitsByEntrance,
+    stairwellsByEntrance,
+    apartmentsByFloor,
+    roomsByApartment,
+    hasVisibleLocationSlots,
+  ]);
 
   const filteredObjects = useMemo(() => {
     return objects.filter((objectRow) => {
@@ -1360,7 +1481,7 @@ export default function ObjectsOverview() {
     );
   };
 
-  const getFloorStatusStats = (floorApartmentsRaw, floorOnlyRooms) => {
+  const getFloorStatusStats = (floor, floorApartmentsRaw, floorOnlyRooms, entranceTransits = [], entranceStairwells = []) => {
     const regularApartments = floorApartmentsRaw.filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME);
     const statusCounts = new Map();
     const appendSlots = (locationKind, locationId) => {
@@ -1385,6 +1506,21 @@ export default function ObjectsOverview() {
       appendSlots('apartment', apartment.id);
       (roomsByApartment.get(apartment.id) || []).forEach((room) => appendSlots('room', room.id));
     });
+    const floorRank = floorSortRank(floor?.sort_order);
+    const appendLinearSlots = (kind, rows) => {
+      rows.forEach((row) => {
+        const fromFloor = floorById.get(Number(row.from_floor_id || 0));
+        const toFloor = floorById.get(Number(row.to_floor_id || 0));
+        const fromRank = floorSortRank(fromFloor?.sort_order);
+        const toRank = floorSortRank(toFloor?.sort_order);
+        const minRank = Math.min(fromRank, toRank);
+        const maxRank = Math.max(fromRank, toRank);
+        if (floorRank < minRank || floorRank > maxRank) return;
+        appendSlots(kind, row.id);
+      });
+    };
+    appendLinearSlots('transit', entranceTransits);
+    appendLinearSlots('stairwell', entranceStairwells);
 
     const rows = [];
     blockStatuses.forEach((status) => {
@@ -1406,7 +1542,14 @@ export default function ObjectsOverview() {
     return { apartmentsCount, roomsCount };
   }, [apartmentsByFloor, roomsByApartment]);
 
-  const renderFloorCard = (floor, floorApartments, floorRooms, compact = false) => {
+  const renderFloorCard = (
+    floor,
+    floorApartments,
+    floorRooms,
+    compact = false,
+    entranceTransits = [],
+    entranceStairwells = [],
+  ) => {
     const isCollapsed = collapsedFloorSet.has(floor.id);
     const floorRoomsBucket = floorApartments.find((apartment) => apartment.name === FLOOR_ROOMS_BUCKET_NAME);
     const regularApartmentsRaw = floorApartments.filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME);
@@ -1420,7 +1563,13 @@ export default function ObjectsOverview() {
           || (roomsByApartment.get(apartment.id) || []).some((room) => hasVisibleLocationSlots('room', room.id))
       ))
       : regularApartmentsRaw;
-    const floorStatusStats = getFloorStatusStats(floorApartments, floorOnlyRooms);
+    const floorStatusStats = getFloorStatusStats(
+      floor,
+      floorApartments,
+      floorOnlyRooms,
+      entranceTransits,
+      entranceStairwells,
+    );
     return (
       <div
         key={floor.id}
@@ -1601,6 +1750,25 @@ export default function ObjectsOverview() {
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {objectEntrances.map((entry) => {
                     const entranceFloors = entry._visibleFloors || [];
+                    const entranceTransits = transitsByEntrance.get(Number(entry.id)) || [];
+                    const entranceStairwells = stairwellsByEntrance.get(Number(entry.id)) || [];
+                    const locationIntersectsVisibleFloors = (locationRow) => {
+                      if (!entranceFloors.length) return false;
+                      const fromFloor = floorById.get(Number(locationRow.from_floor_id || 0));
+                      const toFloor = floorById.get(Number(locationRow.to_floor_id || 0));
+                      const fromRank = floorSortRank(fromFloor?.sort_order);
+                      const toRank = floorSortRank(toFloor?.sort_order);
+                      const minRank = Math.min(fromRank, toRank);
+                      const maxRank = Math.max(fromRank, toRank);
+                      return entranceFloors.some((floorRow) => {
+                        const rank = floorSortRank(floorRow.sort_order);
+                        return rank >= minRank && rank <= maxRank;
+                      });
+                    };
+                    const entranceLinearLocations = [
+                      ...entranceTransits.map((row) => ({ ...row, _kind: 'transit' })),
+                      ...entranceStairwells.map((row) => ({ ...row, _kind: 'stairwell' })),
+                    ].filter((row) => locationIntersectsVisibleFloors(row));
                     const entranceCounts = entranceFloors.reduce((acc, floor) => {
                       const floorCounts = getFloorCounts(floor.id);
                       acc.apartmentsCount += floorCounts.apartmentsCount;
@@ -1632,18 +1800,53 @@ export default function ObjectsOverview() {
                             Этажей: {entranceFloors.length} · Кв.: {entranceApartments} · Пом.: {entranceRooms}
                           </span>
                         </div>
-                        {entranceFloors.length ? (
-                          <div className="space-y-2">
-                            {entranceFloors.map((floor) => {
-                              const floorApartments = apartmentsByFloor.get(floor.id) || [];
-                              const floorCounts = getFloorCounts(floor.id);
-                              const floorRooms = floorCounts.roomsCount;
-                              return renderFloorCard(floor, floorApartments, floorRooms);
-                            })}
-                          </div>
-                        ) : (
-                          <p className="text-zinc-500 text-xs">Этажи ещё не добавлены</p>
-                        )}
+                        <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
+                          {entranceLinearLocations.length ? (
+                            <div className="xl:w-fit xl:max-w-[24rem] space-y-2">
+                              {entranceLinearLocations.map((locationRow) => {
+                                const prefix = locationRow._kind === 'transit' ? 'Транзит' : 'ЛК';
+                                const title = `${prefix} ${locationRow.name}`;
+                                const subtitle = `Этаж ${locationRow.from_floor_name}–${locationRow.to_floor_name}`;
+                                const blocks = renderLocationBlocks(locationRow._kind, locationRow.id);
+                                if (!blocks && slotFiltersActive) return null;
+                                const hasSlots = (slotsByLocation.get(`${locationRow._kind}:${locationRow.id}`) || []).length > 0;
+                                return (
+                                  <div
+                                    key={`${locationRow._kind}:${locationRow.id}`}
+                                    className={`w-fit min-w-[13rem] max-w-[24rem] rounded-lg border px-2.5 py-2 space-y-1.5 ${
+                                      hasSlots
+                                        ? 'border-white/10 bg-black/20'
+                                        : 'border-white/10 bg-black/10'
+                                    }`}
+                                  >
+                                    <p className="text-zinc-100 text-xs font-semibold">{title}</p>
+                                    <p className="text-zinc-400 text-2xs">{subtitle}</p>
+                                    {blocks || <p className="text-zinc-500 text-2xs">Блоки не добавлены</p>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                          {entranceFloors.length ? (
+                            <div className="space-y-2 min-w-0 flex-1">
+                              {entranceFloors.map((floor) => {
+                                const floorApartments = apartmentsByFloor.get(floor.id) || [];
+                                const floorCounts = getFloorCounts(floor.id);
+                                const floorRooms = floorCounts.roomsCount;
+                                return renderFloorCard(
+                                  floor,
+                                  floorApartments,
+                                  floorRooms,
+                                  false,
+                                  entranceTransits,
+                                  entranceStairwells,
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p className="text-zinc-500 text-xs">Этажи ещё не добавлены</p>
+                          )}
+                        </div>
                       </section>
                     );
                   })}
@@ -1967,12 +2170,25 @@ export default function ObjectsOverview() {
               </button>
             </div>
             <div className="space-y-2">
-              {(floorsByEntrance.get(expandedEntrance.id) || []).filter((floor) => isFloorVisible(floor.id)).map((floor) => {
-                const floorApartments = apartmentsByFloor.get(floor.id) || [];
-                const floorCounts = getFloorCounts(floor.id);
-                const floorRooms = floorCounts.roomsCount;
-                return renderFloorCard(floor, floorApartments, floorRooms, true);
-              })}
+              {(() => {
+                const expandedTransits = transitsByEntrance.get(Number(expandedEntrance.id)) || [];
+                const expandedStairwells = stairwellsByEntrance.get(Number(expandedEntrance.id)) || [];
+                return (floorsByEntrance.get(expandedEntrance.id) || [])
+                  .filter((floor) => isFloorVisible(floor.id))
+                  .map((floor) => {
+                    const floorApartments = apartmentsByFloor.get(floor.id) || [];
+                    const floorCounts = getFloorCounts(floor.id);
+                    const floorRooms = floorCounts.roomsCount;
+                    return renderFloorCard(
+                      floor,
+                      floorApartments,
+                      floorRooms,
+                      true,
+                      expandedTransits,
+                      expandedStairwells,
+                    );
+                  });
+              })()}
               {!((floorsByEntrance.get(expandedEntrance.id) || []).filter((floor) => isFloorVisible(floor.id)).length) && (
                 <p className="text-zinc-500 text-sm">Для этого подъезда этажи ещё не добавлены</p>
               )}

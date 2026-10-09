@@ -5,6 +5,21 @@ import { SETTINGS_ACCESS_KEYS } from '../lib/app-permissions.js';
 
 const CATALOG_READ_PERMS = ['can_warehouse', ...SETTINGS_ACCESS_KEYS];
 const READ_OBJECTS = ['can_settings_work', 'can_settings_warehouses'];
+const WORK_LOCATION_KINDS = ['apartment', 'room', 'transit', 'stairwell'];
+const RANGE_LOCATION_META = {
+  transit: {
+    table: 'work_transits',
+    alias: 't',
+    duplicateMessage: 'Такой транзит уже есть в этом подъезде',
+    missingRefMessage: 'Проверьте объект, подъезд и этажи транзита',
+  },
+  stairwell: {
+    table: 'work_stairwells',
+    alias: 's',
+    duplicateMessage: 'Такая лестничная клетка уже есть в этом подъезде',
+    missingRefMessage: 'Проверьте объект, подъезд и этажи лестничной клетки',
+  },
+};
 
 const router = Router();
 
@@ -16,6 +31,38 @@ let ensureObjectStatusSchemaPromise = null;
 async function ensureObjectStatusSchema() {
   if (!ensureObjectStatusSchemaPromise) {
     ensureObjectStatusSchemaPromise = (async () => {
+      await pool.query(
+        `CREATE TABLE IF NOT EXISTS work_transits (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(200) NOT NULL,
+          object_id INTEGER NOT NULL REFERENCES warehouse_objects(id) ON DELETE RESTRICT,
+          entrance_id INTEGER NOT NULL REFERENCES work_entrances(id) ON DELETE RESTRICT,
+          from_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+          to_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          UNIQUE (entrance_id, name)
+        )`,
+      );
+      await pool.query(
+        `CREATE TABLE IF NOT EXISTS work_stairwells (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(200) NOT NULL,
+          object_id INTEGER NOT NULL REFERENCES warehouse_objects(id) ON DELETE RESTRICT,
+          entrance_id INTEGER NOT NULL REFERENCES work_entrances(id) ON DELETE RESTRICT,
+          from_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+          to_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          UNIQUE (entrance_id, name)
+        )`,
+      );
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_object ON work_transits(object_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_entrance ON work_transits(entrance_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_from_floor ON work_transits(from_floor_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_to_floor ON work_transits(to_floor_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_object ON work_stairwells(object_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_entrance ON work_stairwells(entrance_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_from_floor ON work_stairwells(from_floor_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_to_floor ON work_stairwells(to_floor_id)');
       await pool.query(
         `CREATE TABLE IF NOT EXISTS work_block_statuses (
           id SERIAL PRIMARY KEY,
@@ -39,6 +86,14 @@ async function ensureObjectStatusSchema() {
       );
       await pool.query(
         'ALTER TABLE work_location_systems ADD COLUMN IF NOT EXISTS assigned_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
+      );
+      await pool.query(
+        'ALTER TABLE work_location_systems DROP CONSTRAINT IF EXISTS work_location_systems_location_kind_check',
+      );
+      await pool.query(
+        `ALTER TABLE work_location_systems
+         ADD CONSTRAINT work_location_systems_location_kind_check
+         CHECK (location_kind IN ('apartment', 'room', 'transit', 'stairwell'))`,
       );
       await pool.query(
         'CREATE INDEX IF NOT EXISTS idx_wls_status ON work_location_systems(status_id)',
@@ -66,6 +121,29 @@ router.use(async (_req, _res, next) => {
 function parseId(v) {
   const n = parseInt(v, 10);
   return n > 0 ? n : null;
+}
+
+function getRangeLocationMeta(kind) {
+  return RANGE_LOCATION_META[kind] || null;
+}
+
+async function loadRangeLocationRow(db, kind, id) {
+  const meta = getRangeLocationMeta(kind);
+  if (!meta) return null;
+  const { table, alias } = meta;
+  return (await db.query(
+    `SELECT ${alias}.id, ${alias}.name, ${alias}.object_id, o.name AS object_name, ${alias}.entrance_id, e.name AS entrance_name,
+            ${alias}.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
+            ${alias}.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order,
+            ${alias}.created_at
+     FROM ${table} ${alias}
+     JOIN work_entrances e ON e.id = ${alias}.entrance_id
+     JOIN work_floors ff ON ff.id = ${alias}.from_floor_id
+     JOIN work_floors tf ON tf.id = ${alias}.to_floor_id
+     LEFT JOIN warehouse_objects o ON o.id = ${alias}.object_id
+     WHERE ${alias}.id = $1`,
+    [id],
+  )).rows[0] || null;
 }
 
 function parseOptionalPositiveInt(v) {
@@ -166,6 +244,67 @@ async function moveFloorWithinEntrance(db, { entranceId, floorId, fromOrder, toO
   await db.query('UPDATE work_floors SET sort_order = $1 WHERE id = $2', [toOrder, floorId]);
 }
 
+function floorSortRank(row) {
+  const sort = Number(row?.sort_order);
+  if (Number.isFinite(sort)) return sort;
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function normalizeFloorRange(fromFloor, toFloor) {
+  if (!fromFloor || !toFloor) return { fromFloor, toFloor };
+  const fromRank = floorSortRank(fromFloor);
+  const toRank = floorSortRank(toFloor);
+  if (fromRank < toRank) return { fromFloor, toFloor };
+  if (fromRank > toRank) return { fromFloor: toFloor, toFloor: fromFloor };
+  if (Number(fromFloor.id) <= Number(toFloor.id)) return { fromFloor, toFloor };
+  return { fromFloor: toFloor, toFloor: fromFloor };
+}
+
+async function resolveEntranceFloorRange(db, {
+  objectId,
+  entranceId,
+  fromFloorId,
+  toFloorId,
+}) {
+  const entrance = (await db.query(
+    `SELECT e.id, e.object_id, e.name, o.name AS object_name
+     FROM work_entrances e
+     LEFT JOIN warehouse_objects o ON o.id = e.object_id
+     WHERE e.id = $1`,
+    [entranceId],
+  )).rows[0];
+  if (!entrance) return { error: 'Подъезд не найден' };
+
+  if (objectId && Number(entrance.object_id || 0) !== Number(objectId)) {
+    return { error: 'Подъезд не относится к выбранному объекту' };
+  }
+
+  const floorRows = (await db.query(
+    `SELECT id, entrance_id, name, sort_order
+     FROM work_floors
+     WHERE id = ANY($1::int[])`,
+    [[fromFloorId, toFloorId]],
+  )).rows;
+  if (floorRows.length !== 2) return { error: 'Выберите этажи начала и конца' };
+  const floorById = new Map(floorRows.map((row) => [Number(row.id), row]));
+  const fromFloorRaw = floorById.get(Number(fromFloorId));
+  const toFloorRaw = floorById.get(Number(toFloorId));
+  if (!fromFloorRaw || !toFloorRaw) return { error: 'Выберите этажи начала и конца' };
+  if (
+    Number(fromFloorRaw.entrance_id || 0) !== Number(entrance.id)
+    || Number(toFloorRaw.entrance_id || 0) !== Number(entrance.id)
+  ) {
+    return { error: 'Этажи должны относиться к выбранному подъезду' };
+  }
+  const { fromFloor, toFloor } = normalizeFloorRange(fromFloorRaw, toFloorRaw);
+  return {
+    entrance,
+    objectId: Number(entrance.object_id),
+    fromFloor,
+    toFloor,
+  };
+}
+
 async function loadLocationByKind(db, kind, locationId) {
   if (kind === 'apartment') {
     const row = (await db.query(
@@ -222,6 +361,64 @@ async function loadLocationByKind(db, kind, locationId) {
       object_id: row.object_id,
     };
   }
+  if (kind === 'transit') {
+    const row = (await db.query(
+      `SELECT t.id, t.name, t.object_id, t.entrance_id, t.from_floor_id, t.to_floor_id,
+              e.name AS entrance_name,
+              ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
+              tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order
+       FROM work_transits t
+       JOIN work_entrances e ON e.id = t.entrance_id
+       JOIN work_floors ff ON ff.id = t.from_floor_id
+       JOIN work_floors tf ON tf.id = t.to_floor_id
+       WHERE t.id = $1`,
+      [locationId],
+    )).rows[0];
+    if (!row) return null;
+    return {
+      kind: 'transit',
+      id: row.id,
+      name: row.name,
+      object_id: row.object_id,
+      entrance_id: row.entrance_id,
+      entrance_name: row.entrance_name,
+      from_floor_id: row.from_floor_id,
+      to_floor_id: row.to_floor_id,
+      from_floor_name: row.from_floor_name,
+      to_floor_name: row.to_floor_name,
+      from_floor_sort_order: row.from_floor_sort_order,
+      to_floor_sort_order: row.to_floor_sort_order,
+    };
+  }
+  if (kind === 'stairwell') {
+    const row = (await db.query(
+      `SELECT s.id, s.name, s.object_id, s.entrance_id, s.from_floor_id, s.to_floor_id,
+              e.name AS entrance_name,
+              ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
+              tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order
+       FROM work_stairwells s
+       JOIN work_entrances e ON e.id = s.entrance_id
+       JOIN work_floors ff ON ff.id = s.from_floor_id
+       JOIN work_floors tf ON tf.id = s.to_floor_id
+       WHERE s.id = $1`,
+      [locationId],
+    )).rows[0];
+    if (!row) return null;
+    return {
+      kind: 'stairwell',
+      id: row.id,
+      name: row.name,
+      object_id: row.object_id,
+      entrance_id: row.entrance_id,
+      entrance_name: row.entrance_name,
+      from_floor_id: row.from_floor_id,
+      to_floor_id: row.to_floor_id,
+      from_floor_name: row.from_floor_name,
+      to_floor_name: row.to_floor_name,
+      from_floor_sort_order: row.from_floor_sort_order,
+      to_floor_sort_order: row.to_floor_sort_order,
+    };
+  }
   return null;
 }
 
@@ -230,7 +427,7 @@ router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req,
   try {
     const [
       objects, warehouses, racks, categories, systems, organizations,
-      workEntrances, workFloors, workApartments, workRooms, toolTypes, blockStatuses,
+      workEntrances, workFloors, workApartments, workRooms, workTransits, workStairwells, toolTypes, blockStatuses,
     ] = await Promise.all([
       pool.query('SELECT id, name FROM warehouse_objects ORDER BY name'),
       pool.query(
@@ -277,6 +474,30 @@ router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req,
          LEFT JOIN warehouse_objects o ON o.id = e.object_id
          ORDER BY o.name NULLS LAST, e.name, COALESCE(f.sort_order, 2147483647), f.name, a.name, r.name`
       ),
+      pool.query(
+        `SELECT t.id, t.name, t.object_id, o.name AS object_name, t.entrance_id, e.name AS entrance_name,
+                t.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
+                t.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order,
+                t.created_at
+         FROM work_transits t
+         JOIN work_entrances e ON e.id = t.entrance_id
+         JOIN work_floors ff ON ff.id = t.from_floor_id
+         JOIN work_floors tf ON tf.id = t.to_floor_id
+         LEFT JOIN warehouse_objects o ON o.id = t.object_id
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), t.name`
+      ),
+      pool.query(
+        `SELECT s.id, s.name, s.object_id, o.name AS object_name, s.entrance_id, e.name AS entrance_name,
+                s.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
+                s.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order,
+                s.created_at
+         FROM work_stairwells s
+         JOIN work_entrances e ON e.id = s.entrance_id
+         JOIN work_floors ff ON ff.id = s.from_floor_id
+         JOIN work_floors tf ON tf.id = s.to_floor_id
+         LEFT JOIN warehouse_objects o ON o.id = s.object_id
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), s.name`
+      ),
       pool.query('SELECT id, name FROM tool_types ORDER BY name'),
       pool.query('SELECT id, name, color, is_for_production, counts_as_produced, sort_order, created_at, updated_at FROM work_block_statuses ORDER BY sort_order, name'),
     ]);
@@ -291,6 +512,8 @@ router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req,
       work_floors: workFloors.rows,
       work_apartments: workApartments.rows,
       work_rooms: workRooms.rows,
+      work_transits: workTransits.rows,
+      work_stairwells: workStairwells.rows,
       tool_types: toolTypes.rows,
       block_statuses: blockStatuses.rows,
     });
@@ -833,6 +1056,10 @@ router.delete('/work-entrances/:id', requirePermission('can_settings_work'), asy
   if (!id) return res.status(400).json({ error: 'Неверный id' });
   const used = await pool.query('SELECT 1 FROM work_floors WHERE entrance_id = $1 LIMIT 1', [id]);
   if (used.rowCount) return res.status(400).json({ error: 'В подъезде есть этажи — сначала удалите их' });
+  const usedTransits = await pool.query('SELECT 1 FROM work_transits WHERE entrance_id = $1 LIMIT 1', [id]);
+  if (usedTransits.rowCount) return res.status(400).json({ error: 'В подъезде есть транзиты — сначала удалите их' });
+  const usedStairwells = await pool.query('SELECT 1 FROM work_stairwells WHERE entrance_id = $1 LIMIT 1', [id]);
+  if (usedStairwells.rowCount) return res.status(400).json({ error: 'В подъезде есть лестничные клетки — сначала удалите их' });
   const r = await pool.query('DELETE FROM work_entrances WHERE id = $1 RETURNING id', [id]);
   if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
   res.json({ ok: true });
@@ -1062,6 +1289,10 @@ router.delete('/work-floors/:id', requirePermission('can_settings_work'), async 
   if (!id) return res.status(400).json({ error: 'Неверный id' });
   const used = await pool.query('SELECT 1 FROM work_apartments WHERE floor_id = $1 LIMIT 1', [id]);
   if (used.rowCount) return res.status(400).json({ error: 'На этаже есть квартиры — сначала удалите их' });
+  const usedTransit = await pool.query('SELECT 1 FROM work_transits WHERE from_floor_id = $1 OR to_floor_id = $1 LIMIT 1', [id]);
+  if (usedTransit.rowCount) return res.status(400).json({ error: 'Этаж используется в транзитах — сначала удалите их' });
+  const usedStairwell = await pool.query('SELECT 1 FROM work_stairwells WHERE from_floor_id = $1 OR to_floor_id = $1 LIMIT 1', [id]);
+  if (usedStairwell.rowCount) return res.status(400).json({ error: 'Этаж используется в лестничных клетках — сначала удалите их' });
   const r = await pool.query('DELETE FROM work_floors WHERE id = $1 RETURNING id, entrance_id', [id]);
   if (!r.rowCount) return res.status(404).json({ error: 'Не найдено' });
   await resequenceEntranceFloors(pool, r.rows[0].entrance_id);
@@ -1210,6 +1441,157 @@ router.delete('/work-rooms/:id', requirePermission('can_settings_work'), async (
   res.json({ ok: true });
 });
 
+function registerRangeLocationRoutes({
+  kind,
+  basePath,
+  requiredMessage,
+  notFoundReferenceMessage,
+}) {
+  const meta = getRangeLocationMeta(kind);
+  if (!meta) return;
+  const { table, alias, duplicateMessage, missingRefMessage } = meta;
+
+  router.get(basePath, requirePermission('can_settings_work'), async (req, res) => {
+    const objectId = parseId(req.query.object_id);
+    const entranceId = parseId(req.query.entrance_id);
+    const whereClauses = [];
+    const params = [];
+    if (objectId) {
+      params.push(objectId);
+      whereClauses.push(`${alias}.object_id = $${params.length}`);
+    }
+    if (entranceId) {
+      params.push(entranceId);
+      whereClauses.push(`${alias}.entrance_id = $${params.length}`);
+    }
+    const where = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const rows = (await pool.query(
+      `SELECT ${alias}.id, ${alias}.name, ${alias}.object_id, o.name AS object_name, ${alias}.entrance_id, e.name AS entrance_name,
+              ${alias}.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
+              ${alias}.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order,
+              ${alias}.created_at
+       FROM ${table} ${alias}
+       JOIN work_entrances e ON e.id = ${alias}.entrance_id
+       JOIN work_floors ff ON ff.id = ${alias}.from_floor_id
+       JOIN work_floors tf ON tf.id = ${alias}.to_floor_id
+       LEFT JOIN warehouse_objects o ON o.id = ${alias}.object_id
+       ${where}
+       ORDER BY o.name NULLS LAST, e.name, COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), ${alias}.name`,
+      params,
+    )).rows;
+    res.json(rows);
+  });
+
+  router.post(basePath, requirePermission('can_settings_work'), async (req, res) => {
+    const object_id = parseId(req.body?.object_id);
+    const entrance_id = parseId(req.body?.entrance_id);
+    const from_floor_id = parseId(req.body?.from_floor_id);
+    const to_floor_id = parseId(req.body?.to_floor_id);
+    const name = (req.body?.name || '').trim();
+    if (!object_id || !entrance_id || !from_floor_id || !to_floor_id || !name) {
+      return res.status(400).json({ error: requiredMessage });
+    }
+
+    const range = await resolveEntranceFloorRange(pool, {
+      objectId: object_id,
+      entranceId: entrance_id,
+      fromFloorId: from_floor_id,
+      toFloorId: to_floor_id,
+    });
+    if (range.error) return res.status(400).json({ error: range.error });
+
+    try {
+      const created = (await pool.query(
+        `INSERT INTO ${table} (name, object_id, entrance_id, from_floor_id, to_floor_id)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id`,
+        [name, range.objectId, range.entrance.id, range.fromFloor.id, range.toFloor.id],
+      )).rows[0];
+      const row = await loadRangeLocationRow(pool, kind, created.id);
+      res.status(201).json(row);
+    } catch (e) {
+      if (e.code === '23505') return res.status(400).json({ error: duplicateMessage });
+      if (e.code === '23503') return res.status(400).json({ error: missingRefMessage });
+      throw e;
+    }
+  });
+
+  router.put(`${basePath}/:id`, requirePermission('can_settings_work'), async (req, res) => {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Неверный id' });
+
+    const current = (await pool.query(
+      `SELECT id, name, object_id, entrance_id, from_floor_id, to_floor_id
+       FROM ${table}
+       WHERE id = $1`,
+      [id],
+    )).rows[0];
+    if (!current) return res.status(404).json({ error: 'Не найдено' });
+
+    const hasObject = Object.prototype.hasOwnProperty.call(req.body || {}, 'object_id');
+    const hasEntrance = Object.prototype.hasOwnProperty.call(req.body || {}, 'entrance_id');
+    const hasFromFloor = Object.prototype.hasOwnProperty.call(req.body || {}, 'from_floor_id');
+    const hasToFloor = Object.prototype.hasOwnProperty.call(req.body || {}, 'to_floor_id');
+    const hasName = Object.prototype.hasOwnProperty.call(req.body || {}, 'name');
+
+    const object_id = hasObject ? parseId(req.body?.object_id) : current.object_id;
+    const entrance_id = hasEntrance ? parseId(req.body?.entrance_id) : current.entrance_id;
+    const from_floor_id = hasFromFloor ? parseId(req.body?.from_floor_id) : current.from_floor_id;
+    const to_floor_id = hasToFloor ? parseId(req.body?.to_floor_id) : current.to_floor_id;
+    const name = hasName ? (req.body?.name || '').trim() : current.name;
+
+    if (!object_id || !entrance_id || !from_floor_id || !to_floor_id || !name) {
+      return res.status(400).json({ error: requiredMessage });
+    }
+
+    const range = await resolveEntranceFloorRange(pool, {
+      objectId: object_id,
+      entranceId: entrance_id,
+      fromFloorId: from_floor_id,
+      toFloorId: to_floor_id,
+    });
+    if (range.error) return res.status(400).json({ error: range.error });
+
+    try {
+      await pool.query(
+        `UPDATE ${table}
+         SET name = $1, object_id = $2, entrance_id = $3, from_floor_id = $4, to_floor_id = $5
+         WHERE id = $6`,
+        [name, range.objectId, range.entrance.id, range.fromFloor.id, range.toFloor.id, id],
+      );
+      const row = await loadRangeLocationRow(pool, kind, id);
+      res.json(row);
+    } catch (e) {
+      if (e.code === '23505') return res.status(400).json({ error: duplicateMessage });
+      if (e.code === '23503') return res.status(400).json({ error: missingRefMessage });
+      throw e;
+    }
+  });
+
+  router.delete(`${basePath}/:id`, requirePermission('can_settings_work'), async (req, res) => {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Неверный id' });
+    await pool.query('DELETE FROM work_location_systems WHERE location_kind = $1 AND location_id = $2', [kind, id]);
+    const deleted = await pool.query(`DELETE FROM ${table} WHERE id = $1 RETURNING id`, [id]);
+    if (!deleted.rowCount) return res.status(404).json({ error: notFoundReferenceMessage });
+    res.json({ ok: true });
+  });
+}
+
+registerRangeLocationRoutes({
+  kind: 'transit',
+  basePath: '/work-transits',
+  requiredMessage: 'Укажите объект, подъезд, этажи и название транзита',
+  notFoundReferenceMessage: 'Транзит не найден',
+});
+
+registerRangeLocationRoutes({
+  kind: 'stairwell',
+  basePath: '/work-stairwells',
+  requiredMessage: 'Укажите объект, подъезд, этажи и название лестничной клетки',
+  notFoundReferenceMessage: 'Лестничная клетка не найдена',
+});
+
 // ——— Настройки объектов (монтажные системы и материалы) ———
 router.get('/object-settings/layout', requirePermission('can_settings_work'), async (_req, res) => {
   try {
@@ -1219,6 +1601,8 @@ router.get('/object-settings/layout', requirePermission('can_settings_work'), as
       floors,
       apartments,
       rooms,
+      transits,
+      stairwells,
       systems,
       categories,
       blockStatuses,
@@ -1263,6 +1647,30 @@ router.get('/object-settings/layout', requirePermission('can_settings_work'), as
          LEFT JOIN warehouse_objects o ON o.id = e.object_id
          ORDER BY o.name NULLS LAST, e.name, COALESCE(f.sort_order, 2147483647), f.name, a.name, r.name`,
       ),
+      pool.query(
+        `SELECT t.id, t.name, t.object_id, o.name AS object_name, t.entrance_id, e.name AS entrance_name,
+                t.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
+                t.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order,
+                t.created_at
+         FROM work_transits t
+         JOIN work_entrances e ON e.id = t.entrance_id
+         JOIN work_floors ff ON ff.id = t.from_floor_id
+         JOIN work_floors tf ON tf.id = t.to_floor_id
+         LEFT JOIN warehouse_objects o ON o.id = t.object_id
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), t.name`,
+      ),
+      pool.query(
+        `SELECT s.id, s.name, s.object_id, o.name AS object_name, s.entrance_id, e.name AS entrance_name,
+                s.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
+                s.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order,
+                s.created_at
+         FROM work_stairwells s
+         JOIN work_entrances e ON e.id = s.entrance_id
+         JOIN work_floors ff ON ff.id = s.from_floor_id
+         JOIN work_floors tf ON tf.id = s.to_floor_id
+         LEFT JOIN warehouse_objects o ON o.id = s.object_id
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), s.name`,
+      ),
       pool.query('SELECT id, name FROM material_systems ORDER BY name'),
       pool.query('SELECT id, name, icon_key FROM material_categories ORDER BY name'),
       pool.query('SELECT id, name, color, is_for_production, counts_as_produced, sort_order, created_at, updated_at FROM work_block_statuses ORDER BY sort_order, name'),
@@ -1304,6 +1712,8 @@ router.get('/object-settings/layout', requirePermission('can_settings_work'), as
       floors: floors.rows,
       apartments: apartments.rows,
       rooms: rooms.rows,
+      transits: transits.rows,
+      stairwells: stairwells.rows,
       systems: systems.rows,
       categories: categories.rows,
       block_statuses: blockStatuses.rows,
@@ -1322,7 +1732,7 @@ router.post('/object-settings/location-systems', requirePermission('can_settings
   const locationKind = String(req.body?.location_kind || '').trim();
   const locationId = parseId(req.body?.location_id);
   const systemId = parseId(req.body?.system_id);
-  if (!locationId || !systemId || !['apartment', 'room'].includes(locationKind)) {
+  if (!locationId || !systemId || !WORK_LOCATION_KINDS.includes(locationKind)) {
     return res.status(400).json({ error: 'Неверные данные' });
   }
   const categoryId = req.body?.category_id == null || req.body?.category_id === ''
@@ -1424,7 +1834,7 @@ router.delete('/object-settings/location-systems/:id', requirePermission('can_se
 router.delete('/object-settings/locations/:locationKind/:locationId/blocks', requirePermission('can_settings_work'), async (req, res) => {
   const locationKind = String(req.params.locationKind || '').trim();
   const locationId = parseId(req.params.locationId);
-  if (!locationId || !['apartment', 'room'].includes(locationKind)) {
+  if (!locationId || !WORK_LOCATION_KINDS.includes(locationKind)) {
     return res.status(400).json({ error: 'Неверные данные' });
   }
   const location = await loadLocationByKind(pool, locationKind, locationId);

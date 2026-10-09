@@ -417,6 +417,30 @@ export const settings = {
     update: (id, body) => request(`/api/settings/work-rooms/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
     delete: (id) => request(`/api/settings/work-rooms/${id}`, { method: 'DELETE' }),
   },
+  workTransits: {
+    list: (params = {}) => {
+      const query = new URLSearchParams();
+      if (params.object_id) query.set('object_id', String(params.object_id));
+      if (params.entrance_id) query.set('entrance_id', String(params.entrance_id));
+      const suffix = query.toString();
+      return request(`/api/settings/work-transits${suffix ? `?${suffix}` : ''}`);
+    },
+    create: (body) => request('/api/settings/work-transits', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => request(`/api/settings/work-transits/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    delete: (id) => request(`/api/settings/work-transits/${id}`, { method: 'DELETE' }),
+  },
+  workStairwells: {
+    list: (params = {}) => {
+      const query = new URLSearchParams();
+      if (params.object_id) query.set('object_id', String(params.object_id));
+      if (params.entrance_id) query.set('entrance_id', String(params.entrance_id));
+      const suffix = query.toString();
+      return request(`/api/settings/work-stairwells${suffix ? `?${suffix}` : ''}`);
+    },
+    create: (body) => request('/api/settings/work-stairwells', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => request(`/api/settings/work-stairwells/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    delete: (id) => request(`/api/settings/work-stairwells/${id}`, { method: 'DELETE' }),
+  },
   organizations: {
     list: () => request('/api/settings/organizations'),
     create: (body) => request('/api/settings/organizations', { method: 'POST', body: JSON.stringify(body) }),

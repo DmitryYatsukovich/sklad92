@@ -34,6 +34,8 @@ const WORK_SUB_TABS = [
   { id: 'entrances', label: 'Подъезды' },
   { id: 'floors', label: 'Этажи' },
   { id: 'apartments', label: 'Квартиры, помещения' },
+  { id: 'transits', label: 'Транзиты' },
+  { id: 'stairwells', label: 'Лестничные клетки' },
 ];
 
 const EMPTY_CATALOG = {
@@ -47,6 +49,8 @@ const EMPTY_CATALOG = {
   work_floors: [],
   work_apartments: [],
   work_rooms: [],
+  work_transits: [],
+  work_stairwells: [],
   tool_types: [],
 };
 const FLOOR_ROOMS_BUCKET_NAME = 'Помещения этажа';
@@ -75,6 +79,8 @@ function normalizeCatalog(value) {
     work_floors: asArrayOfObjects(safe.work_floors),
     work_apartments: asArrayOfObjects(safe.work_apartments),
     work_rooms: asArrayOfObjects(safe.work_rooms),
+    work_transits: asArrayOfObjects(safe.work_transits),
+    work_stairwells: asArrayOfObjects(safe.work_stairwells),
     tool_types: asArrayOfObjects(safe.tool_types),
   };
 }
@@ -510,6 +516,10 @@ export default function Settings({ user }) {
   const [categoryIconSearch, setCategoryIconSearch] = useState('');
   const [parentId, setParentId] = useState('');
   const [sortOrder, setSortOrder] = useState('');
+  const [workObjectId, setWorkObjectId] = useState('');
+  const [workEntranceId, setWorkEntranceId] = useState('');
+  const [rangeFromFloorId, setRangeFromFloorId] = useState('');
+  const [rangeToFloorId, setRangeToFloorId] = useState('');
   const [workItemKind, setWorkItemKind] = useState('apartment');
   const [workModalOpen, setWorkModalOpen] = useState(false);
   const [modalFloorId, setModalFloorId] = useState('');
@@ -555,6 +565,10 @@ export default function Settings({ user }) {
     setCategoryModalOpen(false);
     setParentId('');
     setSortOrder('');
+    setWorkObjectId('');
+    setWorkEntranceId('');
+    setRangeFromFloorId('');
+    setRangeToFloorId('');
     setWorkItemKind('apartment');
     setEditing(null);
     setError('');
@@ -607,6 +621,20 @@ export default function Settings({ user }) {
       || naturalCompare(a.apartment_name, b.apartment_name)
       || naturalCompare(a.name, b.name)
     ));
+    const sortedTransits = [...catalog.work_transits].sort((a, b) => (
+      naturalCompare(a.object_name, b.object_name)
+      || naturalCompare(a.entrance_name, b.entrance_name)
+      || ((a.from_floor_sort_order ?? Number.MAX_SAFE_INTEGER) - (b.from_floor_sort_order ?? Number.MAX_SAFE_INTEGER))
+      || ((a.to_floor_sort_order ?? Number.MAX_SAFE_INTEGER) - (b.to_floor_sort_order ?? Number.MAX_SAFE_INTEGER))
+      || naturalCompare(a.name, b.name)
+    ));
+    const sortedStairwells = [...catalog.work_stairwells].sort((a, b) => (
+      naturalCompare(a.object_name, b.object_name)
+      || naturalCompare(a.entrance_name, b.entrance_name)
+      || ((a.from_floor_sort_order ?? Number.MAX_SAFE_INTEGER) - (b.from_floor_sort_order ?? Number.MAX_SAFE_INTEGER))
+      || ((a.to_floor_sort_order ?? Number.MAX_SAFE_INTEGER) - (b.to_floor_sort_order ?? Number.MAX_SAFE_INTEGER))
+      || naturalCompare(a.name, b.name)
+    ));
 
     if (effectiveWarehouseTab === 'warehouses') {
       return catalog.warehouses.map((w) => ({
@@ -648,6 +676,18 @@ export default function Settings({ user }) {
         ...a,
         _extra: [a.object_name, a.entrance_name, a.floor_name].filter(Boolean).join(' → ')
           || catalog.work_floors.find((f) => f.id === a.floor_id)?.name,
+      }));
+    }
+    if (effectiveWorkTab === 'transits') {
+      return sortedTransits.map((t) => ({
+        ...t,
+        _extra: [t.object_name, t.entrance_name, `Этаж ${t.from_floor_name}–${t.to_floor_name}`].filter(Boolean).join(' → '),
+      }));
+    }
+    if (effectiveWorkTab === 'stairwells') {
+      return sortedStairwells.map((s) => ({
+        ...s,
+        _extra: [s.object_name, s.entrance_name, `Этаж ${s.from_floor_name}–${s.to_floor_name}`].filter(Boolean).join(' → '),
       }));
     }
     return sortedRooms.map((r) => ({
@@ -722,6 +762,29 @@ export default function Settings({ user }) {
           if (editing) await settingsApi.workApartments.update(editing.id, { name: n, floor_id: fid });
           else await settingsApi.workApartments.create({ name: n, floor_id: fid });
         }
+      } else if (effectiveWorkTab === 'transits' || effectiveWorkTab === 'stairwells') {
+        const objectId = parseInt(workObjectId, 10);
+        const entranceId = parseInt(workEntranceId, 10);
+        const fromFloorId = parseInt(rangeFromFloorId, 10);
+        const toFloorId = parseInt(rangeToFloorId, 10);
+        if (!objectId || !entranceId || !fromFloorId || !toFloorId) {
+          return setError('Выберите объект, подъезд и диапазон этажей');
+        }
+        const payload = {
+          name: n,
+          object_id: objectId,
+          entrance_id: entranceId,
+          from_floor_id: fromFloorId,
+          to_floor_id: toFloorId,
+        };
+        if (effectiveWorkTab === 'transits') {
+          if (editing) await settingsApi.workTransits.update(editing.id, payload);
+          else await settingsApi.workTransits.create(payload);
+        } else if (editing) {
+          await settingsApi.workStairwells.update(editing.id, payload);
+        } else {
+          await settingsApi.workStairwells.create(payload);
+        }
       }
       if (tab === 'categories') closeCategoryModal();
       else if (effectiveWorkTab === 'apartments') closeWorkModal();
@@ -747,8 +810,7 @@ export default function Settings({ user }) {
     else if (effectiveWorkTab === 'floors') {
       setParentId(String(row.entrance_id || ''));
       setSortOrder(row.sort_order != null ? String(row.sort_order) : '');
-    }
-    else if (effectiveWorkTab === 'apartments') {
+    } else if (effectiveWorkTab === 'apartments') {
       if (row._kind === 'room' || row.apartment_id) {
         setWorkItemKind('room');
         setParentId(String(row.apartment_id || ''));
@@ -756,8 +818,15 @@ export default function Settings({ user }) {
         setWorkItemKind('apartment');
         setParentId(String(row.floor_id || ''));
       }
+    } else if (effectiveWorkTab === 'transits' || effectiveWorkTab === 'stairwells') {
+      setWorkObjectId(String(row.object_id || ''));
+      setWorkEntranceId(String(row.entrance_id || ''));
+      setRangeFromFloorId(String(row.from_floor_id || ''));
+      setRangeToFloorId(String(row.to_floor_id || ''));
+      setParentId('');
+    } else {
+      setParentId('');
     }
-    else setParentId('');
   };
 
   const handleDelete = async (row) => {
@@ -775,6 +844,10 @@ export default function Settings({ user }) {
       else if (effectiveWorkTab === 'apartments') {
         if (row._kind === 'room' || row.apartment_id) await settingsApi.workRooms.delete(row.id);
         else await settingsApi.workApartments.delete(row.id);
+      } else if (effectiveWorkTab === 'transits') {
+        await settingsApi.workTransits.delete(row.id);
+      } else if (effectiveWorkTab === 'stairwells') {
+        await settingsApi.workStairwells.delete(row.id);
       }
       if (editing?.id === row.id) resetForm();
       load();
@@ -803,6 +876,7 @@ export default function Settings({ user }) {
     if (effectiveWorkTab === 'entrances') return 'Объект';
     if (effectiveWorkTab === 'floors') return 'Подъезд';
     if (effectiveWorkTab === 'apartments') return workItemKind === 'room' ? 'Квартира' : 'Этаж';
+    if (effectiveWorkTab === 'transits' || effectiveWorkTab === 'stairwells') return 'Локация';
     return null;
   })();
 
@@ -820,6 +894,8 @@ export default function Settings({ user }) {
       entrances: 'подъезд',
       floors: 'этаж',
       apartments: workItemKind === 'room' ? 'помещение' : 'квартиру',
+      transits: 'транзит',
+      stairwells: 'лестничную клетку',
     };
     const what = labels[effectiveWorkTab] || 'запись';
     return editing ? `Редактирование: ${what}` : `Добавить ${what}`;
@@ -872,6 +948,12 @@ export default function Settings({ user }) {
     || ((a.sort_order ?? Number.MAX_SAFE_INTEGER) - (b.sort_order ?? Number.MAX_SAFE_INTEGER))
     || naturalCompare(a.name, b.name)
   ));
+  const rangeEntrances = workObjectId
+    ? sortedWorkEntrances.filter((entrance) => String(entrance.object_id || '') === String(workObjectId))
+    : [];
+  const rangeFloors = workEntranceId
+    ? sortedWorkFloors.filter((floor) => String(floor.entrance_id || '') === String(workEntranceId))
+    : [];
   const sortedWorkApartments = [...catalog.work_apartments].sort((a, b) => (
     naturalCompare(a.object_name, b.object_name)
     || naturalCompare(a.entrance_name, b.entrance_name)
@@ -913,6 +995,47 @@ export default function Settings({ user }) {
       .map((v) => Number.parseInt(v, 10))
       .filter((v) => Number.isInteger(v) && v > 0),
   );
+
+  useEffect(() => {
+    if (effectiveWorkTab !== 'transits' && effectiveWorkTab !== 'stairwells') return;
+    if (!workObjectId) {
+      if (workEntranceId) setWorkEntranceId('');
+      if (rangeFromFloorId) setRangeFromFloorId('');
+      if (rangeToFloorId) setRangeToFloorId('');
+      return;
+    }
+    const selectedEntrance = sortedWorkEntrances.find((entry) => String(entry.id) === String(workEntranceId));
+    if (selectedEntrance && String(selectedEntrance.object_id || '') !== String(workObjectId)) {
+      setWorkEntranceId('');
+      setRangeFromFloorId('');
+      setRangeToFloorId('');
+    }
+  }, [
+    effectiveWorkTab,
+    workObjectId,
+    workEntranceId,
+    sortedWorkEntrances,
+    rangeFromFloorId,
+    rangeToFloorId,
+  ]);
+
+  useEffect(() => {
+    if (effectiveWorkTab !== 'transits' && effectiveWorkTab !== 'stairwells') return;
+    if (!workEntranceId) {
+      if (rangeFromFloorId) setRangeFromFloorId('');
+      if (rangeToFloorId) setRangeToFloorId('');
+      return;
+    }
+    const floorIds = new Set(rangeFloors.map((floor) => String(floor.id)));
+    if (rangeFromFloorId && !floorIds.has(String(rangeFromFloorId))) setRangeFromFloorId('');
+    if (rangeToFloorId && !floorIds.has(String(rangeToFloorId))) setRangeToFloorId('');
+  }, [
+    effectiveWorkTab,
+    workEntranceId,
+    rangeFloors,
+    rangeFromFloorId,
+    rangeToFloorId,
+  ]);
 
   useEffect(() => {
     if (!workModalOpen || workItemKind !== 'room') return;
@@ -1127,7 +1250,7 @@ export default function Settings({ user }) {
       <div>
         <h2 className="page-title">Настройка</h2>
         <p className="text-zinc-400 text-sm mt-1">
-          Справочники склада и мест проведения работ: склады и места хранения, категории и системы; объекты, подъезды, этажи, квартиры и помещения — во вкладке «Место проведения работ».
+          Справочники склада и мест проведения работ: склады и места хранения, категории и системы; объекты, подъезды, этажи, квартиры, помещения, транзиты и лестничные клетки.
         </p>
       </div>
 
@@ -1170,7 +1293,7 @@ export default function Settings({ user }) {
             ))}
           </div>
           <p className="text-zinc-400 text-xs">
-            Сначала объекты, затем подъезды, этажи, квартиры и помещения — каждый уровень привязан к родительскому.
+            Сначала объекты, затем подъезды и этажи. Квартиры/помещения, транзиты и лестничные клетки привязываются к этим уровням.
           </p>
         </div>
       )}
@@ -1559,6 +1682,73 @@ export default function Settings({ user }) {
                   className="input"
                   placeholder="По умолчанию в конец"
                 />
+              </div>
+            </div>
+          )}
+          {(effectiveWorkTab === 'transits' || effectiveWorkTab === 'stairwells') && (
+            <div className="space-y-3">
+              <div>
+                <label className="label">Объект</label>
+                <select
+                  value={workObjectId}
+                  onChange={(e) => setWorkObjectId(e.target.value)}
+                  className="input"
+                  required
+                >
+                  <option value="">— Выберите —</option>
+                  {sortedWorkObjects.map((objectRow) => (
+                    <option key={objectRow.id} value={objectRow.id}>{objectRow.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Подъезд</label>
+                <select
+                  value={workEntranceId}
+                  onChange={(e) => setWorkEntranceId(e.target.value)}
+                  className="input"
+                  required
+                  disabled={!workObjectId}
+                >
+                  <option value="">— Выберите —</option>
+                  {rangeEntrances.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="label">С этажа</label>
+                  <select
+                    value={rangeFromFloorId}
+                    onChange={(e) => setRangeFromFloorId(e.target.value)}
+                    className="input"
+                    required
+                    disabled={!workEntranceId}
+                  >
+                    <option value="">— Выберите —</option>
+                    {rangeFloors.map((floor) => (
+                      <option key={floor.id} value={floor.id}>{floor.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">По этаж</label>
+                  <select
+                    value={rangeToFloorId}
+                    onChange={(e) => setRangeToFloorId(e.target.value)}
+                    className="input"
+                    required
+                    disabled={!workEntranceId}
+                  >
+                    <option value="">— Выберите —</option>
+                    {rangeFloors.map((floor) => (
+                      <option key={floor.id} value={floor.id}>{floor.name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
           )}
