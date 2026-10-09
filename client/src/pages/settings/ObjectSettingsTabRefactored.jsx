@@ -219,6 +219,8 @@ export default function ObjectSettingsTabRefactored() {
     lineId: null,
     fromSlotId: null,
     toSlotId: null,
+    systemId: '',
+    categoryId: '',
     name: '',
     lengthM: '',
   });
@@ -520,6 +522,18 @@ export default function ObjectSettingsTabRefactored() {
     });
     return map;
   }, [data.locationSystems, apartmentById, roomById, transitById, stairwellById]);
+
+  const systemById = useMemo(() => {
+    const map = new Map();
+    data.systems.forEach((row) => map.set(Number(row.id), row));
+    return map;
+  }, [data.systems]);
+
+  const categoryById = useMemo(() => {
+    const map = new Map();
+    data.categories.forEach((row) => map.set(Number(row.id), row));
+    return map;
+  }, [data.categories]);
 
   const getSlotEntries = useCallback((slotId) => {
     const rows = [];
@@ -1237,6 +1251,12 @@ export default function ObjectSettingsTabRefactored() {
   const isSlotEligibleForCableTransit = useCallback((slot, transit) => {
     if (!slot || !transit) return false;
     if (!['apartment', 'room'].includes(slot.location_kind)) return false;
+    const requiredSystemId = Number.parseInt(cableDraft.systemId, 10);
+    const requiredCategoryId = cableDraft.categoryId === ''
+      ? null
+      : Number.parseInt(cableDraft.categoryId, 10);
+    if (requiredSystemId && Number(slot.system_id || 0) !== requiredSystemId) return false;
+    if (requiredCategoryId && Number(slot.category_id || 0) !== requiredCategoryId) return false;
     const placement = slotPlacementById.get(slot.id);
     if (!placement?.location) return false;
     const location = placement.location;
@@ -1249,13 +1269,15 @@ export default function ObjectSettingsTabRefactored() {
     if (Number(location.object_id || 0) !== Number(transit.object_id || 0)) return false;
     if (Number(location.entrance_id || 0) !== Number(transit.entrance_id || 0)) return false;
     return true;
-  }, [slotPlacementById]);
+  }, [slotPlacementById, cableDraft.systemId, cableDraft.categoryId]);
 
   const resetCableDraft = useCallback(() => {
     setCableDraft({
       lineId: null,
       fromSlotId: null,
       toSlotId: null,
+      systemId: '',
+      categoryId: '',
       name: '',
       lengthM: '',
     });
@@ -1324,8 +1346,12 @@ export default function ObjectSettingsTabRefactored() {
     if (!activeCableTransitId) return;
     const fromSlotId = Number.parseInt(cableDraft.fromSlotId, 10);
     const toSlotId = Number.parseInt(cableDraft.toSlotId, 10);
+    const systemId = Number.parseInt(cableDraft.systemId, 10);
+    const categoryId = cableDraft.categoryId === '' ? null : Number.parseInt(cableDraft.categoryId, 10);
     const name = String(cableDraft.name || '').trim();
     const lengthM = Number.parseFloat(cableDraft.lengthM);
+    if (!systemId) return setError('Выберите систему кабельной линии');
+    if (cableDraft.categoryId !== '' && !categoryId) return setError('Выберите корректную категорию');
     if (!fromSlotId || !toSlotId) return setError('Выберите два блока для кабельной линии');
     if (!name) return setError('Укажите название кабельной линии');
     if (!Number.isFinite(lengthM) || lengthM <= 0) return setError('Укажите корректную длину кабеля (м)');
@@ -1338,6 +1364,8 @@ export default function ObjectSettingsTabRefactored() {
           transit_id: activeCableTransitId,
           from_location_system_id: fromSlotId,
           to_location_system_id: toSlotId,
+          system_id: systemId,
+          category_id: categoryId,
           name,
           length_m: lengthM,
         });
@@ -1346,6 +1374,8 @@ export default function ObjectSettingsTabRefactored() {
         await settingsApi.objectSettings.createTransitCableLine(activeCableTransitId, {
           from_location_system_id: fromSlotId,
           to_location_system_id: toSlotId,
+          system_id: systemId,
+          category_id: categoryId,
           name,
           length_m: lengthM,
         });
@@ -1361,11 +1391,16 @@ export default function ObjectSettingsTabRefactored() {
   };
 
   const handleEditCableLine = (line) => {
+    const fromSlot = slotById.get(line.from_location_system_id);
+    const inferredSystemId = line.system_id || fromSlot?.system_id || '';
+    const inferredCategoryId = line.category_id ?? fromSlot?.category_id ?? '';
     setActiveCableTransitId(line.transit_id);
     setCableDraft({
       lineId: line.id,
       fromSlotId: line.from_location_system_id,
       toSlotId: line.to_location_system_id,
+      systemId: String(inferredSystemId || ''),
+      categoryId: inferredCategoryId == null ? '' : String(inferredCategoryId),
       name: line.name || '',
       lengthM: String(line.length_m ?? ''),
     });
@@ -1667,12 +1702,107 @@ export default function ObjectSettingsTabRefactored() {
     };
   };
 
+  const buildOptimizedTransitLineRows = useCallback((lines, transitRow) => {
+    const prepared = (lines || []).map((line) => {
+      const fromPlacement = slotPlacementById.get(line.from_location_system_id) || null;
+      const toPlacement = slotPlacementById.get(line.to_location_system_id) || null;
+      const fromRank = floorSortRank({ sort_order: fromPlacement?.location?.floor_sort_order });
+      const toRank = floorSortRank({ sort_order: toPlacement?.location?.floor_sort_order });
+      const fromShort = fromPlacement
+        ? `${fromPlacement.slot.location_kind === 'room' ? 'Пом.' : 'Кв.'} ${fromPlacement.location.name}`
+        : '—';
+      const toShort = toPlacement
+        ? `${toPlacement.slot.location_kind === 'room' ? 'Пом.' : 'Кв.'} ${toPlacement.location.name}`
+        : '—';
+      return {
+        line,
+        fromPlacement,
+        toPlacement,
+        fromRank,
+        toRank,
+        fromShort,
+        toShort,
+      };
+    });
+
+    const fromOrdered = [...prepared].sort((a, b) => (
+      (a.fromRank - b.fromRank)
+      || naturalCompare(a.fromShort, b.fromShort)
+      || (a.line.id - b.line.id)
+    ));
+    const toOrdered = [...prepared].sort((a, b) => (
+      (a.toRank - b.toRank)
+      || naturalCompare(a.toShort, b.toShort)
+      || (a.line.id - b.line.id)
+    ));
+    const fromOrderMap = new Map();
+    const toOrderMap = new Map();
+    fromOrdered.forEach((item, index) => fromOrderMap.set(item.line.id, index));
+    toOrdered.forEach((item, index) => toOrderMap.set(item.line.id, index));
+
+    const laneOrdered = [...prepared].sort((a, b) => {
+      const aFrom = fromOrderMap.get(a.line.id) ?? 0;
+      const aTo = toOrderMap.get(a.line.id) ?? 0;
+      const bFrom = fromOrderMap.get(b.line.id) ?? 0;
+      const bTo = toOrderMap.get(b.line.id) ?? 0;
+      const aCenter = (aFrom + aTo) / 2;
+      const bCenter = (bFrom + bTo) / 2;
+      return (
+        (aCenter - bCenter)
+        || (Math.abs(aFrom - aTo) - Math.abs(bFrom - bTo))
+        || (aFrom - bFrom)
+        || naturalCompare(a.line.name || '', b.line.name || '')
+        || (a.line.id - b.line.id)
+      );
+    });
+
+    const transitFromRank = floorSortRank({ sort_order: transitRow?.from_floor_sort_order });
+    const transitToRank = floorSortRank({ sort_order: transitRow?.to_floor_sort_order });
+    const minRank = Math.min(transitFromRank, transitToRank);
+    const maxRank = Math.max(transitFromRank, transitToRank);
+    const spread = maxRank > minRank ? (maxRank - minRank) : 1;
+    const topPad = 14;
+    const bottomPad = 14;
+    const contentHeight = Math.max(120, laneOrdered.length * 24);
+    const usableHeight = Math.max(contentHeight - topPad - bottomPad, 1);
+    const laneStep = laneOrdered.length > 0 ? usableHeight / laneOrdered.length : usableHeight;
+    const rankToY = (rank) => {
+      const clamped = Number.isFinite(rank) ? rank : minRank;
+      return topPad + ((clamped - minRank) / spread) * usableHeight;
+    };
+
+    return {
+      contentHeight,
+      rows: laneOrdered.map((item, laneIndex) => {
+        const lineHueSeed = Number(item.line.system_id || item.line.id || 1);
+        const stroke = `hsl(${(lineHueSeed * 37) % 360} 85% 66%)`;
+        return {
+          ...item,
+          laneIndex,
+          laneY: topPad + (laneStep * laneIndex) + (laneStep / 2),
+          fromY: rankToY(item.fromRank),
+          toY: rankToY(item.toRank),
+          stroke,
+        };
+      }),
+    };
+  }, [slotPlacementById]);
+
   const renderTransitCablePanel = (transitRow) => {
     const transitId = transitRow.id;
     const lines = transitCableLinesByTransit.get(transitId) || [];
+    const optimized = buildOptimizedTransitLineRows(lines, transitRow);
+    const optimizedRows = optimized.rows;
+    const diagramHeight = optimized.contentHeight;
     const isActive = Number(activeCableTransitId) === Number(transitId);
     const fromLabel = cableDraft.fromSlotId ? describeSlot(cableDraft.fromSlotId) : 'Не выбран';
     const toLabel = cableDraft.toSlotId ? describeSlot(cableDraft.toSlotId) : 'Не выбран';
+    const selectedSystemName = cableDraft.systemId
+      ? (systemById.get(Number.parseInt(cableDraft.systemId, 10))?.name || '')
+      : '';
+    const selectedCategoryName = cableDraft.categoryId
+      ? (categoryById.get(Number.parseInt(cableDraft.categoryId, 10))?.name || '')
+      : '';
     return (
       <div className="rounded-md border border-cyan-400/25 bg-cyan-950/15 p-1.5 space-y-1.5">
         <div className="flex flex-wrap items-center gap-1">
@@ -1705,9 +1835,54 @@ export default function ObjectSettingsTabRefactored() {
         {isActive && (
           <form className="space-y-1.5" onSubmit={handleSaveCableLine}>
             <p className="text-[9px] text-zinc-300 leading-tight">
-              Кликните по блоку отправления и блоку назначения на этажах этого подъезда.
+              Выберите систему/категорию линии, затем кликните по блоку отправления и блоку назначения на этажах этого подъезда.
             </p>
+            <div className="grid grid-cols-1 gap-1.5">
+              <select
+                value={cableDraft.systemId}
+                onChange={(e) => {
+                  const nextValue = e.target.value;
+                  setCableDraft((prev) => ({
+                    ...prev,
+                    systemId: nextValue,
+                    fromSlotId: null,
+                    toSlotId: null,
+                  }));
+                }}
+                className="input h-7 text-xs"
+                disabled={cableBusy}
+                required
+              >
+                <option value="">Система кабельной линии</option>
+                {data.systems.map((system) => (
+                  <option key={system.id} value={system.id}>{system.name}</option>
+                ))}
+              </select>
+              <select
+                value={cableDraft.categoryId}
+                onChange={(e) => {
+                  const nextValue = e.target.value;
+                  setCableDraft((prev) => ({
+                    ...prev,
+                    categoryId: nextValue,
+                    fromSlotId: null,
+                    toSlotId: null,
+                  }));
+                }}
+                className="input h-7 text-xs"
+                disabled={cableBusy}
+              >
+                <option value="">Категория (не выбрана)</option>
+                {data.categories.map((category) => (
+                  <option key={category.id} value={category.id}>{category.name}</option>
+                ))}
+              </select>
+            </div>
             <div className="space-y-1 rounded border border-white/10 bg-black/20 p-1.5">
+              <p className="text-[9px] text-cyan-100">
+                {selectedSystemName || 'Система не выбрана'}
+                {selectedCategoryName ? ` • ${selectedCategoryName}` : ''}
+              </p>
               <p className="text-[9px] text-zinc-200 truncate">От: {fromLabel}</p>
               <div className="flex items-center gap-1 text-[9px] text-cyan-200">
                 <span className="inline-block h-px flex-1 bg-cyan-300/60" />
@@ -1752,12 +1927,49 @@ export default function ObjectSettingsTabRefactored() {
 
         {!!lines.length && (
           <div className="space-y-1">
-            {lines.map((line) => (
+            {optimizedRows.length > 1 && (
+              <div className="rounded border border-white/10 bg-black/20 p-1.5">
+                <p className="text-[8px] text-zinc-300 mb-1">
+                  Линии автоматически переставляются для минимизации визуальных пересечений.
+                </p>
+                <svg viewBox={`0 0 100 ${diagramHeight}`} className="w-full h-28 rounded bg-black/25 border border-white/5">
+                  {optimizedRows.map((row) => {
+                    const midX = 50;
+                    const leftX = 8;
+                    const rightX = 92;
+                    const d = [
+                      `M ${leftX} ${row.fromY}`,
+                      `C ${midX - 18} ${row.fromY}, ${midX - 10} ${row.laneY}, ${midX} ${row.laneY}`,
+                      `C ${midX + 10} ${row.laneY}, ${rightX - 18} ${row.toY}, ${rightX} ${row.toY}`,
+                    ].join(' ');
+                    return (
+                      <g key={`diagram-${row.line.id}`}>
+                        <path d={d} fill="none" stroke={row.stroke} strokeWidth="1.8" opacity="0.95" />
+                        <circle cx={leftX} cy={row.fromY} r="1.8" fill={row.stroke} />
+                        <circle cx={rightX} cy={row.toY} r="1.8" fill={row.stroke} />
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
+            )}
+            {optimizedRows.map((row) => {
+              const line = row.line;
+              const lineSystemName = line.system_name
+                || systemById.get(Number(line.system_id || 0))?.name
+                || 'Без системы';
+              const lineCategoryName = line.category_name
+                || (line.category_id ? categoryById.get(Number(line.category_id))?.name : '')
+                || '';
+              return (
               <div key={line.id} className="rounded border border-white/10 bg-black/25 p-1">
                 <div className="flex items-center justify-between gap-1">
                   <p className="text-[9px] text-zinc-100 truncate font-medium">{line.name}</p>
                   <p className="text-[9px] text-zinc-400 shrink-0">{formatQty(line.length_m)} м</p>
                 </div>
+                <p className="text-[8px] text-cyan-100/90 truncate">
+                  {lineSystemName}{lineCategoryName ? ` • ${lineCategoryName}` : ''}
+                </p>
                 <p className="text-[8px] text-zinc-300 truncate">
                   {describeSlot(line.from_location_system_id)}
                 </p>
@@ -1788,7 +2000,8 @@ export default function ObjectSettingsTabRefactored() {
                   </button>
                 </div>
               </div>
-            ))}
+            );
+            })}
           </div>
         )}
       </div>

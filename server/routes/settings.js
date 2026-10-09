@@ -69,6 +69,8 @@ async function ensureObjectStatusSchema() {
           transit_id INTEGER NOT NULL REFERENCES work_transits(id) ON DELETE CASCADE,
           from_location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE CASCADE,
           to_location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE CASCADE,
+          system_id INTEGER REFERENCES material_systems(id) ON DELETE SET NULL,
+          category_id INTEGER REFERENCES material_categories(id) ON DELETE SET NULL,
           name VARCHAR(200) NOT NULL,
           length_m NUMERIC(12,3) NOT NULL CHECK (length_m > 0),
           created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -76,9 +78,17 @@ async function ensureObjectStatusSchema() {
           CHECK (from_location_system_id <> to_location_system_id)
         )`,
       );
+      await pool.query(
+        'ALTER TABLE work_transit_cable_lines ADD COLUMN IF NOT EXISTS system_id INTEGER REFERENCES material_systems(id) ON DELETE SET NULL',
+      );
+      await pool.query(
+        'ALTER TABLE work_transit_cable_lines ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES material_categories(id) ON DELETE SET NULL',
+      );
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_transit ON work_transit_cable_lines(transit_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_from_slot ON work_transit_cable_lines(from_location_system_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_to_slot ON work_transit_cable_lines(to_location_system_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_system ON work_transit_cable_lines(system_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_category ON work_transit_cable_lines(category_id)');
       await pool.query(
         `CREATE TABLE IF NOT EXISTS work_block_statuses (
           id SERIAL PRIMARY KEY,
@@ -473,9 +483,14 @@ function isTransitCableEndpointKind(kind) {
 
 async function loadTransitCableLineById(db, id) {
   return (await db.query(
-    `SELECT id, transit_id, from_location_system_id, to_location_system_id, name, length_m, created_at, updated_at
-     FROM work_transit_cable_lines
-     WHERE id = $1`,
+    `SELECT l.id, l.transit_id, l.from_location_system_id, l.to_location_system_id,
+            l.system_id, l.category_id, l.name, l.length_m, l.created_at, l.updated_at,
+            s.name AS system_name,
+            c.name AS category_name, c.icon_key AS category_icon_key
+     FROM work_transit_cable_lines l
+     LEFT JOIN material_systems s ON s.id = l.system_id
+     LEFT JOIN material_categories c ON c.id = l.category_id
+     WHERE l.id = $1`,
     [id],
   )).rows[0] || null;
 }
@@ -484,11 +499,20 @@ async function validateTransitCableLineInput(db, {
   transitId,
   fromLocationSystemId,
   toLocationSystemId,
+  systemId,
+  categoryId,
   name,
   lengthM,
 }) {
   const transit = await loadLocationByKind(db, 'transit', transitId);
   if (!transit) return { error: 'Транзит не найден' };
+  const system = (await db.query('SELECT id, name FROM material_systems WHERE id = $1', [systemId])).rows[0];
+  if (!system) return { error: 'Система кабельной линии не найдена' };
+  let category = null;
+  if (categoryId) {
+    category = (await db.query('SELECT id, name FROM material_categories WHERE id = $1', [categoryId])).rows[0];
+    if (!category) return { error: 'Категория кабельной линии не найдена' };
+  }
 
   const [fromSlot, toSlot] = await Promise.all([
     loadLocationSystemWithPlacement(db, fromLocationSystemId),
@@ -499,6 +523,14 @@ async function validateTransitCableLineInput(db, {
 
   if (!isTransitCableEndpointKind(fromSlot.location_kind) || !isTransitCableEndpointKind(toSlot.location_kind)) {
     return { error: 'Кабель можно привязать только к блокам квартир и помещений' };
+  }
+  if (Number(fromSlot.system_id || 0) !== Number(system.id) || Number(toSlot.system_id || 0) !== Number(system.id)) {
+    return { error: 'Выбранные блоки должны относиться к выбранной системе' };
+  }
+  if (categoryId) {
+    if (Number(fromSlot.category_id || 0) !== Number(category.id) || Number(toSlot.category_id || 0) !== Number(category.id)) {
+      return { error: 'Выбранные блоки должны относиться к выбранной категории' };
+    }
   }
 
   const invalidScope = [fromSlot, toSlot].find((slot) => {
@@ -517,6 +549,8 @@ async function validateTransitCableLineInput(db, {
     transit,
     fromSlot,
     toSlot,
+    system,
+    category,
     name,
     lengthM,
   };
@@ -1807,9 +1841,14 @@ router.get('/object-settings/layout', requirePermission('can_settings_work'), as
          ORDER BY location_system_id, name`,
       ),
       pool.query(
-        `SELECT id, transit_id, from_location_system_id, to_location_system_id, name, length_m, created_at, updated_at
-         FROM work_transit_cable_lines
-         ORDER BY transit_id, id`,
+        `SELECT l.id, l.transit_id, l.from_location_system_id, l.to_location_system_id,
+                l.system_id, l.category_id, l.name, l.length_m, l.created_at, l.updated_at,
+                s.name AS system_name,
+                c.name AS category_name, c.icon_key AS category_icon_key
+         FROM work_transit_cable_lines l
+         LEFT JOIN material_systems s ON s.id = l.system_id
+         LEFT JOIN material_categories c ON c.id = l.category_id
+         ORDER BY l.transit_id, l.id`,
       ),
     ]);
     res.json({
@@ -1839,16 +1878,25 @@ router.post('/object-settings/transits/:transitId/cable-lines', requirePermissio
   const transitId = parseId(req.params.transitId);
   const fromLocationSystemId = parseId(req.body?.from_location_system_id);
   const toLocationSystemId = parseId(req.body?.to_location_system_id);
+  const systemId = parseId(req.body?.system_id);
+  const categoryId = req.body?.category_id == null || req.body?.category_id === ''
+    ? null
+    : parseId(req.body?.category_id);
   const name = parseRequiredName(req.body?.name, 200);
   const lengthM = parsePositiveDecimal(req.body?.length_m);
-  if (!transitId || !fromLocationSystemId || !toLocationSystemId || !name || !lengthM) {
-    return res.status(400).json({ error: 'Укажите транзит, 2 блока, название и длину кабеля' });
+  if (!transitId || !fromLocationSystemId || !toLocationSystemId || !systemId || !name || !lengthM) {
+    return res.status(400).json({ error: 'Укажите транзит, систему, 2 блока, название и длину кабеля' });
+  }
+  if (req.body?.category_id != null && req.body?.category_id !== '' && !categoryId) {
+    return res.status(400).json({ error: 'Неверная категория кабельной линии' });
   }
 
   const validated = await validateTransitCableLineInput(pool, {
     transitId,
     fromLocationSystemId,
     toLocationSystemId,
+    systemId,
+    categoryId,
     name,
     lengthM,
   });
@@ -1859,12 +1907,14 @@ router.post('/object-settings/transits/:transitId/cable-lines', requirePermissio
       transit_id,
       from_location_system_id,
       to_location_system_id,
+      system_id,
+      category_id,
       name,
       length_m
     )
-    VALUES ($1, $2, $3, $4, $5)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING id`,
-    [transitId, fromLocationSystemId, toLocationSystemId, name, lengthM],
+    [transitId, fromLocationSystemId, toLocationSystemId, systemId, categoryId, name, lengthM],
   )).rows[0];
   const row = await loadTransitCableLineById(pool, created.id);
   res.status(201).json(row);
@@ -1884,19 +1934,30 @@ router.put('/object-settings/transit-cable-lines/:id', requirePermission('can_se
   const toLocationSystemId = req.body?.to_location_system_id === undefined
     ? current.to_location_system_id
     : parseId(req.body?.to_location_system_id);
+  const systemId = req.body?.system_id === undefined
+    ? parseId(current.system_id)
+    : parseId(req.body?.system_id);
+  const categoryId = req.body?.category_id === undefined
+    ? (current.category_id == null ? null : parseId(current.category_id))
+    : (req.body?.category_id == null || req.body?.category_id === '' ? null : parseId(req.body?.category_id));
   const name = req.body?.name === undefined ? current.name : parseRequiredName(req.body?.name, 200);
   const lengthM = req.body?.length_m === undefined
     ? parsePositiveDecimal(current.length_m)
     : parsePositiveDecimal(req.body?.length_m);
 
-  if (!transitId || !fromLocationSystemId || !toLocationSystemId || !name || !lengthM) {
+  if (!transitId || !fromLocationSystemId || !toLocationSystemId || !systemId || !name || !lengthM) {
     return res.status(400).json({ error: 'Неверные данные кабельной линии' });
+  }
+  if (req.body?.category_id !== undefined && req.body?.category_id != null && req.body?.category_id !== '' && !categoryId) {
+    return res.status(400).json({ error: 'Неверная категория кабельной линии' });
   }
 
   const validated = await validateTransitCableLineInput(pool, {
     transitId,
     fromLocationSystemId,
     toLocationSystemId,
+    systemId,
+    categoryId,
     name,
     lengthM,
   });
@@ -1907,11 +1968,13 @@ router.put('/object-settings/transit-cable-lines/:id', requirePermission('can_se
      SET transit_id = $1,
          from_location_system_id = $2,
          to_location_system_id = $3,
-         name = $4,
-         length_m = $5,
+         system_id = $4,
+         category_id = $5,
+         name = $6,
+         length_m = $7,
          updated_at = NOW()
-     WHERE id = $6`,
-    [transitId, fromLocationSystemId, toLocationSystemId, name, lengthM, id],
+     WHERE id = $8`,
+    [transitId, fromLocationSystemId, toLocationSystemId, systemId, categoryId, name, lengthM, id],
   );
   const row = await loadTransitCableLineById(pool, id);
   res.json(row);
