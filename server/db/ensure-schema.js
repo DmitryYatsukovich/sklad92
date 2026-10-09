@@ -228,6 +228,20 @@ const statements = [
   `CREATE INDEX IF NOT EXISTS idx_wls_system ON work_location_systems(system_id)`,
   `CREATE INDEX IF NOT EXISTS idx_wls_status ON work_location_systems(status_id)`,
   `CREATE INDEX IF NOT EXISTS idx_wls_assigned_user ON work_location_systems(assigned_user_id)`,
+  `CREATE TABLE IF NOT EXISTS work_transit_cable_lines (
+    id SERIAL PRIMARY KEY,
+    transit_id INTEGER NOT NULL REFERENCES work_transits(id) ON DELETE CASCADE,
+    from_location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE CASCADE,
+    to_location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE CASCADE,
+    name VARCHAR(200) NOT NULL,
+    length_m NUMERIC(12,3) NOT NULL CHECK (length_m > 0),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CHECK (from_location_system_id <> to_location_system_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_transit ON work_transit_cable_lines(transit_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_from_slot ON work_transit_cable_lines(from_location_system_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_to_slot ON work_transit_cable_lines(to_location_system_id)`,
   `CREATE TABLE IF NOT EXISTS work_location_system_materials (
     id SERIAL PRIMARY KEY,
     location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE CASCADE,

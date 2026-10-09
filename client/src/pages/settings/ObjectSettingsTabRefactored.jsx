@@ -79,6 +79,7 @@ function normalizePayload(payload) {
     locationSystemMaterials: asObjects(safe.location_system_materials),
     locationSystemEquipment: asObjects(safe.location_system_equipment),
     locationSystemWorks: asObjects(safe.location_system_works),
+    transitCableLines: asObjects(safe.transit_cable_lines),
   };
 }
 
@@ -97,6 +98,8 @@ function SystemSquare({
   incomplete = false,
   selectionMode = false,
   selected = false,
+  selectionEnabled = true,
+  selectionTone = 'default',
   onToggleSelect,
 }) {
   const entriesPreview = Array.isArray(slot.entryNames) ? slot.entryNames.filter(Boolean) : [];
@@ -104,22 +107,26 @@ function SystemSquare({
   const previewCount = entriesPreview.length;
   const tooltip = `${slot.system_name || 'Без системы'}${slot.category_name ? ` • ${slot.category_name}` : ''}${slot.missingFieldsText ? `\nНе заполнено: ${slot.missingFieldsText}` : ''}`;
   const systemShort = String(slot.system_name || 'Сист').slice(0, 5);
+  const selectedRingClass = selectionTone === 'cable' ? 'ring-cyan-300/80' : 'ring-white/70';
+  const idleRingClass = selectionTone === 'cable' ? 'ring-cyan-400/30' : 'ring-white/25';
+  const disabledSelectionClass = selectionMode && !selectionEnabled ? 'opacity-45 cursor-not-allowed' : '';
   return (
     <button
       type="button"
       onClick={() => {
         if (selectionMode) {
+          if (!selectionEnabled) return;
           onToggleSelect?.(slot);
           return;
         }
         onOpen(slot);
       }}
-      className={`relative w-[2.9rem] h-[2.9rem] rounded-md border p-0.5 text-left transition hover:bg-white/10 hover:shadow-[0_8px_18px_rgba(0,0,0,0.24)] shadow-[0_4px_10px_rgba(0,0,0,0.18)] ${incomplete ? 'border-rose-500/70 bg-rose-950/35 text-rose-100' : 'border-white/15 bg-zinc-900/80 text-zinc-100'} ${selectionMode ? (selected ? 'ring-2 ring-white/70' : 'ring-1 ring-white/25') : ''}`}
+      className={`relative w-[2.9rem] h-[2.9rem] rounded-md border p-0.5 text-left transition hover:bg-white/10 hover:shadow-[0_8px_18px_rgba(0,0,0,0.24)] shadow-[0_4px_10px_rgba(0,0,0,0.18)] ${incomplete ? 'border-rose-500/70 bg-rose-950/35 text-rose-100' : 'border-white/15 bg-zinc-900/80 text-zinc-100'} ${selectionMode ? (selected ? `ring-2 ${selectedRingClass}` : `ring-1 ${idleRingClass}`) : ''} ${disabledSelectionClass}`}
       title={tooltip}
     >
       {selectionMode && (
         <span
-          className={`absolute top-1 right-1 h-3.5 w-3.5 rounded-full border ${selected ? 'bg-white border-white' : 'bg-transparent border-white/60'}`}
+          className={`absolute top-1 right-1 h-3.5 w-3.5 rounded-full border ${selected ? 'bg-white border-white' : 'bg-transparent border-white/60'} ${!selectionEnabled ? 'opacity-40' : ''}`}
           aria-hidden="true"
         />
       )}
@@ -207,6 +214,15 @@ export default function ObjectSettingsTabRefactored() {
   const [summaryEditSystemId, setSummaryEditSystemId] = useState('');
   const [summaryEditCategoryId, setSummaryEditCategoryId] = useState('');
   const [summaryEditBusy, setSummaryEditBusy] = useState(false);
+  const [activeCableTransitId, setActiveCableTransitId] = useState(null);
+  const [cableDraft, setCableDraft] = useState({
+    lineId: null,
+    fromSlotId: null,
+    toSlotId: null,
+    name: '',
+    lengthM: '',
+  });
+  const [cableBusy, setCableBusy] = useState(false);
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -478,6 +494,32 @@ export default function ObjectSettingsTabRefactored() {
     sortedStairwells.forEach((row) => map.set(row.id, row));
     return map;
   }, [sortedStairwells]);
+  const transitCableLinesByTransit = useMemo(() => {
+    const map = new Map();
+    data.transitCableLines.forEach((line) => {
+      const list = map.get(line.transit_id) || [];
+      list.push(line);
+      map.set(line.transit_id, list);
+    });
+    map.forEach((list, key) => {
+      map.set(key, [...list].sort((a, b) => naturalCompare(a.name, b.name) || (a.id - b.id)));
+    });
+    return map;
+  }, [data.transitCableLines]);
+
+  const slotPlacementById = useMemo(() => {
+    const map = new Map();
+    data.locationSystems.forEach((slot) => {
+      let location = null;
+      if (slot.location_kind === 'apartment') location = apartmentById.get(slot.location_id) || null;
+      if (slot.location_kind === 'room') location = roomById.get(slot.location_id) || null;
+      if (slot.location_kind === 'transit') location = transitById.get(slot.location_id) || null;
+      if (slot.location_kind === 'stairwell') location = stairwellById.get(slot.location_id) || null;
+      if (!location) return;
+      map.set(slot.id, { slot, location });
+    });
+    return map;
+  }, [data.locationSystems, apartmentById, roomById, transitById, stairwellById]);
 
   const getSlotEntries = useCallback((slotId) => {
     const rows = [];
@@ -1166,6 +1208,196 @@ export default function ObjectSettingsTabRefactored() {
     setMultiCopySelectedSlotIds([]);
   };
 
+  const activeCableTransit = useMemo(
+    () => (activeCableTransitId ? transitById.get(activeCableTransitId) || null : null),
+    [activeCableTransitId, transitById],
+  );
+
+  const cableSelectedSlotIds = useMemo(() => {
+    const values = [cableDraft.fromSlotId, cableDraft.toSlotId]
+      .map((value) => Number.parseInt(value, 10))
+      .filter((value) => Number.isInteger(value) && value > 0);
+    return new Set(values.map(String));
+  }, [cableDraft.fromSlotId, cableDraft.toSlotId]);
+
+  const describeSlot = useCallback((slotId) => {
+    const placement = slotPlacementById.get(slotId);
+    if (!placement) return 'Блок не найден';
+    const { slot, location } = placement;
+    if (slot.location_kind === 'apartment') {
+      return `Кв. ${location.name} · эт. ${location.floor_name} · ${slot.system_name}${slot.category_name ? ` / ${slot.category_name}` : ''}`;
+    }
+    if (slot.location_kind === 'room') {
+      const apartmentName = location.apartment_name ? ` · кв. ${location.apartment_name}` : '';
+      return `Пом. ${location.name}${apartmentName} · эт. ${location.floor_name} · ${slot.system_name}${slot.category_name ? ` / ${slot.category_name}` : ''}`;
+    }
+    return `${getLocationKindTitle(slot.location_kind)} ${location.name || ''} · ${slot.system_name}`;
+  }, [slotPlacementById]);
+
+  const isSlotEligibleForCableTransit = useCallback((slot, transit) => {
+    if (!slot || !transit) return false;
+    if (!['apartment', 'room'].includes(slot.location_kind)) return false;
+    const placement = slotPlacementById.get(slot.id);
+    if (!placement?.location) return false;
+    const location = placement.location;
+    const fromRank = floorSortRank({ sort_order: transit.from_floor_sort_order });
+    const toRank = floorSortRank({ sort_order: transit.to_floor_sort_order });
+    const minRank = Math.min(fromRank, toRank);
+    const maxRank = Math.max(fromRank, toRank);
+    const locationRank = floorSortRank({ sort_order: location.floor_sort_order });
+    if (locationRank < minRank || locationRank > maxRank) return false;
+    if (Number(location.object_id || 0) !== Number(transit.object_id || 0)) return false;
+    if (Number(location.entrance_id || 0) !== Number(transit.entrance_id || 0)) return false;
+    return true;
+  }, [slotPlacementById]);
+
+  const resetCableDraft = useCallback(() => {
+    setCableDraft({
+      lineId: null,
+      fromSlotId: null,
+      toSlotId: null,
+      name: '',
+      lengthM: '',
+    });
+  }, []);
+
+  const handleStartCableSelection = (transitId) => {
+    if (multiCopyLocationKey) {
+      setMultiCopyLocationKey('');
+      setMultiCopySelectedSlotIds([]);
+    }
+    setActiveCableTransitId(transitId);
+    resetCableDraft();
+    setError('');
+    setNotice('Выберите первый блок, затем второй. После выбора укажите название и длину кабеля.');
+  };
+
+  const handleCancelCableSelection = () => {
+    setActiveCableTransitId(null);
+    resetCableDraft();
+    setError('');
+  };
+
+  const handlePickCableSlot = useCallback((slot) => {
+    if (!activeCableTransit) return;
+    if (!isSlotEligibleForCableTransit(slot, activeCableTransit)) {
+      setError('Для текущего транзита можно выбирать только блоки в этом подъезде и в диапазоне этажей.');
+      return;
+    }
+    setError('');
+    setCableDraft((prev) => {
+      const pickedId = Number(slot.id);
+      if (!prev.fromSlotId || (prev.fromSlotId && prev.toSlotId)) {
+        return {
+          ...prev,
+          lineId: null,
+          fromSlotId: pickedId,
+          toSlotId: null,
+        };
+      }
+      if (Number(prev.fromSlotId) === pickedId) {
+        return {
+          ...prev,
+          lineId: null,
+          fromSlotId: null,
+          toSlotId: null,
+        };
+      }
+      if (!prev.toSlotId) {
+        return {
+          ...prev,
+          lineId: null,
+          toSlotId: pickedId,
+        };
+      }
+      return {
+        ...prev,
+        lineId: null,
+        fromSlotId: pickedId,
+        toSlotId: null,
+      };
+    });
+  }, [activeCableTransit, isSlotEligibleForCableTransit]);
+
+  const handleSaveCableLine = async (e) => {
+    e.preventDefault();
+    if (!activeCableTransitId) return;
+    const fromSlotId = Number.parseInt(cableDraft.fromSlotId, 10);
+    const toSlotId = Number.parseInt(cableDraft.toSlotId, 10);
+    const name = String(cableDraft.name || '').trim();
+    const lengthM = Number.parseFloat(cableDraft.lengthM);
+    if (!fromSlotId || !toSlotId) return setError('Выберите два блока для кабельной линии');
+    if (!name) return setError('Укажите название кабельной линии');
+    if (!Number.isFinite(lengthM) || lengthM <= 0) return setError('Укажите корректную длину кабеля (м)');
+
+    setCableBusy(true);
+    setError('');
+    try {
+      if (cableDraft.lineId) {
+        await settingsApi.objectSettings.updateTransitCableLine(cableDraft.lineId, {
+          transit_id: activeCableTransitId,
+          from_location_system_id: fromSlotId,
+          to_location_system_id: toSlotId,
+          name,
+          length_m: lengthM,
+        });
+        setNotice('Кабельная линия обновлена.');
+      } else {
+        await settingsApi.objectSettings.createTransitCableLine(activeCableTransitId, {
+          from_location_system_id: fromSlotId,
+          to_location_system_id: toSlotId,
+          name,
+          length_m: lengthM,
+        });
+        setNotice('Кабельная линия добавлена.');
+      }
+      resetCableDraft();
+      await load({ silent: true });
+    } catch (err) {
+      setError(err.message || 'Не удалось сохранить кабельную линию');
+    } finally {
+      setCableBusy(false);
+    }
+  };
+
+  const handleEditCableLine = (line) => {
+    setActiveCableTransitId(line.transit_id);
+    setCableDraft({
+      lineId: line.id,
+      fromSlotId: line.from_location_system_id,
+      toSlotId: line.to_location_system_id,
+      name: line.name || '',
+      lengthM: String(line.length_m ?? ''),
+    });
+    setError('');
+    setNotice('Отредактируйте параметры линии и нажмите «Сохранить кабель».');
+  };
+
+  const handleDeleteCableLine = async (lineId) => {
+    if (!lineId) return;
+    if (!confirm('Удалить кабельную линию?')) return;
+    setCableBusy(true);
+    setError('');
+    try {
+      await settingsApi.objectSettings.deleteTransitCableLine(lineId);
+      if (Number(cableDraft.lineId) === Number(lineId)) resetCableDraft();
+      setNotice('Кабельная линия удалена.');
+      await load({ silent: true });
+    } catch (err) {
+      setError(err.message || 'Не удалось удалить кабельную линию');
+    } finally {
+      setCableBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!activeCableTransitId) return;
+    if (!transitById.has(activeCableTransitId)) {
+      setActiveCableTransitId(null);
+      resetCableDraft();
+    }
+  }, [activeCableTransitId, transitById, resetCableDraft]);
+
   const openSummaryEditModal = (objectName, row) => {
     if (!row?.slotIds?.length) return;
     setSummaryEditTarget({
@@ -1229,13 +1461,14 @@ export default function ObjectSettingsTabRefactored() {
     const blockCount = (slotsByLocation.get(key) || []).length;
     const selectingMultiple = multiCopyLocationKey === key;
     const selectedCount = selectingMultiple ? multiCopySelectedSlotIds.length : 0;
+    const cableSelectionActive = Boolean(activeCableTransitId);
     return (
       <div className="grid grid-cols-2 gap-1">
         <button
           type="button"
           onClick={() => handleCopyLocationBlocks(locationKind, locationId, title)}
           className="px-1 py-0.5 rounded border border-white/15 text-[8px] text-zinc-200 hover:bg-white/10 leading-tight"
-          disabled={!!pasteBusyKey || slotBusy}
+          disabled={!!pasteBusyKey || slotBusy || cableSelectionActive}
         >
           Коп. все
         </button>
@@ -1244,7 +1477,7 @@ export default function ObjectSettingsTabRefactored() {
             type="button"
             onClick={() => handleStartMultiCopySelection(locationKind, locationId)}
             className="px-1 py-0.5 rounded border border-indigo-400/40 text-[8px] text-indigo-200 hover:bg-indigo-900/30 leading-tight"
-            disabled={!!pasteBusyKey || slotBusy || blockCount === 0}
+            disabled={!!pasteBusyKey || slotBusy || blockCount === 0 || cableSelectionActive}
           >
             Коп. выбор
           </button>
@@ -1254,7 +1487,7 @@ export default function ObjectSettingsTabRefactored() {
               type="button"
               onClick={() => handleCopySelectedBlocks(locationKind, locationId, title)}
               className="px-1 py-0.5 rounded border border-indigo-300/60 text-[8px] text-indigo-100 hover:bg-indigo-900/40 disabled:opacity-40 leading-tight"
-              disabled={!!pasteBusyKey || slotBusy || selectedCount === 0}
+              disabled={!!pasteBusyKey || slotBusy || selectedCount === 0 || cableSelectionActive}
             >
               Коп. ({selectedCount})
             </button>
@@ -1262,7 +1495,7 @@ export default function ObjectSettingsTabRefactored() {
               type="button"
               onClick={handleCancelMultiCopySelection}
               className="px-1 py-0.5 rounded border border-white/20 text-[8px] text-zinc-300 hover:bg-white/10 leading-tight"
-              disabled={!!pasteBusyKey || slotBusy}
+              disabled={!!pasteBusyKey || slotBusy || cableSelectionActive}
             >
               Снять выбор
             </button>
@@ -1273,7 +1506,7 @@ export default function ObjectSettingsTabRefactored() {
             type="button"
             onClick={() => handlePasteLocationBlocks(locationKind, locationId, title)}
             className="px-1 py-0.5 rounded border border-sky-400/40 text-[8px] text-sky-200 hover:bg-sky-900/30 leading-tight"
-            disabled={!!pasteBusyKey || slotBusy}
+            disabled={!!pasteBusyKey || slotBusy || cableSelectionActive}
           >
             {locationBusy ? 'Вставка…' : 'Вставить'}
           </button>
@@ -1282,7 +1515,7 @@ export default function ObjectSettingsTabRefactored() {
           type="button"
           onClick={() => handleDeleteLocationBlocks(locationKind, locationId, title)}
           className={`px-1 py-0.5 rounded border border-rose-400/40 text-[8px] text-rose-200 hover:bg-rose-900/30 disabled:opacity-40 leading-tight ${canPaste ? 'col-span-2' : ''}`}
-          disabled={!!pasteBusyKey || slotBusy || blockCount === 0}
+          disabled={!!pasteBusyKey || slotBusy || blockCount === 0 || cableSelectionActive}
         >
           Удалить
         </button>
@@ -1290,7 +1523,7 @@ export default function ObjectSettingsTabRefactored() {
     );
   };
 
-  const renderSystemSquares = (locationKind, locationId, title) => {
+  const renderSystemSquares = (locationKind, locationId, title, options = {}) => {
     const key = `${locationKind}:${locationId}`;
     const slots = (slotsByLocation.get(key) || []).filter(slotMatchesFilters);
     const sortedSlotCards = slots
@@ -1307,7 +1540,12 @@ export default function ObjectSettingsTabRefactored() {
         || (a.slot.id - b.slot.id)
       ));
     const isPastingHere = pasteBusyKey === `slot:${key}`;
-    const selectingMultiple = multiCopyLocationKey === key;
+    const selectingMultiple = multiCopyLocationKey === key && !options.selectionMode;
+    const isCustomSelectionMode = Boolean(options.selectionMode);
+    const selectedSet = options.selectedSlotIds instanceof Set
+      ? options.selectedSlotIds
+      : new Set((options.selectedSlotIds || []).map((id) => String(id)));
+    const selectionTone = options.selectionTone || 'default';
     if (!sortedSlotCards.length && hasSlotFilters) return null;
 
     const groupedBySystem = sortedSlotCards.reduce((acc, item) => {
@@ -1357,6 +1595,10 @@ export default function ObjectSettingsTabRefactored() {
                   <div className="grid grid-cols-3 sm:grid-cols-4 xl:grid-cols-6 gap-1">
                     {categoryRow.items.map(({ slot, entries, entryNames, completeness }) => {
                       const selectedForMultiCopy = selectingMultiple && multiCopySelectedSlotIds.includes(String(slot.id));
+                      const selectedForCustomSelection = isCustomSelectionMode && selectedSet.has(String(slot.id));
+                      const selectableForCustom = isCustomSelectionMode
+                        ? (typeof options.isSlotSelectable === 'function' ? options.isSlotSelectable(slot) : true)
+                        : true;
                       return (
                         <SystemSquare
                           key={slot.id}
@@ -1369,9 +1611,11 @@ export default function ObjectSettingsTabRefactored() {
                           onOpen={openSlotModal}
                           totals={{ positions: entries.length }}
                           incomplete={completeness.isIncomplete}
-                          selectionMode={selectingMultiple}
-                          selected={selectedForMultiCopy}
-                          onToggleSelect={handleToggleMultiCopySlot}
+                          selectionMode={selectingMultiple || isCustomSelectionMode}
+                          selected={selectedForMultiCopy || selectedForCustomSelection}
+                          selectionEnabled={selectableForCustom}
+                          selectionTone={selectionTone}
+                          onToggleSelect={isCustomSelectionMode ? options.onSelectSlot : handleToggleMultiCopySlot}
                         />
                       );
                     })}
@@ -1386,6 +1630,7 @@ export default function ObjectSettingsTabRefactored() {
             type="button"
             onClick={() => openCreateSlotModal(locationKind, locationId, title)}
             className="w-[2.9rem] h-[2.9rem] rounded-md border border-dashed border-white/20 bg-black/20 hover:bg-white/10 text-zinc-300 text-[7px] shadow-[0_4px_10px_rgba(0,0,0,0.18)]"
+            disabled={Boolean(activeCableTransitId)}
           >
             +Сист.
           </button>
@@ -1394,7 +1639,7 @@ export default function ObjectSettingsTabRefactored() {
               type="button"
               onClick={() => handlePasteSlotToLocation(locationKind, locationId, title)}
               className="w-[2.9rem] h-[2.9rem] rounded-md border border-dashed border-sky-400/40 bg-sky-900/20 hover:bg-sky-800/30 text-sky-100 text-[7px] shadow-[0_4px_10px_rgba(0,0,0,0.18)]"
-              disabled={!!pasteBusyKey || slotBusy}
+              disabled={!!pasteBusyKey || slotBusy || Boolean(activeCableTransitId)}
               title={`Вставить блок: ${copiedSlotTemplate.systemName}`}
             >
               {isPastingHere ? '…' : 'Встав.'}
@@ -1408,6 +1653,146 @@ export default function ObjectSettingsTabRefactored() {
   const toggleFloor = (floorId) => {
     const key = String(floorId);
     setCollapsedFloors((prev) => (prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key]));
+  };
+
+  const buildCableSelectionOptions = (locationKind) => {
+    if (!activeCableTransit) return null;
+    if (!['room', 'apartment'].includes(locationKind)) return null;
+    return {
+      selectionMode: true,
+      selectionTone: 'cable',
+      selectedSlotIds: cableSelectedSlotIds,
+      onSelectSlot: handlePickCableSlot,
+      isSlotSelectable: (slot) => isSlotEligibleForCableTransit(slot, activeCableTransit),
+    };
+  };
+
+  const renderTransitCablePanel = (transitRow) => {
+    const transitId = transitRow.id;
+    const lines = transitCableLinesByTransit.get(transitId) || [];
+    const isActive = Number(activeCableTransitId) === Number(transitId);
+    const fromLabel = cableDraft.fromSlotId ? describeSlot(cableDraft.fromSlotId) : 'Не выбран';
+    const toLabel = cableDraft.toSlotId ? describeSlot(cableDraft.toSlotId) : 'Не выбран';
+    return (
+      <div className="rounded-md border border-cyan-400/25 bg-cyan-950/15 p-1.5 space-y-1.5">
+        <div className="flex flex-wrap items-center gap-1">
+          {!isActive ? (
+            <button
+              type="button"
+              onClick={() => handleStartCableSelection(transitId)}
+              className="px-2 py-0.5 rounded border border-cyan-300/40 text-[9px] text-cyan-100 hover:bg-cyan-900/35"
+              disabled={cableBusy}
+            >
+              Добавить кабель
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleCancelCableSelection}
+              className="px-2 py-0.5 rounded border border-white/25 text-[9px] text-zinc-100 hover:bg-white/10"
+              disabled={cableBusy}
+            >
+              Закрыть выбор
+            </button>
+          )}
+          {!!lines.length && (
+            <span className="text-[9px] text-zinc-300 rounded-full border border-white/15 px-1.5 py-0.5">
+              Линий: {lines.length}
+            </span>
+          )}
+        </div>
+
+        {isActive && (
+          <form className="space-y-1.5" onSubmit={handleSaveCableLine}>
+            <p className="text-[9px] text-zinc-300 leading-tight">
+              Кликните по блоку отправления и блоку назначения на этажах этого подъезда.
+            </p>
+            <div className="space-y-1 rounded border border-white/10 bg-black/20 p-1.5">
+              <p className="text-[9px] text-zinc-200 truncate">От: {fromLabel}</p>
+              <div className="flex items-center gap-1 text-[9px] text-cyan-200">
+                <span className="inline-block h-px flex-1 bg-cyan-300/60" />
+                <span className="shrink-0 px-1 py-0.5 rounded border border-cyan-300/30 bg-cyan-900/35">
+                  Транзит {transitRow.name}
+                </span>
+                <span className="inline-block h-px flex-1 bg-cyan-300/60" />
+              </div>
+              <p className="text-[9px] text-zinc-200 truncate">До: {toLabel}</p>
+            </div>
+            <div className="grid grid-cols-1 gap-1.5">
+              <input
+                type="text"
+                value={cableDraft.name}
+                onChange={(e) => setCableDraft((prev) => ({ ...prev, name: e.target.value }))}
+                placeholder="Название кабеля"
+                className="input h-7 text-xs"
+                disabled={cableBusy}
+                required
+              />
+              <input
+                type="number"
+                min="0.001"
+                step="0.001"
+                value={cableDraft.lengthM}
+                onChange={(e) => setCableDraft((prev) => ({ ...prev, lengthM: e.target.value }))}
+                placeholder="Длина, м"
+                className="input h-7 text-xs"
+                disabled={cableBusy}
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full rounded border border-cyan-300/40 bg-cyan-900/35 px-2 py-1 text-[10px] font-medium text-cyan-100 hover:bg-cyan-800/35 disabled:opacity-50"
+              disabled={cableBusy}
+            >
+              {cableBusy ? 'Сохранение…' : (cableDraft.lineId ? 'Сохранить кабель' : 'Добавить кабель')}
+            </button>
+          </form>
+        )}
+
+        {!!lines.length && (
+          <div className="space-y-1">
+            {lines.map((line) => (
+              <div key={line.id} className="rounded border border-white/10 bg-black/25 p-1">
+                <div className="flex items-center justify-between gap-1">
+                  <p className="text-[9px] text-zinc-100 truncate font-medium">{line.name}</p>
+                  <p className="text-[9px] text-zinc-400 shrink-0">{formatQty(line.length_m)} м</p>
+                </div>
+                <p className="text-[8px] text-zinc-300 truncate">
+                  {describeSlot(line.from_location_system_id)}
+                </p>
+                <div className="flex items-center gap-1 text-[8px] text-cyan-200 py-0.5">
+                  <span className="inline-block h-px flex-1 bg-cyan-300/55" />
+                  <span className="shrink-0 uppercase tracking-wide">через транзит</span>
+                  <span className="inline-block h-px flex-1 bg-cyan-300/55" />
+                </div>
+                <p className="text-[8px] text-zinc-300 truncate">
+                  {describeSlot(line.to_location_system_id)}
+                </p>
+                <div className="mt-1 flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleEditCableLine(line)}
+                    className="px-1.5 py-0.5 rounded border border-white/20 text-[8px] text-zinc-200 hover:bg-white/10"
+                    disabled={cableBusy}
+                  >
+                    Изм.
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteCableLine(line.id)}
+                    className="px-1.5 py-0.5 rounded border border-rose-400/45 text-[8px] text-rose-200 hover:bg-rose-900/30"
+                    disabled={cableBusy}
+                  >
+                    Удал.
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
   };
 
   const activeSlotId = activeSlot?.id || null;
@@ -1588,6 +1973,7 @@ export default function ObjectSettingsTabRefactored() {
                                     <p className="text-zinc-100 text-[9px] font-semibold leading-tight break-words uppercase tracking-wide">{locationTitle}</p>
                                     <p className="text-zinc-400 text-[8px] leading-tight">{locationRange}</p>
                                     {renderLocationActions(locationRow._kind, locationRow.id, locationTitle)}
+                                    {locationRow._kind === 'transit' ? renderTransitCablePanel(locationRow) : null}
                                     {squares}
                                   </div>
                                 );
@@ -1642,7 +2028,7 @@ export default function ObjectSettingsTabRefactored() {
                                           type="button"
                                           onClick={() => handleCopyFloorBlocks(floor)}
                                           className="px-2 py-0.5 rounded border border-white/15 text-[10px] text-zinc-200 hover:bg-white/10"
-                                          disabled={!!pasteBusyKey || slotBusy}
+                                          disabled={!!pasteBusyKey || slotBusy || Boolean(activeCableTransitId)}
                                         >
                                           Копировать этаж
                                         </button>
@@ -1651,7 +2037,7 @@ export default function ObjectSettingsTabRefactored() {
                                             type="button"
                                             onClick={() => handlePasteFloorBlocks(floor)}
                                             className="px-2 py-0.5 rounded border border-sky-400/40 text-[10px] text-sky-200 hover:bg-sky-900/30"
-                                            disabled={!!pasteBusyKey || slotBusy}
+                                            disabled={!!pasteBusyKey || slotBusy || Boolean(activeCableTransitId)}
                                           >
                                             {pasteBusyKey === `floor:${floor.id}` ? 'Вставка…' : 'Вставить этаж'}
                                           </button>
@@ -1664,7 +2050,7 @@ export default function ObjectSettingsTabRefactored() {
                                               <p className="text-zinc-200 text-[10px] font-semibold tracking-wide uppercase">Помещения на этаже</p>
                                               {floorRooms.map((room) => (
                                                 (() => {
-                                                  const roomSquares = renderSystemSquares('room', room.id, `Пом. ${room.name}`);
+                                                  const roomSquares = renderSystemSquares('room', room.id, `Пом. ${room.name}`, buildCableSelectionOptions('room') || undefined);
                                                   if (!roomSquares) return null;
                                                   const roomHasBlocks = hasLocationBlocks('room', room.id);
                                                   return (
@@ -1691,9 +2077,9 @@ export default function ObjectSettingsTabRefactored() {
                                               <p className="text-zinc-200 text-[10px] font-semibold tracking-wide uppercase">Квартиры на этаже</p>
                                               {floorApartments.map((apartment) => (
                                                 (() => {
-                                                  const apartmentSquares = renderSystemSquares('apartment', apartment.id, `Кв. ${apartment.name}`);
+                                                  const apartmentSquares = renderSystemSquares('apartment', apartment.id, `Кв. ${apartment.name}`, buildCableSelectionOptions('apartment') || undefined);
                                                   const apartmentRoomCards = (roomsByApartment.get(apartment.id) || []).map((room) => {
-                                                    const roomSquares = renderSystemSquares('room', room.id, `Пом. ${room.name}`);
+                                                    const roomSquares = renderSystemSquares('room', room.id, `Пом. ${room.name}`, buildCableSelectionOptions('room') || undefined);
                                                     if (!roomSquares) return null;
                                                     const roomHasBlocks = hasLocationBlocks('room', room.id);
                                                     return (
