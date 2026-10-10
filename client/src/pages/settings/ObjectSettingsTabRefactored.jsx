@@ -233,7 +233,6 @@ export default function ObjectSettingsTabRefactored() {
     name: '',
     lengthM: '',
   });
-  const [cableAddModalOpen, setCableAddModalOpen] = useState(false);
   const [cableBusy, setCableBusy] = useState(false);
   const [cablePickTarget, setCablePickTarget] = useState('');
   const [cableEditModalOpen, setCableEditModalOpen] = useState(false);
@@ -1331,16 +1330,13 @@ export default function ObjectSettingsTabRefactored() {
       return;
     }
     setActiveCableTransitId(normalizedTransitId);
-    setCableAddModalOpen(true);
     resetCableDraft();
     setCablePickTarget('from');
     setError('');
-    setNotice('Заполните окно добавления кабеля. Блоки можно выбрать из списка или кликом по схеме.');
+    setNotice('Нажмите «От», выберите блок, затем «До» и выберите второй блок.');
   };
 
   const handleCancelCableSelection = () => {
-    if (cableBusy) return;
-    setCableAddModalOpen(false);
     setActiveCableTransitId(null);
     resetCableDraft();
     setCablePickTarget('');
@@ -1417,7 +1413,6 @@ export default function ObjectSettingsTabRefactored() {
       revealCableSlotFloor(toSlotId);
       await load({ silent: true });
       setNotice('Кабельная линия добавлена.');
-      setCableAddModalOpen(false);
       setActiveCableTransitId(null);
       resetCableDraft();
       setCablePickTarget('');
@@ -1511,7 +1506,6 @@ export default function ObjectSettingsTabRefactored() {
     if (!activeCableTransitId) return;
     const activeId = Number.parseInt(activeCableTransitId, 10);
     if (!activeId || !transitById.has(activeId)) {
-      setCableAddModalOpen(false);
       setActiveCableTransitId(null);
       resetCableDraft();
       setCablePickTarget('');
@@ -1867,29 +1861,44 @@ export default function ObjectSettingsTabRefactored() {
         if (!gridEl) return;
         const gridRect = gridEl.getBoundingClientRect();
         if (!gridRect.width || !gridRect.height) return;
+        const pointFromRectCenter = (rect) => ({
+          x: rect.left - gridRect.left + (rect.width / 2),
+          y: rect.top - gridRect.top + (rect.height / 2),
+        });
+        const resolveSlotPoint = (slotIdValue, transitPoint) => {
+          const slotId = Number.parseInt(slotIdValue, 10);
+          if (!slotId) return null;
+          const slotEl = gridEl.querySelector(`[data-slot-id="${slotId}"]`);
+          if (slotEl instanceof HTMLElement) {
+            return pointFromRectCenter(slotEl.getBoundingClientRect());
+          }
+          const placement = slotPlacementById.get(slotId);
+          const floorId = Number.parseInt(placement?.location?.floor_id, 10);
+          if (!floorId) return null;
+          const floorEl = gridEl.querySelector(`[data-floor-id="${floorId}"]`);
+          if (!(floorEl instanceof HTMLElement)) return null;
+          const floorRect = floorEl.getBoundingClientRect();
+          const floorCenterY = floorRect.top - gridRect.top + (floorRect.height / 2);
+          const floorLeft = floorRect.left - gridRect.left;
+          const floorRight = floorLeft + floorRect.width;
+          const fallbackX = transitPoint && transitPoint.x > floorLeft
+            ? Math.max(floorLeft + 8, floorRight - 12)
+            : floorLeft + 12;
+          return {
+            x: fallbackX,
+            y: floorCenterY,
+          };
+        };
 
         const itemsByTransit = new Map();
         lines.forEach((line) => {
-          const fromEl = gridEl.querySelector(`[data-slot-id="${Number(line.from_location_system_id)}"]`);
-          const toEl = gridEl.querySelector(`[data-slot-id="${Number(line.to_location_system_id)}"]`);
           const transitEl = gridEl.querySelector(`[data-transit-id="${Number(line.transit_id)}"]`);
-          if (!(fromEl instanceof HTMLElement) || !(toEl instanceof HTMLElement) || !(transitEl instanceof HTMLElement)) return;
-
-          const fromRect = fromEl.getBoundingClientRect();
-          const toRect = toEl.getBoundingClientRect();
+          if (!(transitEl instanceof HTMLElement)) return;
           const transitRect = transitEl.getBoundingClientRect();
-          const fromPoint = {
-            x: fromRect.left - gridRect.left + (fromRect.width / 2),
-            y: fromRect.top - gridRect.top + (fromRect.height / 2),
-          };
-          const toPoint = {
-            x: toRect.left - gridRect.left + (toRect.width / 2),
-            y: toRect.top - gridRect.top + (toRect.height / 2),
-          };
-          const transitPoint = {
-            x: transitRect.left - gridRect.left + (transitRect.width / 2),
-            y: transitRect.top - gridRect.top + (transitRect.height / 2),
-          };
+          const transitPoint = pointFromRectCenter(transitRect);
+          const fromPoint = resolveSlotPoint(line.from_location_system_id, transitPoint);
+          const toPoint = resolveSlotPoint(line.to_location_system_id, transitPoint);
+          if (!fromPoint || !toPoint) return;
 
           const list = itemsByTransit.get(Number(line.transit_id)) || [];
           list.push({
@@ -1973,6 +1982,7 @@ export default function ObjectSettingsTabRefactored() {
   }, [
     overlayCableLines,
     transitById,
+    slotPlacementById,
     collapsedFloors,
     selectedSystemIds,
     selectedCategoryIds,
@@ -1984,7 +1994,13 @@ export default function ObjectSettingsTabRefactored() {
   const renderTransitCablePanel = (transitRow) => {
     const transitId = transitRow.id;
     const lines = transitCableLinesByTransit.get(transitId) || [];
-    const isActive = cableAddModalOpen && Number(activeCableTransitId) === Number(transitId);
+    const isActive = Number(activeCableTransitId) === Number(transitId);
+    const fromLabel = cableDraft.fromSlotId ? describeSlot(cableDraft.fromSlotId) : 'Не выбран';
+    const toLabel = cableDraft.toSlotId ? describeSlot(cableDraft.toSlotId) : 'Не выбран';
+    const selectableSlots = isActive ? getSelectableTransitSlots(transitRow) : [];
+    const pickTargetTitle = cablePickTarget === 'from'
+      ? 'Выбор блока: ОТ'
+      : (cablePickTarget === 'to' ? 'Выбор блока: ДО' : '');
     return (
       <div className="relative z-30 rounded-md border border-cyan-400/25 bg-cyan-950/15 p-1.5 space-y-1.5">
         <div className="flex flex-wrap items-center gap-1">
@@ -2004,7 +2020,7 @@ export default function ObjectSettingsTabRefactored() {
               className="px-2 py-0.5 rounded border border-white/25 text-[9px] text-zinc-100 hover:bg-white/10"
               disabled={cableBusy}
             >
-              Закрыть окно
+              Закрыть выбор
             </button>
           )}
           {!!lines.length && (
@@ -2013,8 +2029,145 @@ export default function ObjectSettingsTabRefactored() {
             </span>
           )}
         </div>
+
         {isActive && (
-          <p className="text-[9px] text-cyan-100">Окно добавления кабеля открыто.</p>
+          <form className="space-y-1.5" onSubmit={(e) => handleSaveCableLine(e, transitId)}>
+            <div className="grid grid-cols-1 gap-1.5">
+              <select
+                value={cableDraft.systemId}
+                onChange={(e) => {
+                  const nextValue = e.target.value;
+                  setCableDraft((prev) => ({
+                    ...prev,
+                    systemId: nextValue,
+                    fromSlotId: null,
+                    toSlotId: null,
+                  }));
+                  setCablePickTarget('from');
+                }}
+                className="input h-7 text-xs"
+                disabled={cableBusy}
+                required
+              >
+                <option value="">Система</option>
+                {data.systems.map((system) => (
+                  <option key={system.id} value={system.id}>{system.name}</option>
+                ))}
+              </select>
+              <select
+                value={cableDraft.categoryId}
+                onChange={(e) => {
+                  const nextValue = e.target.value;
+                  setCableDraft((prev) => ({
+                    ...prev,
+                    categoryId: nextValue,
+                    fromSlotId: null,
+                    toSlotId: null,
+                  }));
+                  setCablePickTarget('from');
+                }}
+                className="input h-7 text-xs"
+                disabled={cableBusy}
+              >
+                <option value="">Категория (не выбрана)</option>
+                {data.categories.map((category) => (
+                  <option key={category.id} value={category.id}>{category.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="rounded border border-cyan-300/25 bg-cyan-950/20 p-1.5 space-y-1">
+              <div className="flex flex-wrap gap-1">
+                <button
+                  type="button"
+                  onClick={() => setCablePickTarget('from')}
+                  className={`px-2 py-0.5 rounded border text-[9px] ${cablePickTarget === 'from' ? 'border-cyan-200/70 text-cyan-100 bg-cyan-900/45' : 'border-white/20 text-zinc-200 hover:bg-white/10'}`}
+                  disabled={cableBusy}
+                >
+                  От
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCablePickTarget('to')}
+                  className={`px-2 py-0.5 rounded border text-[9px] ${cablePickTarget === 'to' ? 'border-cyan-200/70 text-cyan-100 bg-cyan-900/45' : 'border-white/20 text-zinc-200 hover:bg-white/10'}`}
+                  disabled={cableBusy}
+                >
+                  До
+                </button>
+                {Boolean(cablePickTarget) && (
+                  <button
+                    type="button"
+                    onClick={() => setCablePickTarget('')}
+                    className="px-2 py-0.5 rounded border border-white/20 text-[9px] text-zinc-300 hover:bg-white/10"
+                    disabled={cableBusy}
+                  >
+                    Снять выбор
+                  </button>
+                )}
+              </div>
+              {cablePickTarget && (
+                <div className="space-y-1">
+                  <p className="text-[9px] text-cyan-100">{pickTargetTitle}</p>
+                  <div className="max-h-32 overflow-auto rounded border border-white/10 bg-black/25 p-1 space-y-0.5">
+                    {selectableSlots.length === 0 ? (
+                      <p className="text-[9px] text-zinc-400 px-1 py-0.5">Нет доступных блоков для выбранной системы/категории.</p>
+                    ) : selectableSlots.map((slot) => (
+                      <button
+                        key={`pick-${slot.id}`}
+                        type="button"
+                        onClick={() => handlePickCableSlot(slot)}
+                        className="w-full text-left rounded border border-white/10 px-1.5 py-1 text-[9px] text-zinc-200 hover:bg-white/10"
+                        disabled={cableBusy}
+                      >
+                        {describeSlot(slot.id)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-1 gap-1.5">
+              <input
+                type="text"
+                value={fromLabel}
+                className="input h-7 text-xs"
+                readOnly
+                placeholder="От"
+              />
+              <input
+                type="text"
+                value={toLabel}
+                className="input h-7 text-xs"
+                readOnly
+                placeholder="До"
+              />
+              <input
+                type="text"
+                value={cableDraft.name}
+                onChange={(e) => setCableDraft((prev) => ({ ...prev, name: e.target.value }))}
+                placeholder="Название кабеля"
+                className="input h-7 text-xs"
+                disabled={cableBusy}
+                required
+              />
+              <input
+                type="text"
+                inputMode="decimal"
+                value={cableDraft.lengthM}
+                onChange={(e) => setCableDraft((prev) => ({ ...prev, lengthM: e.target.value }))}
+                placeholder="Длина, м"
+                className="input h-7 text-xs"
+                disabled={cableBusy}
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full rounded border border-cyan-300/40 bg-cyan-900/35 px-2 py-1 text-[10px] font-medium text-cyan-100 hover:bg-cyan-800/35 disabled:opacity-50"
+              disabled={cableBusy}
+            >
+              {cableBusy ? 'Сохранение…' : 'Сохранить'}
+            </button>
+          </form>
         )}
       </div>
     );
@@ -2024,12 +2177,6 @@ export default function ObjectSettingsTabRefactored() {
   const activeSlotEntries = activeSlotId ? getSlotEntries(activeSlotId) : [];
   const slotLocked = !activeSlot;
   const canAddEntry = !slotBusy && !slotLocked && String(entryQuery || '').trim().length > 0;
-  const cableAddFromLabel = cableDraft.fromSlotId ? describeSlot(cableDraft.fromSlotId) : 'Не выбран';
-  const cableAddToLabel = cableDraft.toSlotId ? describeSlot(cableDraft.toSlotId) : 'Не выбран';
-  const cableAddSelectableSlots = activeCableTransit ? getSelectableTransitSlots(activeCableTransit) : [];
-  const cablePickTargetTitle = cablePickTarget === 'from'
-    ? 'Выбор блока: ОТ'
-    : (cablePickTarget === 'to' ? 'Выбор блока: ДО' : '');
   const cableEditTransit = cableEditDraft?.transitId ? (transitById.get(Number(cableEditDraft.transitId)) || null) : null;
   const cableEditSelectableSlots = cableEditTransit
     ? getSelectableTransitSlots(
@@ -2251,6 +2398,7 @@ export default function ObjectSettingsTabRefactored() {
                                   return (
                                     <div
                                       key={floor.id}
+                                      data-floor-id={floor.id}
                                       style={{
                                         gridColumn: entranceLinearLayoutRows.length + 1,
                                         gridRow: floorIndex + 1,
@@ -2437,233 +2585,6 @@ export default function ObjectSettingsTabRefactored() {
           );
         })}
       </div>
-
-      {cableAddModalOpen && activeCableTransit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-2 sm:p-3" role="dialog" aria-modal="true">
-          <div className="card p-3 sm:p-4 max-w-xl w-full max-h-[92vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <h3 className="text-white text-base font-medium">Добавление кабельной линии</h3>
-                <p className="text-zinc-400 text-xs mt-0.5">
-                  Транзит {activeCableTransit.name} · Этаж {activeCableTransit.from_floor_name}–{activeCableTransit.to_floor_name}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="btn-secondary text-xs px-2.5 py-1"
-                onClick={handleCancelCableSelection}
-                disabled={cableBusy}
-              >
-                Закрыть
-              </button>
-            </div>
-
-            <form className="space-y-2.5 mt-3" onSubmit={(e) => handleSaveCableLine(e, activeCableTransit.id)}>
-              <div className="grid gap-2 md:grid-cols-2">
-                <div>
-                  <label className="label">Система</label>
-                  <select
-                    value={cableDraft.systemId}
-                    onChange={(e) => {
-                      const nextValue = e.target.value;
-                      setCableDraft((prev) => ({
-                        ...prev,
-                        systemId: nextValue,
-                        fromSlotId: null,
-                        toSlotId: null,
-                      }));
-                      setCablePickTarget('from');
-                    }}
-                    className="input"
-                    disabled={cableBusy}
-                    required
-                  >
-                    <option value="">— Выберите систему —</option>
-                    {data.systems.map((system) => (
-                      <option key={system.id} value={system.id}>{system.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Категория</label>
-                  <select
-                    value={cableDraft.categoryId}
-                    onChange={(e) => {
-                      const nextValue = e.target.value;
-                      setCableDraft((prev) => ({
-                        ...prev,
-                        categoryId: nextValue,
-                        fromSlotId: null,
-                        toSlotId: null,
-                      }));
-                      setCablePickTarget('from');
-                    }}
-                    className="input"
-                    disabled={cableBusy}
-                  >
-                    <option value="">Без категории</option>
-                    {data.categories.map((category) => (
-                      <option key={category.id} value={category.id}>{category.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <label className="label m-0">От</label>
-                    <button
-                      type="button"
-                      onClick={() => setCablePickTarget('from')}
-                      className={`px-2 py-0.5 rounded border text-[11px] ${cablePickTarget === 'from' ? 'border-cyan-200/70 text-cyan-100 bg-cyan-900/45' : 'border-white/20 text-zinc-200 hover:bg-white/10'}`}
-                      disabled={cableBusy}
-                    >
-                      Выбрать на схеме
-                    </button>
-                  </div>
-                  <select
-                    value={cableDraft.fromSlotId || ''}
-                    onChange={(e) => {
-                      const pickedId = Number.parseInt(e.target.value, 10) || null;
-                      setCableDraft((prev) => ({
-                        ...prev,
-                        fromSlotId: pickedId,
-                        toSlotId: Number(prev.toSlotId) === pickedId ? null : prev.toSlotId,
-                      }));
-                      revealCableSlotFloor(pickedId);
-                    }}
-                    className="input"
-                    disabled={cableBusy}
-                    required
-                  >
-                    <option value="">— Выберите блок —</option>
-                    {cableAddSelectableSlots.map((slot) => (
-                      <option key={`add-from-${slot.id}`} value={slot.id}>{describeSlot(slot.id)}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <label className="label m-0">До</label>
-                    <button
-                      type="button"
-                      onClick={() => setCablePickTarget('to')}
-                      className={`px-2 py-0.5 rounded border text-[11px] ${cablePickTarget === 'to' ? 'border-cyan-200/70 text-cyan-100 bg-cyan-900/45' : 'border-white/20 text-zinc-200 hover:bg-white/10'}`}
-                      disabled={cableBusy}
-                    >
-                      Выбрать на схеме
-                    </button>
-                  </div>
-                  <select
-                    value={cableDraft.toSlotId || ''}
-                    onChange={(e) => {
-                      const pickedId = Number.parseInt(e.target.value, 10) || null;
-                      setCableDraft((prev) => ({
-                        ...prev,
-                        toSlotId: pickedId,
-                        fromSlotId: Number(prev.fromSlotId) === pickedId ? null : prev.fromSlotId,
-                      }));
-                      revealCableSlotFloor(pickedId);
-                    }}
-                    className="input"
-                    disabled={cableBusy}
-                    required
-                  >
-                    <option value="">— Выберите блок —</option>
-                    {cableAddSelectableSlots.map((slot) => (
-                      <option key={`add-to-${slot.id}`} value={slot.id}>{describeSlot(slot.id)}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {cablePickTarget && (
-                <div className="rounded border border-cyan-300/25 bg-cyan-950/20 p-1.5 space-y-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[11px] text-cyan-100">{cablePickTargetTitle}</p>
-                    <button
-                      type="button"
-                      onClick={() => setCablePickTarget('')}
-                      className="px-2 py-0.5 rounded border border-white/20 text-[11px] text-zinc-300 hover:bg-white/10"
-                      disabled={cableBusy}
-                    >
-                      Снять выбор
-                    </button>
-                  </div>
-                  <div className="max-h-28 overflow-auto rounded border border-white/10 bg-black/25 p-1 space-y-1">
-                    {cableAddSelectableSlots.length === 0 ? (
-                      <p className="text-[11px] text-zinc-400 px-1 py-0.5">Нет доступных блоков для выбранной системы/категории.</p>
-                    ) : cableAddSelectableSlots.map((slot) => (
-                      <button
-                        key={`pick-modal-${slot.id}`}
-                        type="button"
-                        onClick={() => handlePickCableSlot(slot)}
-                        className="w-full text-left rounded border border-white/10 px-2 py-1 text-[11px] text-zinc-200 hover:bg-white/10"
-                        disabled={cableBusy}
-                      >
-                        {describeSlot(slot.id)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div>
-                  <label className="label">Выбрано «От»</label>
-                  <input type="text" className="input" value={cableAddFromLabel} readOnly />
-                </div>
-                <div>
-                  <label className="label">Выбрано «До»</label>
-                  <input type="text" className="input" value={cableAddToLabel} readOnly />
-                </div>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div>
-                  <label className="label">Название</label>
-                  <input
-                    type="text"
-                    className="input"
-                    value={cableDraft.name}
-                    onChange={(e) => setCableDraft((prev) => ({ ...prev, name: e.target.value }))}
-                    disabled={cableBusy}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="label">Длина, м</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    className="input"
-                    value={cableDraft.lengthM}
-                    onChange={(e) => setCableDraft((prev) => ({ ...prev, lengthM: e.target.value }))}
-                    disabled={cableBusy}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-0.5">
-                <button
-                  type="button"
-                  className="btn-secondary text-xs px-2.5 py-1"
-                  onClick={handleCancelCableSelection}
-                  disabled={cableBusy}
-                >
-                  Отмена
-                </button>
-                <button type="submit" className="btn-primary text-xs px-2.5 py-1" disabled={cableBusy}>
-                  {cableBusy ? 'Сохранение…' : 'Сохранить'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {cableEditModalOpen && cableEditDraft && (
         <div className="modal-backdrop z-50" onClick={closeCableEditModal} role="dialog" aria-modal="true">
