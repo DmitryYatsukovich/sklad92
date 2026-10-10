@@ -226,6 +226,8 @@ export default function ObjectSettingsTabRefactored() {
   const [activeCableTransitId, setActiveCableTransitId] = useState(null);
   const [cableDraft, setCableDraft] = useState({
     lineId: null,
+    routeMode: 'transit',
+    transitId: '',
     fromSlotId: null,
     toSlotId: null,
     systemId: '',
@@ -1261,6 +1263,13 @@ export default function ObjectSettingsTabRefactored() {
     () => (activeCableTransitId ? transitById.get(activeCableTransitId) || null : null),
     [activeCableTransitId, transitById],
   );
+  const selectedCableTransit = useMemo(() => {
+    const selectedTransitId = Number.parseInt(cableDraft.transitId, 10);
+    if (selectedTransitId && transitById.has(selectedTransitId)) {
+      return transitById.get(selectedTransitId) || null;
+    }
+    return activeCableTransit;
+  }, [cableDraft.transitId, transitById, activeCableTransit]);
 
   const cableSelectedSlotIds = useMemo(() => {
     const values = [cableDraft.fromSlotId, cableDraft.toSlotId]
@@ -1295,20 +1304,41 @@ export default function ObjectSettingsTabRefactored() {
     const placement = slotPlacementById.get(slot.id);
     if (!placement?.location) return false;
     const location = placement.location;
-    const fromRank = floorSortRank({ sort_order: transit.from_floor_sort_order });
-    const toRank = floorSortRank({ sort_order: transit.to_floor_sort_order });
-    const minRank = Math.min(fromRank, toRank);
-    const maxRank = Math.max(fromRank, toRank);
-    const locationRank = floorSortRank({ sort_order: location.floor_sort_order });
-    if (locationRank < minRank || locationRank > maxRank) return false;
     if (Number(location.object_id || 0) !== Number(transit.object_id || 0)) return false;
     if (Number(location.entrance_id || 0) !== Number(transit.entrance_id || 0)) return false;
     return true;
   }, [slotPlacementById]);
 
-  const isSlotEligibleForCableTransit = useCallback((slot, transit) => (
-    isSlotEligibleForTransitWithCriteria(slot, transit, cableDraft.systemId, cableDraft.categoryId)
-  ), [isSlotEligibleForTransitWithCriteria, cableDraft.systemId, cableDraft.categoryId]);
+  const isSlotEligibleForCableDraft = useCallback((slot) => {
+    if (!slot || !['apartment', 'room'].includes(slot.location_kind)) return false;
+    if (cableDraft.routeMode === 'transit') {
+      return selectedCableTransit
+        ? isSlotEligibleForTransitWithCriteria(slot, selectedCableTransit, cableDraft.systemId, cableDraft.categoryId)
+        : false;
+    }
+    const requiredSystemId = Number.parseInt(cableDraft.systemId, 10);
+    const requiredCategoryId = cableDraft.categoryId === '' || cableDraft.categoryId == null
+      ? null
+      : Number.parseInt(cableDraft.categoryId, 10);
+    if (requiredSystemId && Number(slot.system_id || 0) !== requiredSystemId) return false;
+    if (requiredCategoryId && Number(slot.category_id || 0) !== requiredCategoryId) return false;
+    if (!activeCableTransit) return true;
+    const placement = slotPlacementById.get(slot.id);
+    if (!placement?.location) return false;
+    const location = placement.location;
+    return (
+      Number(location.object_id || 0) === Number(activeCableTransit.object_id || 0)
+      && Number(location.entrance_id || 0) === Number(activeCableTransit.entrance_id || 0)
+    );
+  }, [
+    cableDraft.routeMode,
+    cableDraft.systemId,
+    cableDraft.categoryId,
+    selectedCableTransit,
+    isSlotEligibleForTransitWithCriteria,
+    slotPlacementById,
+    activeCableTransit,
+  ]);
 
   const revealCableSlotFloor = useCallback((slotIdValue) => {
     const slotId = Number.parseInt(slotIdValue, 10);
@@ -1320,9 +1350,11 @@ export default function ObjectSettingsTabRefactored() {
     setCollapsedFloors((prev) => prev.filter((value) => value !== floorKey));
   }, [slotPlacementById]);
 
-  const resetCableDraft = useCallback(() => {
+  const resetCableDraft = useCallback((transitId = null) => {
     setCableDraft({
       lineId: null,
+      routeMode: 'transit',
+      transitId: transitId ? String(transitId) : '',
       fromSlotId: null,
       toSlotId: null,
       systemId: '',
@@ -1343,7 +1375,7 @@ export default function ObjectSettingsTabRefactored() {
       return;
     }
     setActiveCableTransitId(normalizedTransitId);
-    resetCableDraft();
+    resetCableDraft(normalizedTransitId);
     setCablePickTarget('from');
     setError('');
     setNotice('Нажмите «От», выберите блок, затем «До» и выберите второй блок.');
@@ -1362,8 +1394,10 @@ export default function ObjectSettingsTabRefactored() {
       setError('Нажмите кнопку «От» или «До», затем выберите блок.');
       return;
     }
-    if (!isSlotEligibleForCableTransit(slot, activeCableTransit)) {
-      setError('Для текущего транзита можно выбирать только блоки в этом подъезде и в диапазоне этажей.');
+    if (!isSlotEligibleForCableDraft(slot)) {
+      setError(cableDraft.routeMode === 'transit'
+        ? 'Для линии через транзит выбирайте блоки в том же подъезде, что и выбранный транзит.'
+        : 'Для прямой линии выбирайте блоки в том же подъезде.');
       return;
     }
     setError('');
@@ -1392,12 +1426,15 @@ export default function ObjectSettingsTabRefactored() {
       setCablePickTarget('');
       setNotice('Блок «До» выбран. При необходимости выберите другой «От» или «До».');
     }
-  }, [activeCableTransit, cablePickTarget, isSlotEligibleForCableTransit, revealCableSlotFloor]);
+  }, [activeCableTransit, cablePickTarget, isSlotEligibleForCableDraft, revealCableSlotFloor, cableDraft.routeMode]);
 
   const handleSaveCableLine = async (e, transitIdArg) => {
     e.preventDefault();
-    const transitId = Number.parseInt(transitIdArg ?? activeCableTransitId, 10);
-    if (!transitId) return setError('Транзит не выбран');
+    const routeMode = cableDraft.routeMode === 'direct' ? 'direct' : 'transit';
+    const transitSeed = cableDraft.transitId || transitIdArg || activeCableTransitId || '';
+    const selectedTransitId = Number.parseInt(transitSeed, 10);
+    const transitId = routeMode === 'transit' ? (selectedTransitId || null) : null;
+    if (routeMode === 'transit' && !transitId) return setError('Выберите транзит для маршрута');
     const fromSlotId = Number.parseInt(cableDraft.fromSlotId, 10);
     const toSlotId = Number.parseInt(cableDraft.toSlotId, 10);
     const systemId = cableDraft.systemId === '' ? null : Number.parseInt(cableDraft.systemId, 10);
@@ -1414,6 +1451,7 @@ export default function ObjectSettingsTabRefactored() {
     const optimisticLineId = `tmp-cable-${Date.now()}-${fromSlotId}-${toSlotId}`;
     const optimisticLine = {
       id: optimisticLineId,
+      route_mode: routeMode,
       transit_id: transitId,
       from_location_system_id: fromSlotId,
       to_location_system_id: toSlotId,
@@ -1439,7 +1477,8 @@ export default function ObjectSettingsTabRefactored() {
     setCablePickTarget('');
     setNotice('Сохранение кабельной линии…');
     try {
-      const createdLine = await settingsApi.objectSettings.createTransitCableLine(transitId, {
+      const createdLine = await settingsApi.objectSettings.createCableLine({
+        transit_id: transitId,
         from_location_system_id: fromSlotId,
         to_location_system_id: toSlotId,
         system_id: systemId,
@@ -1473,9 +1512,11 @@ export default function ObjectSettingsTabRefactored() {
     if (!line) return;
     const inferredSystemId = line.system_id ?? '';
     const inferredCategoryId = line.category_id ?? '';
+    const lineTransitId = line.transit_id == null ? '' : String(line.transit_id);
     setCableEditDraft({
       lineId: line.id,
-      transitId: line.transit_id,
+      routeMode: lineTransitId ? 'transit' : 'direct',
+      transitId: lineTransitId,
       fromSlotId: line.from_location_system_id,
       toSlotId: line.to_location_system_id,
       systemId: String(inferredSystemId || ''),
@@ -1496,16 +1537,19 @@ export default function ObjectSettingsTabRefactored() {
   const handleSaveCableEdit = async (e) => {
     e.preventDefault();
     if (!cableEditDraft?.lineId) return;
-    const transitId = Number.parseInt(cableEditDraft.transitId, 10);
+    const routeMode = cableEditDraft.routeMode === 'direct' ? 'direct' : 'transit';
+    const transitIdRaw = Number.parseInt(cableEditDraft.transitId, 10);
+    const transitId = routeMode === 'transit' ? (transitIdRaw || null) : null;
     const fromSlotId = Number.parseInt(cableEditDraft.fromSlotId, 10);
     const toSlotId = Number.parseInt(cableEditDraft.toSlotId, 10);
     const systemId = cableEditDraft.systemId === '' ? null : Number.parseInt(cableEditDraft.systemId, 10);
     const categoryId = cableEditDraft.categoryId === '' ? null : Number.parseInt(cableEditDraft.categoryId, 10);
     const name = String(cableEditDraft.name || '').trim();
     const lengthM = parseDecimalInput(cableEditDraft.lengthM);
-    if (!transitId || !fromSlotId || !toSlotId || !name || !Number.isFinite(lengthM) || lengthM <= 0) {
+    if (!fromSlotId || !toSlotId || !name || !Number.isFinite(lengthM) || lengthM <= 0) {
       return setError('Проверьте поля редактирования кабеля');
     }
+    if (routeMode === 'transit' && !transitId) return setError('Выберите транзит для маршрута');
     if (cableEditDraft.systemId !== '' && !systemId) return setError('Выберите корректную систему кабельной линии');
     if (fromSlotId === toSlotId) return setError('Блоки «От» и «До» должны отличаться');
     if (cableEditDraft.categoryId !== '' && !categoryId) return setError('Выберите корректную категорию');
@@ -1837,17 +1881,36 @@ export default function ObjectSettingsTabRefactored() {
       selectionTone: 'cable',
       selectedSlotIds: cableSelectedSlotIds,
       onSelectSlot: handlePickCableSlot,
-      isSlotSelectable: (slot) => Boolean(cablePickTarget) && isSlotEligibleForCableTransit(slot, activeCableTransit),
+      isSlotSelectable: (slot) => Boolean(cablePickTarget) && isSlotEligibleForCableDraft(slot),
     };
   };
 
   const getSelectableTransitSlots = useCallback((transitRow, criteria = {}) => {
     const criteriaSystemId = criteria.systemId ?? cableDraft.systemId;
     const criteriaCategoryId = criteria.categoryId ?? cableDraft.categoryId;
+    const routeMode = criteria.routeMode ?? cableDraft.routeMode;
+    const anchorTransit = criteria.anchorTransit ?? activeCableTransit;
     return [...data.locationSystems]
       .filter((slot) => ['apartment', 'room'].includes(slot.location_kind))
       .filter((slot) => (
-        isSlotEligibleForTransitWithCriteria(slot, transitRow, criteriaSystemId, criteriaCategoryId)
+        transitRow
+          ? isSlotEligibleForTransitWithCriteria(slot, transitRow, criteriaSystemId, criteriaCategoryId)
+          : (() => {
+            const requiredSystemId = Number.parseInt(criteriaSystemId, 10);
+            const requiredCategoryId = criteriaCategoryId === '' || criteriaCategoryId == null
+              ? null
+              : Number.parseInt(criteriaCategoryId, 10);
+            if (requiredSystemId && Number(slot.system_id || 0) !== requiredSystemId) return false;
+            if (requiredCategoryId && Number(slot.category_id || 0) !== requiredCategoryId) return false;
+            if (routeMode !== 'direct' || !anchorTransit) return true;
+            const placement = slotPlacementById.get(slot.id);
+            if (!placement?.location) return false;
+            const location = placement.location;
+            return (
+              Number(location.object_id || 0) === Number(anchorTransit.object_id || 0)
+              && Number(location.entrance_id || 0) === Number(anchorTransit.entrance_id || 0)
+            );
+          })()
       ))
       .sort((a, b) => {
         const placementA = slotPlacementById.get(a.id);
@@ -1862,7 +1925,15 @@ export default function ObjectSettingsTabRefactored() {
           || (a.id - b.id)
         );
       });
-  }, [data.locationSystems, isSlotEligibleForTransitWithCriteria, slotPlacementById, cableDraft.systemId, cableDraft.categoryId]);
+  }, [
+    data.locationSystems,
+    isSlotEligibleForTransitWithCriteria,
+    slotPlacementById,
+    cableDraft.systemId,
+    cableDraft.categoryId,
+    cableDraft.routeMode,
+    activeCableTransit,
+  ]);
 
   const setEntranceGridRef = useCallback((entranceId, node) => {
     if (!entranceId) return;
@@ -1877,10 +1948,13 @@ export default function ObjectSettingsTabRefactored() {
     }));
     const fromId = Number.parseInt(cableDraft.fromSlotId, 10);
     const toId = Number.parseInt(cableDraft.toSlotId, 10);
-    const transitId = Number.parseInt(activeCableTransitId, 10);
-    if (transitId && fromId && toId) {
+    const routeMode = cableDraft.routeMode === 'direct' ? 'direct' : 'transit';
+    const selectedTransitId = Number.parseInt(cableDraft.transitId || activeCableTransitId, 10) || null;
+    const transitId = routeMode === 'transit' ? selectedTransitId : null;
+    if (fromId && toId && (routeMode === 'direct' || transitId)) {
       base.push({
-        id: `draft-${transitId}-${fromId}-${toId}`,
+        id: `draft-${routeMode}-${transitId || 'none'}-${fromId}-${toId}`,
+        route_mode: routeMode,
         transit_id: transitId,
         from_location_system_id: fromId,
         to_location_system_id: toId,
@@ -1894,6 +1968,8 @@ export default function ObjectSettingsTabRefactored() {
     cableDraft.fromSlotId,
     cableDraft.toSlotId,
     cableDraft.systemId,
+    cableDraft.routeMode,
+    cableDraft.transitId,
     activeCableTransitId,
   ]);
 
@@ -1904,10 +1980,12 @@ export default function ObjectSettingsTabRefactored() {
       const linesByEntrance = new Map();
       overlayCableLines.forEach((line) => {
         const transit = transitById.get(Number(line.transit_id));
-        if (!transit?.entrance_id) return;
-        const list = linesByEntrance.get(transit.entrance_id) || [];
+        const fromPlacement = slotPlacementById.get(Number(line.from_location_system_id));
+        const entranceId = Number(transit?.entrance_id || fromPlacement?.location?.entrance_id || 0);
+        if (!entranceId) return;
+        const list = linesByEntrance.get(entranceId) || [];
         list.push(line);
-        linesByEntrance.set(transit.entrance_id, list);
+        linesByEntrance.set(entranceId, list);
       });
 
       linesByEntrance.forEach((lines, entranceId) => {
@@ -1946,15 +2024,20 @@ export default function ObjectSettingsTabRefactored() {
 
         const itemsByTransit = new Map();
         lines.forEach((line) => {
-          const transitEl = gridEl.querySelector(`[data-transit-id="${Number(line.transit_id)}"]`);
-          if (!(transitEl instanceof HTMLElement)) return;
-          const transitRect = transitEl.getBoundingClientRect();
-          const transitPoint = pointFromRectCenter(transitRect);
+          const transitId = Number.parseInt(line.transit_id, 10);
+          let transitPoint = null;
+          if (transitId) {
+            const transitEl = gridEl.querySelector(`[data-transit-id="${transitId}"]`);
+            if (transitEl instanceof HTMLElement) {
+              transitPoint = pointFromRectCenter(transitEl.getBoundingClientRect());
+            }
+          }
           const fromPoint = resolveSlotPoint(line.from_location_system_id, transitPoint);
           const toPoint = resolveSlotPoint(line.to_location_system_id, transitPoint);
           if (!fromPoint || !toPoint) return;
 
-          const list = itemsByTransit.get(Number(line.transit_id)) || [];
+          const groupKey = transitPoint ? `transit:${transitId}` : 'direct';
+          const list = itemsByTransit.get(groupKey) || [];
           list.push({
             key: String(line.id),
             line,
@@ -1962,11 +2045,12 @@ export default function ObjectSettingsTabRefactored() {
             to: toPoint,
             transit: transitPoint,
           });
-          itemsByTransit.set(Number(line.transit_id), list);
+          itemsByTransit.set(groupKey, list);
         });
 
         const paths = [];
         itemsByTransit.forEach((items) => {
+          if (!items.length) return;
           const fromOrdered = [...items].sort((a, b) => (a.from.y - b.from.y) || naturalCompare(a.key, b.key));
           const toOrdered = [...items].sort((a, b) => (a.to.y - b.to.y) || naturalCompare(a.key, b.key));
           const fromOrder = new Map(fromOrdered.map((item, index) => [item.key, index]));
@@ -1983,23 +2067,37 @@ export default function ObjectSettingsTabRefactored() {
             );
           });
 
+          const hasTransitRoute = Boolean(arranged[0]?.transit);
           let upLane = 0;
           let downLane = 0;
-          arranged.forEach((item) => {
-            const goingUp = item.to.y < item.from.y;
-            const laneOffset = 16 + (goingUp ? upLane++ : downLane++) * 9;
-            const transitX = item.transit.x;
-            const liftRaw = goingUp
-              ? (Math.min(item.from.y, item.to.y) - laneOffset)
-              : (Math.max(item.from.y, item.to.y) + laneOffset);
-            const liftY = Math.max(6, Math.min(gridRect.height - 6, liftRaw));
-            const d = [
-              `M ${item.from.x} ${item.from.y}`,
-              `L ${transitX} ${item.from.y}`,
-              `L ${transitX} ${liftY}`,
-              `L ${item.to.x} ${liftY}`,
-              `L ${item.to.x} ${item.to.y}`,
-            ].join(' ');
+          arranged.forEach((item, index) => {
+            let d = '';
+            if (hasTransitRoute && item.transit) {
+              const goingUp = item.to.y < item.from.y;
+              const laneOffset = 16 + (goingUp ? upLane++ : downLane++) * 9;
+              const transitX = item.transit.x;
+              const liftRaw = goingUp
+                ? (Math.min(item.from.y, item.to.y) - laneOffset)
+                : (Math.max(item.from.y, item.to.y) + laneOffset);
+              const liftY = Math.max(6, Math.min(gridRect.height - 6, liftRaw));
+              d = [
+                `M ${item.from.x} ${item.from.y}`,
+                `L ${transitX} ${item.from.y}`,
+                `L ${transitX} ${liftY}`,
+                `L ${item.to.x} ${liftY}`,
+                `L ${item.to.x} ${item.to.y}`,
+              ].join(' ');
+            } else {
+              const laneOffset = (index - ((arranged.length - 1) / 2)) * 8;
+              const midYRaw = ((item.from.y + item.to.y) / 2) + laneOffset;
+              const midY = Math.max(6, Math.min(gridRect.height - 6, midYRaw));
+              d = [
+                `M ${item.from.x} ${item.from.y}`,
+                `L ${item.from.x} ${midY}`,
+                `L ${item.to.x} ${midY}`,
+                `L ${item.to.x} ${item.to.y}`,
+              ].join(' ');
+            }
             const hueSeed = Number(item.line.system_id || item.line.id || 1);
             const optimistic = Boolean(item.line.__optimistic);
             const color = item.line.__overlay_preview
@@ -2052,7 +2150,17 @@ export default function ObjectSettingsTabRefactored() {
     const isActive = Number(activeCableTransitId) === Number(transitId);
     const fromLabel = cableDraft.fromSlotId ? describeSlot(cableDraft.fromSlotId) : 'Не выбран';
     const toLabel = cableDraft.toSlotId ? describeSlot(cableDraft.toSlotId) : 'Не выбран';
-    const selectableSlots = isActive ? getSelectableTransitSlots(transitRow) : [];
+    const entranceTransits = transitsByEntrance.get(transitRow.entrance_id) || [];
+    const effectiveTransitId = cableDraft.transitId || String(transitId);
+    const routeTransit = cableDraft.routeMode === 'transit'
+      ? (transitById.get(Number.parseInt(effectiveTransitId, 10)) || null)
+      : null;
+    const selectableSlots = isActive
+      ? getSelectableTransitSlots(routeTransit, {
+        routeMode: cableDraft.routeMode,
+        anchorTransit: activeCableTransit,
+      })
+      : [];
     const pickTargetTitle = cablePickTarget === 'from'
       ? 'Выбор блока: ОТ'
       : (cablePickTarget === 'to' ? 'Выбор блока: ДО' : '');
@@ -2088,6 +2196,50 @@ export default function ObjectSettingsTabRefactored() {
         {isActive && (
           <form className="space-y-1.5" onSubmit={(e) => handleSaveCableLine(e, transitId)}>
             <div className="grid grid-cols-1 gap-1.5">
+              <select
+                value={cableDraft.routeMode || 'transit'}
+                onChange={(e) => {
+                  const routeMode = e.target.value === 'direct' ? 'direct' : 'transit';
+                  setCableDraft((prev) => ({
+                    ...prev,
+                    routeMode,
+                    transitId: routeMode === 'transit' ? (prev.transitId || String(transitId)) : '',
+                    fromSlotId: null,
+                    toSlotId: null,
+                  }));
+                  setCablePickTarget('from');
+                }}
+                className="input h-7 text-xs"
+                disabled={cableBusy}
+              >
+                <option value="transit">Через транзит</option>
+                <option value="direct">Прямая линия</option>
+              </select>
+              {cableDraft.routeMode !== 'direct' && (
+                <select
+                  value={effectiveTransitId}
+                  onChange={(e) => {
+                    const nextTransitId = e.target.value;
+                    setCableDraft((prev) => ({
+                      ...prev,
+                      transitId: nextTransitId,
+                      fromSlotId: null,
+                      toSlotId: null,
+                    }));
+                    setCablePickTarget('from');
+                  }}
+                  className="input h-7 text-xs"
+                  disabled={cableBusy}
+                  required
+                >
+                  <option value="">Название транзита</option>
+                  {entranceTransits.map((transitOption) => (
+                    <option key={`cable-transit-${transitOption.id}`} value={transitOption.id}>
+                      {transitOption.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               <select
                 value={cableDraft.systemId}
                 onChange={(e) => {
@@ -2231,16 +2383,32 @@ export default function ObjectSettingsTabRefactored() {
   const activeSlotEntries = activeSlotId ? getSlotEntries(activeSlotId) : [];
   const slotLocked = !activeSlot;
   const canAddEntry = !slotBusy && !slotLocked && String(entryQuery || '').trim().length > 0;
-  const cableEditTransit = cableEditDraft?.transitId ? (transitById.get(Number(cableEditDraft.transitId)) || null) : null;
-  const cableEditSelectableSlots = cableEditTransit
+  const cableEditFromPlacement = cableEditDraft?.fromSlotId
+    ? (slotPlacementById.get(Number(cableEditDraft.fromSlotId)) || null)
+    : null;
+  const cableEditAnchorTransit = cableEditFromPlacement?.location
+    ? {
+      object_id: cableEditFromPlacement.location.object_id,
+      entrance_id: cableEditFromPlacement.location.entrance_id,
+    }
+    : null;
+  const cableEditTransitOptions = cableEditAnchorTransit?.entrance_id
+    ? (transitsByEntrance.get(cableEditAnchorTransit.entrance_id) || [])
+    : sortedTransits;
+  const cableEditTransit = cableEditDraft?.routeMode !== 'direct' && cableEditDraft?.transitId
+    ? (transitById.get(Number(cableEditDraft.transitId)) || null)
+    : null;
+  const cableEditSelectableSlots = (cableEditTransit || cableEditDraft?.routeMode === 'direct')
     ? getSelectableTransitSlots(
-      {
+      cableEditTransit ? {
         ...cableEditTransit,
         id: Number(cableEditDraft?.transitId),
-      },
+      } : null,
       {
         systemId: cableEditDraft?.systemId ?? '',
         categoryId: cableEditDraft?.categoryId ?? '',
+        routeMode: cableEditDraft?.routeMode ?? 'transit',
+        anchorTransit: cableEditAnchorTransit,
       },
     )
     : [];
@@ -2645,6 +2813,56 @@ export default function ObjectSettingsTabRefactored() {
           <div className="card p-5 max-w-xl w-full" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-white text-lg font-medium">Редактирование кабельной линии</h3>
             <form className="space-y-3 mt-4" onSubmit={handleSaveCableEdit}>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="label">Маршрут</label>
+                  <select
+                    value={cableEditDraft.routeMode || 'transit'}
+                    onChange={(e) => {
+                      const routeMode = e.target.value === 'direct' ? 'direct' : 'transit';
+                      setCableEditDraft((prev) => ({
+                        ...prev,
+                        routeMode,
+                        transitId: routeMode === 'transit'
+                          ? (prev.transitId || String(cableEditTransitOptions[0]?.id || ''))
+                          : '',
+                        fromSlotId: null,
+                        toSlotId: null,
+                      }));
+                    }}
+                    className="input"
+                    disabled={cableEditBusy}
+                  >
+                    <option value="transit">Через транзит</option>
+                    <option value="direct">Прямая линия</option>
+                  </select>
+                </div>
+                {cableEditDraft.routeMode !== 'direct' && (
+                  <div>
+                    <label className="label">Транзит</label>
+                    <select
+                      value={cableEditDraft.transitId || ''}
+                      onChange={(e) => {
+                        const transitId = e.target.value;
+                        setCableEditDraft((prev) => ({
+                          ...prev,
+                          transitId,
+                          fromSlotId: null,
+                          toSlotId: null,
+                        }));
+                      }}
+                      className="input"
+                      disabled={cableEditBusy}
+                      required
+                    >
+                      <option value="">— Выберите транзит —</option>
+                      {cableEditTransitOptions.map((transit) => (
+                        <option key={`edit-transit-${transit.id}`} value={transit.id}>{transit.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
               <div>
                 <label className="label">Система</label>
                 <select

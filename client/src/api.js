@@ -513,6 +513,11 @@ export const settings = {
       }),
     deleteWork: (id) =>
       request(`/api/settings/object-settings/location-system-works/${id}`, { method: 'DELETE' }),
+    createCableLine: (body) =>
+      request('/api/settings/object-settings/cable-lines', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
     createTransitCableLine: (transitId, body) =>
       request(`/api/settings/object-settings/transits/${transitId}/cable-lines`, {
         method: 'POST',

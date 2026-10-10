@@ -66,7 +66,7 @@ async function ensureObjectStatusSchema() {
       await pool.query(
         `CREATE TABLE IF NOT EXISTS work_transit_cable_lines (
           id SERIAL PRIMARY KEY,
-          transit_id INTEGER NOT NULL REFERENCES work_transits(id) ON DELETE CASCADE,
+          transit_id INTEGER REFERENCES work_transits(id) ON DELETE CASCADE,
           from_location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE CASCADE,
           to_location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE CASCADE,
           system_id INTEGER REFERENCES material_systems(id) ON DELETE SET NULL,
@@ -83,6 +83,9 @@ async function ensureObjectStatusSchema() {
       );
       await pool.query(
         'ALTER TABLE work_transit_cable_lines ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES material_categories(id) ON DELETE SET NULL',
+      );
+      await pool.query(
+        'ALTER TABLE work_transit_cable_lines ALTER COLUMN transit_id DROP NOT NULL',
       );
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_transit ON work_transit_cable_lines(transit_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_from_slot ON work_transit_cable_lines(from_location_system_id)');
@@ -504,8 +507,8 @@ async function validateTransitCableLineInput(db, {
   name,
   lengthM,
 }) {
-  const transit = await loadLocationByKind(db, 'transit', transitId);
-  if (!transit) return { error: 'Транзит не найден' };
+  const transit = transitId ? await loadLocationByKind(db, 'transit', transitId) : null;
+  if (transitId && !transit) return { error: 'Транзит не найден' };
   let system = null;
   if (systemId) {
     system = (await db.query('SELECT id, name FROM material_systems WHERE id = $1', [systemId])).rows[0];
@@ -536,16 +539,29 @@ async function validateTransitCableLineInput(db, {
     }
   }
 
-  const invalidScope = [fromSlot, toSlot].find((slot) => {
-    const location = slot.location;
-    if (!location) return true;
-    if (Number(location.object_id || 0) !== Number(transit.object_id || 0)) return true;
-    if (Number(location.entrance_id || 0) !== Number(transit.entrance_id || 0)) return true;
-    if (!locationWithinTransitRange(transit, location)) return true;
-    return false;
-  });
-  if (invalidScope) {
-    return { error: 'Выберите блоки в том же подъезде и в диапазоне этажей транзита' };
+  const fromLocation = fromSlot.location;
+  const toLocation = toSlot.location;
+  if (!fromLocation || !toLocation) {
+    return { error: 'Выберите корректные блоки для соединения' };
+  }
+
+  if (transit) {
+    const invalidScope = [fromSlot, toSlot].find((slot) => {
+      const location = slot.location;
+      if (!location) return true;
+      if (Number(location.object_id || 0) !== Number(transit.object_id || 0)) return true;
+      if (Number(location.entrance_id || 0) !== Number(transit.entrance_id || 0)) return true;
+      return false;
+    });
+    if (invalidScope) {
+      return { error: 'Для линии через транзит выберите блоки в том же подъезде, что и транзит' };
+    }
+  } else {
+    const sameObject = Number(fromLocation.object_id || 0) === Number(toLocation.object_id || 0);
+    const sameEntrance = Number(fromLocation.entrance_id || 0) === Number(toLocation.entrance_id || 0);
+    if (!sameObject || !sameEntrance) {
+      return { error: 'Для прямой линии выберите блоки в одном подъезде' };
+    }
   }
 
   return {
@@ -1877,8 +1893,10 @@ router.get('/object-settings/layout', requirePermission('can_settings_work'), as
   }
 });
 
-router.post('/object-settings/transits/:transitId/cable-lines', requirePermission('can_settings_work'), async (req, res) => {
-  const transitId = parseId(req.params.transitId);
+async function createCableLine(req, res, forcedTransitId = undefined) {
+  const transitId = forcedTransitId === undefined
+    ? (req.body?.transit_id == null || req.body?.transit_id === '' ? null : parseId(req.body?.transit_id))
+    : forcedTransitId;
   const fromLocationSystemId = parseId(req.body?.from_location_system_id);
   const toLocationSystemId = parseId(req.body?.to_location_system_id);
   const systemId = req.body?.system_id == null || req.body?.system_id === ''
@@ -1889,8 +1907,14 @@ router.post('/object-settings/transits/:transitId/cable-lines', requirePermissio
     : parseId(req.body?.category_id);
   const name = parseRequiredName(req.body?.name, 200);
   const lengthM = parsePositiveDecimal(req.body?.length_m);
-  if (!transitId || !fromLocationSystemId || !toLocationSystemId || !name || !lengthM) {
-    return res.status(400).json({ error: 'Укажите транзит, 2 блока, название и длину кабеля' });
+  if (!fromLocationSystemId || !toLocationSystemId || !name || !lengthM) {
+    return res.status(400).json({ error: 'Укажите 2 блока, название и длину кабеля' });
+  }
+  if (forcedTransitId !== undefined && !transitId) {
+    return res.status(400).json({ error: 'Неверный транзит' });
+  }
+  if (forcedTransitId === undefined && req.body?.transit_id != null && req.body?.transit_id !== '' && !transitId) {
+    return res.status(400).json({ error: 'Неверный транзит' });
   }
   if (req.body?.system_id != null && req.body?.system_id !== '' && !systemId) {
     return res.status(400).json({ error: 'Неверная система кабельной линии' });
@@ -1926,6 +1950,16 @@ router.post('/object-settings/transits/:transitId/cable-lines', requirePermissio
   )).rows[0];
   const row = await loadTransitCableLineById(pool, created.id);
   res.status(201).json(row);
+}
+
+router.post('/object-settings/cable-lines', requirePermission('can_settings_work'), async (req, res) => (
+  createCableLine(req, res, undefined)
+));
+
+router.post('/object-settings/transits/:transitId/cable-lines', requirePermission('can_settings_work'), async (req, res) => {
+  const transitId = parseId(req.params.transitId);
+  if (!transitId) return res.status(400).json({ error: 'Неверный транзит' });
+  return createCableLine(req, res, transitId);
 });
 
 router.put('/object-settings/transit-cable-lines/:id', requirePermission('can_settings_work'), async (req, res) => {
@@ -1953,8 +1987,11 @@ router.put('/object-settings/transit-cable-lines/:id', requirePermission('can_se
     ? parsePositiveDecimal(current.length_m)
     : parsePositiveDecimal(req.body?.length_m);
 
-  if (!transitId || !fromLocationSystemId || !toLocationSystemId || !name || !lengthM) {
+  if (!fromLocationSystemId || !toLocationSystemId || !name || !lengthM) {
     return res.status(400).json({ error: 'Неверные данные кабельной линии' });
+  }
+  if (req.body?.transit_id !== undefined && req.body?.transit_id != null && req.body?.transit_id !== '' && !transitId) {
+    return res.status(400).json({ error: 'Неверный транзит' });
   }
   if (req.body?.system_id !== undefined && req.body?.system_id != null && req.body?.system_id !== '' && !systemId) {
     return res.status(400).json({ error: 'Неверная система кабельной линии' });

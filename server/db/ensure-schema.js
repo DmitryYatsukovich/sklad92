@@ -230,7 +230,7 @@ const statements = [
   `CREATE INDEX IF NOT EXISTS idx_wls_assigned_user ON work_location_systems(assigned_user_id)`,
   `CREATE TABLE IF NOT EXISTS work_transit_cable_lines (
     id SERIAL PRIMARY KEY,
-    transit_id INTEGER NOT NULL REFERENCES work_transits(id) ON DELETE CASCADE,
+    transit_id INTEGER REFERENCES work_transits(id) ON DELETE CASCADE,
     from_location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE CASCADE,
     to_location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE CASCADE,
     system_id INTEGER REFERENCES material_systems(id) ON DELETE SET NULL,
@@ -243,6 +243,7 @@ const statements = [
   )`,
   `ALTER TABLE work_transit_cable_lines ADD COLUMN IF NOT EXISTS system_id INTEGER REFERENCES material_systems(id) ON DELETE SET NULL`,
   `ALTER TABLE work_transit_cable_lines ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES material_categories(id) ON DELETE SET NULL`,
+  `ALTER TABLE work_transit_cable_lines ALTER COLUMN transit_id DROP NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_transit ON work_transit_cable_lines(transit_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_from_slot ON work_transit_cable_lines(from_location_system_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_to_slot ON work_transit_cable_lines(to_location_system_id)`,
