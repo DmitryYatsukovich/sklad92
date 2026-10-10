@@ -1411,8 +1411,33 @@ export default function ObjectSettingsTabRefactored() {
     if (!name) return setError('Укажите название кабельной линии');
     if (!Number.isFinite(lengthM) || lengthM <= 0) return setError('Укажите корректную длину кабеля (м)');
 
+    const optimisticLineId = `tmp-cable-${Date.now()}-${fromSlotId}-${toSlotId}`;
+    const optimisticLine = {
+      id: optimisticLineId,
+      transit_id: transitId,
+      from_location_system_id: fromSlotId,
+      to_location_system_id: toSlotId,
+      system_id: systemId,
+      category_id: categoryId,
+      name,
+      length_m: lengthM,
+      __optimistic: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
     setCableBusy(true);
     setError('');
+    revealCableSlotFloor(fromSlotId);
+    revealCableSlotFloor(toSlotId);
+    setData((prev) => ({
+      ...prev,
+      transitCableLines: mergeTransitCableLine(prev.transitCableLines, optimisticLine),
+    }));
+    setActiveCableTransitId(null);
+    resetCableDraft();
+    setCablePickTarget('');
+    setNotice('Сохранение кабельной линии…');
     try {
       const createdLine = await settingsApi.objectSettings.createTransitCableLine(transitId, {
         from_location_system_id: fromSlotId,
@@ -1422,18 +1447,23 @@ export default function ObjectSettingsTabRefactored() {
         name,
         length_m: lengthM,
       });
-      revealCableSlotFloor(fromSlotId);
-      revealCableSlotFloor(toSlotId);
       setData((prev) => ({
         ...prev,
-        transitCableLines: mergeTransitCableLine(prev.transitCableLines, createdLine),
+        transitCableLines: mergeTransitCableLine(
+          (prev.transitCableLines || []).filter((line) => String(line.id) !== String(optimisticLineId)),
+          createdLine,
+        ),
       }));
       setNotice('Кабельная линия добавлена.');
-      setActiveCableTransitId(null);
-      resetCableDraft();
-      setCablePickTarget('');
     } catch (err) {
+      setData((prev) => ({
+        ...prev,
+        transitCableLines: (prev.transitCableLines || []).filter(
+          (line) => String(line.id) !== String(optimisticLineId),
+        ),
+      }));
       setError(err.message || 'Не удалось сохранить кабельную линию');
+      setNotice('');
     } finally {
       setCableBusy(false);
     }
@@ -1971,15 +2001,16 @@ export default function ObjectSettingsTabRefactored() {
               `L ${item.to.x} ${item.to.y}`,
             ].join(' ');
             const hueSeed = Number(item.line.system_id || item.line.id || 1);
+            const optimistic = Boolean(item.line.__optimistic);
             const color = item.line.__overlay_preview
               ? '#7DD3FC'
-              : `hsl(${(hueSeed * 37) % 360} 85% 66%)`;
+              : (optimistic ? '#67E8F9' : `hsl(${(hueSeed * 37) % 360} 85% 66%)`);
             paths.push({
               key: `${item.key}:${item.line.transit_id}`,
-              lineId: item.line.__overlay_preview ? null : item.line.id,
+              lineId: item.line.__overlay_preview || optimistic ? null : item.line.id,
               d,
               color,
-              preview: Boolean(item.line.__overlay_preview),
+              preview: Boolean(item.line.__overlay_preview || optimistic),
             });
           });
         });
