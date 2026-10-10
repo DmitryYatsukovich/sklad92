@@ -515,9 +515,11 @@ export default function ObjectSettingsTabRefactored() {
   const transitCableLinesByTransit = useMemo(() => {
     const map = new Map();
     data.transitCableLines.forEach((line) => {
-      const list = map.get(line.transit_id) || [];
+      const transitId = Number.parseInt(line.transit_id, 10);
+      if (!transitId) return;
+      const list = map.get(transitId) || [];
       list.push(line);
-      map.set(line.transit_id, list);
+      map.set(transitId, list);
     });
     map.forEach((list, key) => {
       map.set(key, [...list].sort((a, b) => naturalCompare(a.name, b.name) || (a.id - b.id)));
@@ -530,6 +532,16 @@ export default function ObjectSettingsTabRefactored() {
       map.set(String(line.id), line);
     });
     return map;
+  }, [data.transitCableLines]);
+  const cableEndpointSlotIdSet = useMemo(() => {
+    const set = new Set();
+    data.transitCableLines.forEach((line) => {
+      const fromId = Number.parseInt(line.from_location_system_id, 10);
+      const toId = Number.parseInt(line.to_location_system_id, 10);
+      if (fromId) set.add(fromId);
+      if (toId) set.add(toId);
+    });
+    return set;
   }, [data.transitCableLines]);
 
   const slotPlacementById = useMemo(() => {
@@ -1286,6 +1298,16 @@ export default function ObjectSettingsTabRefactored() {
     isSlotEligibleForTransitWithCriteria(slot, transit, cableDraft.systemId, cableDraft.categoryId)
   ), [isSlotEligibleForTransitWithCriteria, cableDraft.systemId, cableDraft.categoryId]);
 
+  const revealCableSlotFloor = useCallback((slotIdValue) => {
+    const slotId = Number.parseInt(slotIdValue, 10);
+    if (!slotId) return;
+    const placement = slotPlacementById.get(slotId);
+    const floorId = placement?.location?.floor_id;
+    if (!floorId) return;
+    const floorKey = String(floorId);
+    setCollapsedFloors((prev) => prev.filter((value) => value !== floorKey));
+  }, [slotPlacementById]);
+
   const resetCableDraft = useCallback(() => {
     setCableDraft({
       lineId: null,
@@ -1353,12 +1375,7 @@ export default function ObjectSettingsTabRefactored() {
         fromSlotId: Number(prev.fromSlotId) === pickedId ? null : prev.fromSlotId,
       };
     });
-    const placement = slotPlacementById.get(Number(slot.id));
-    const floorId = placement?.location?.floor_id;
-    if (floorId) {
-      const floorKey = String(floorId);
-      setCollapsedFloors((prev) => prev.filter((value) => value !== floorKey));
-    }
+    revealCableSlotFloor(slot.id);
     if (cablePickTarget === 'from') {
       setCablePickTarget('to');
       setNotice('Блок «От» выбран. Выберите блок «До».');
@@ -1366,7 +1383,7 @@ export default function ObjectSettingsTabRefactored() {
       setCablePickTarget('');
       setNotice('Блок «До» выбран. При необходимости выберите другой «От» или «До».');
     }
-  }, [activeCableTransit, cablePickTarget, isSlotEligibleForCableTransit, slotPlacementById]);
+  }, [activeCableTransit, cablePickTarget, isSlotEligibleForCableTransit, revealCableSlotFloor]);
 
   const handleSaveCableLine = async (e, transitIdArg) => {
     e.preventDefault();
@@ -1396,6 +1413,8 @@ export default function ObjectSettingsTabRefactored() {
         name,
         length_m: lengthM,
       });
+      revealCableSlotFloor(fromSlotId);
+      revealCableSlotFloor(toSlotId);
       await load({ silent: true });
       setNotice('Кабельная линия добавлена.');
       setCableAddModalOpen(false);
@@ -1627,9 +1646,12 @@ export default function ObjectSettingsTabRefactored() {
   const renderSystemSquares = (locationKind, locationId, title, options = {}) => {
     const key = `${locationKind}:${locationId}`;
     const bypassFilters = Boolean(options.selectionMode && options.selectionTone === 'cable');
+    const allSlots = slotsByLocation.get(key) || [];
     const slots = bypassFilters
-      ? (slotsByLocation.get(key) || [])
-      : (slotsByLocation.get(key) || []).filter(slotMatchesFilters);
+      ? allSlots
+      : allSlots.filter((slot) => (
+        slotMatchesFilters(slot) || cableEndpointSlotIdSet.has(Number(slot.id))
+      ));
     const sortedSlotCards = slots
       .map((slot) => {
         const entries = getSlotEntries(slot.id);
@@ -2417,21 +2439,18 @@ export default function ObjectSettingsTabRefactored() {
       </div>
 
       {cableAddModalOpen && activeCableTransit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none" role="dialog" aria-modal="true">
-          <div className="card p-5 max-w-2xl w-full pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-2 sm:p-3" role="dialog" aria-modal="true">
+          <div className="card p-3 sm:p-4 max-w-xl w-full max-h-[92vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
-                <h3 className="text-white text-lg font-medium">Добавление кабельной линии</h3>
-                <p className="text-zinc-400 text-sm mt-1">
+                <h3 className="text-white text-base font-medium">Добавление кабельной линии</h3>
+                <p className="text-zinc-400 text-xs mt-0.5">
                   Транзит {activeCableTransit.name} · Этаж {activeCableTransit.from_floor_name}–{activeCableTransit.to_floor_name}
-                </p>
-                <p className="text-zinc-500 text-xs mt-1">
-                  Блоки можно выбрать из списков ниже или кликом по схеме после нажатия кнопок «От»/«До».
                 </p>
               </div>
               <button
                 type="button"
-                className="btn-secondary text-sm"
+                className="btn-secondary text-xs px-2.5 py-1"
                 onClick={handleCancelCableSelection}
                 disabled={cableBusy}
               >
@@ -2439,8 +2458,8 @@ export default function ObjectSettingsTabRefactored() {
               </button>
             </div>
 
-            <form className="space-y-3 mt-4" onSubmit={(e) => handleSaveCableLine(e, activeCableTransit.id)}>
-              <div className="grid gap-3 md:grid-cols-2">
+            <form className="space-y-2.5 mt-3" onSubmit={(e) => handleSaveCableLine(e, activeCableTransit.id)}>
+              <div className="grid gap-2 md:grid-cols-2">
                 <div>
                   <label className="label">Система</label>
                   <select
@@ -2512,6 +2531,7 @@ export default function ObjectSettingsTabRefactored() {
                         fromSlotId: pickedId,
                         toSlotId: Number(prev.toSlotId) === pickedId ? null : prev.toSlotId,
                       }));
+                      revealCableSlotFloor(pickedId);
                     }}
                     className="input"
                     disabled={cableBusy}
@@ -2545,6 +2565,7 @@ export default function ObjectSettingsTabRefactored() {
                         toSlotId: pickedId,
                         fromSlotId: Number(prev.fromSlotId) === pickedId ? null : prev.fromSlotId,
                       }));
+                      revealCableSlotFloor(pickedId);
                     }}
                     className="input"
                     disabled={cableBusy}
@@ -2559,9 +2580,9 @@ export default function ObjectSettingsTabRefactored() {
               </div>
 
               {cablePickTarget && (
-                <div className="rounded border border-cyan-300/25 bg-cyan-950/20 p-2 space-y-1.5">
+                <div className="rounded border border-cyan-300/25 bg-cyan-950/20 p-1.5 space-y-1">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-cyan-100">{cablePickTargetTitle}</p>
+                    <p className="text-[11px] text-cyan-100">{cablePickTargetTitle}</p>
                     <button
                       type="button"
                       onClick={() => setCablePickTarget('')}
@@ -2571,7 +2592,7 @@ export default function ObjectSettingsTabRefactored() {
                       Снять выбор
                     </button>
                   </div>
-                  <div className="max-h-36 overflow-auto rounded border border-white/10 bg-black/25 p-1 space-y-1">
+                  <div className="max-h-28 overflow-auto rounded border border-white/10 bg-black/25 p-1 space-y-1">
                     {cableAddSelectableSlots.length === 0 ? (
                       <p className="text-[11px] text-zinc-400 px-1 py-0.5">Нет доступных блоков для выбранной системы/категории.</p>
                     ) : cableAddSelectableSlots.map((slot) => (
@@ -2626,16 +2647,16 @@ export default function ObjectSettingsTabRefactored() {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-1">
+              <div className="flex justify-end gap-2 pt-0.5">
                 <button
                   type="button"
-                  className="btn-secondary text-sm"
+                  className="btn-secondary text-xs px-2.5 py-1"
                   onClick={handleCancelCableSelection}
                   disabled={cableBusy}
                 >
                   Отмена
                 </button>
-                <button type="submit" className="btn-primary text-sm" disabled={cableBusy}>
+                <button type="submit" className="btn-primary text-xs px-2.5 py-1" disabled={cableBusy}>
                   {cableBusy ? 'Сохранение…' : 'Сохранить'}
                 </button>
               </div>
