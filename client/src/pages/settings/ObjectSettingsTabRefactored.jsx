@@ -245,6 +245,7 @@ export default function ObjectSettingsTabRefactored() {
   const [cableEditBusy, setCableEditBusy] = useState(false);
   const entranceGridRefs = useRef(new Map());
   const [entranceCableOverlay, setEntranceCableOverlay] = useState({});
+  const [entranceFloorHeights, setEntranceFloorHeights] = useState({});
   const mergeTransitCableLine = useCallback((prevLines, nextLine) => {
     const safePrev = Array.isArray(prevLines) ? prevLines : [];
     if (!nextLine?.id) return safePrev;
@@ -2152,7 +2153,21 @@ export default function ObjectSettingsTabRefactored() {
     let rafId = 0;
     const recompute = () => {
       const next = {};
+      const nextFloorHeights = {};
       const linesByEntrance = new Map();
+      entranceGridRefs.current.forEach((gridEl, entranceIdKey) => {
+        if (!(gridEl instanceof HTMLElement)) return;
+        const entranceId = Number.parseInt(String(entranceIdKey), 10);
+        if (!entranceId) return;
+        const heights = {};
+        gridEl.querySelectorAll('[data-floor-id]').forEach((node) => {
+          if (!(node instanceof HTMLElement)) return;
+          const floorId = Number.parseInt(node.dataset.floorId || '', 10);
+          if (!floorId) return;
+          heights[floorId] = node.getBoundingClientRect().height;
+        });
+        nextFloorHeights[entranceId] = heights;
+      });
       overlayCableLines.forEach((line) => {
         const transit = transitById.get(Number(line.transit_id));
         const fromPlacement = slotPlacementById.get(Number(line.from_location_system_id));
@@ -2295,6 +2310,7 @@ export default function ObjectSettingsTabRefactored() {
         };
       });
       setEntranceCableOverlay(next);
+      setEntranceFloorHeights(nextFloorHeights);
     };
 
     const schedule = () => {
@@ -2319,12 +2335,13 @@ export default function ObjectSettingsTabRefactored() {
     activeCableTransitId,
   ]);
 
-  const renderLinearLocationSegments = (locationRow, locationTitle) => {
+  const renderLinearLocationSegments = (locationRow, locationTitle, entranceId) => {
     const spanFloors = Array.isArray(locationRow?.spanFloors) ? locationRow.spanFloors : [];
     if (!spanFloors.length) return null;
     const canPasteSlot = Boolean(copiedSlotTemplate);
     const actionsDisabled = !!pasteBusyKey || slotBusy || Boolean(activeCableTransitId);
     const pasteTitle = copiedSlotTemplate ? `Вставить блок: ${copiedSlotTemplate.systemName}` : 'Вставить блок';
+    const floorHeights = entranceFloorHeights[Number(entranceId)] || {};
 
     if (locationRow._kind === 'transit') {
       return (
@@ -2333,10 +2350,13 @@ export default function ObjectSettingsTabRefactored() {
           {spanFloors.map((floorRow, index) => {
             const floorId = Number.parseInt(floorRow?.id, 10);
             const isCollapsed = floorId ? collapsedFloorSet.has(floorId) : false;
+            const measuredFloorHeight = floorId ? Number(floorHeights[floorId] || 0) : 0;
+            const segmentHeight = measuredFloorHeight ? Math.max(24, Math.round(measuredFloorHeight) - 6) : null;
             return (
               <div
                 key={`transit-floor-segment-${locationRow.id}-${floorRow.id}-${index}`}
-                className={`rounded border border-cyan-400/20 bg-black/25 p-1 ${isCollapsed ? 'opacity-75' : ''}`}
+                className={`rounded border border-cyan-400/20 bg-black/25 p-1 overflow-auto ${isCollapsed ? 'opacity-75' : ''}`}
+                style={segmentHeight ? { height: `${segmentHeight}px` } : undefined}
               >
                 <div className="flex items-center justify-between gap-1">
                   <span className="text-[8px] text-zinc-200">Этаж {floorRow.name}</span>
@@ -2380,11 +2400,16 @@ export default function ObjectSettingsTabRefactored() {
           {spanFloors.map((floorRow, index) => {
             const floorId = Number.parseInt(floorRow?.id, 10);
             const isCollapsed = floorId ? collapsedFloorSet.has(floorId) : false;
+            const measuredFloorHeight = floorId ? Number(floorHeights[floorId] || 0) : 0;
+            const segmentHeight = measuredFloorHeight ? Math.max(24, Math.round(measuredFloorHeight) - 6) : null;
             return (
               <div
                 key={`stair-floor-segment-${locationRow.id}-${floorRow.id}-${index}`}
-                className={`relative rounded border border-emerald-400/20 bg-black/25 p-1 space-y-1 ${isCollapsed ? 'opacity-75' : ''}`}
-                style={{ marginLeft: `${(index % 2) * 12}px` }}
+                className={`relative rounded border border-emerald-400/20 bg-black/25 p-1 space-y-1 overflow-auto ${isCollapsed ? 'opacity-75' : ''}`}
+                style={{
+                  marginLeft: `${(index % 2) * 12}px`,
+                  ...(segmentHeight ? { height: `${segmentHeight}px` } : {}),
+                }}
               >
                 <div className="flex items-center justify-between gap-1">
                   <span className="text-[8px] text-zinc-200">Этаж {floorRow.name}</span>
@@ -3001,11 +3026,12 @@ export default function ObjectSettingsTabRefactored() {
                                 ref={(node) => setEntranceGridRef(entrance.id, node)}
                                 className="grid gap-1.5 min-w-0 relative z-10"
                                 style={{
-                                  gridTemplateColumns: `repeat(${Math.max(entranceLinearLayoutRows.length + 1, 1)}, minmax(16rem, 1fr))`,
+                                  gridTemplateColumns: `${entranceLinearLayoutRows.length ? `repeat(${entranceLinearLayoutRows.length}, minmax(4.75rem, 5.5rem)) ` : ''}minmax(18rem, 1fr)`,
                                   alignItems: 'stretch',
                                 }}
                               >
                                 {entranceLinearLayoutRows.map((locationRow, laneIndex) => {
+                                  const isLinearColumn = locationRow._kind === 'transit' || locationRow._kind === 'stairwell';
                                   const prefix = locationRow._kind === 'transit' ? 'Транзит' : 'ЛК';
                                   const locationTitle = `${prefix} ${locationRow.name}`;
                                   const locationRange = `Этаж ${locationRow.from_floor_name}–${locationRow.to_floor_name}`;
@@ -3039,10 +3065,10 @@ export default function ObjectSettingsTabRefactored() {
                                       <p className="text-zinc-100 text-[9px] font-semibold leading-tight break-words uppercase tracking-wide">{locationTitle}</p>
                                       <p className="text-zinc-400 text-[8px] leading-tight">{locationRange}</p>
                                       <div className="space-y-1 overflow-auto min-h-0 pr-0.5">
-                                        {renderLinearLocationSegments(locationRow, locationTitle)}
-                                        {renderLocationActions(locationRow._kind, locationRow.id, locationTitle)}
+                                        {renderLinearLocationSegments(locationRow, locationTitle, entrance.id)}
+                                        {!isLinearColumn ? renderLocationActions(locationRow._kind, locationRow.id, locationTitle) : null}
                                         {locationRow._kind === 'transit' ? renderTransitCablePanel(locationRow) : null}
-                                        {squares}
+                                        {!isLinearColumn ? squares : null}
                                       </div>
                                     </div>
                                   );
