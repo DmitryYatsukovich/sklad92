@@ -237,6 +237,9 @@ export default function ObjectSettingsTabRefactored() {
   });
   const [cableBusy, setCableBusy] = useState(false);
   const [cablePickTarget, setCablePickTarget] = useState('');
+  const [cableStockSuggestions, setCableStockSuggestions] = useState([]);
+  const [cableStockSuggestionLoading, setCableStockSuggestionLoading] = useState(false);
+  const [cableSelectedMaterial, setCableSelectedMaterial] = useState(null);
   const [cableEditModalOpen, setCableEditModalOpen] = useState(false);
   const [cableEditDraft, setCableEditDraft] = useState(null);
   const [cableEditBusy, setCableEditBusy] = useState(false);
@@ -692,16 +695,30 @@ export default function ObjectSettingsTabRefactored() {
       if (slot.location_kind === 'stairwell') return stairwellById.get(slot.location_id)?.object_id || null;
       return null;
     };
-    const pushEntry = (objectId, slot, name, quantity, unit = '') => {
+    const pushEntry = ({
+      objectId,
+      source = 'slot',
+      slot,
+      name,
+      quantity,
+      unit = '',
+      systemIdValue = null,
+      systemNameValue = '',
+      categoryIdValue = null,
+      categoryNameValue = '',
+      slotIdValue = null,
+    }) => {
       const target = ensureObject(objectId);
       if (!target) return;
       const nameKey = normalizeNameKey(name);
       if (!nameKey) return;
-      const systemId = slot?.system_id ? String(slot.system_id) : '';
-      const systemName = slot?.system_name || 'Без системы';
-      const key = `${systemId}::${nameKey}`;
+      const systemIdRaw = systemIdValue ?? slot?.system_id ?? '';
+      const systemId = systemIdRaw == null ? '' : String(systemIdRaw);
+      const systemName = systemNameValue || slot?.system_name || 'Без системы';
+      const key = `${source}::${systemId}::${nameKey}`;
       const prev = target.entriesMap.get(key) || {
         key,
+        source,
         name: String(name || '').trim(),
         systemId,
         systemName,
@@ -712,12 +729,14 @@ export default function ObjectSettingsTabRefactored() {
       };
       prev.quantity += Number(quantity || 0);
       if (!prev.unit && unit) prev.unit = unit;
-      if (slot?.id) prev.slotIdsSet.add(slot.id);
-      const categoryKey = slot?.category_id == null ? '' : String(slot.category_id);
+      const slotId = slotIdValue ?? slot?.id ?? null;
+      if (slotId) prev.slotIdsSet.add(slotId);
+      const categoryIdRaw = categoryIdValue ?? slot?.category_id ?? null;
+      const categoryKey = categoryIdRaw == null ? '' : String(categoryIdRaw);
       if (!prev.categoriesMap.has(categoryKey)) {
         prev.categoriesMap.set(categoryKey, {
           id: categoryKey,
-          name: slot?.category_name || 'Без категории',
+          name: categoryNameValue || slot?.category_name || 'Без категории',
         });
       }
       target.entriesMap.set(key, prev);
@@ -727,19 +746,80 @@ export default function ObjectSettingsTabRefactored() {
       const slot = slotById.get(row.location_system_id);
       if (!slotMatchesFilters(slot)) return;
       const objectId = getSlotObjectId(slot);
-      pushEntry(objectId, slot, row.material_name, row.quantity, row.material_unit || '');
+      pushEntry({
+        objectId,
+        source: 'slot',
+        slot,
+        name: row.material_name,
+        quantity: row.quantity,
+        unit: row.material_unit || '',
+      });
     });
     data.locationSystemEquipment.forEach((row) => {
       const slot = slotById.get(row.location_system_id);
       if (!slotMatchesFilters(slot)) return;
       const objectId = getSlotObjectId(slot);
-      pushEntry(objectId, slot, row.name, row.quantity);
+      pushEntry({
+        objectId,
+        source: 'slot',
+        slot,
+        name: row.name,
+        quantity: row.quantity,
+      });
     });
     data.locationSystemWorks.forEach((row) => {
       const slot = slotById.get(row.location_system_id);
       if (!slotMatchesFilters(slot)) return;
       const objectId = getSlotObjectId(slot);
-      pushEntry(objectId, slot, row.name, row.quantity);
+      pushEntry({
+        objectId,
+        source: 'slot',
+        slot,
+        name: row.name,
+        quantity: row.quantity,
+      });
+    });
+
+    const apartmentsSelected = selectedApartmentScopes.includes('all');
+    const hasRoomFilters = selectedRoomNames.length > 0;
+    const hasLocationFilters = apartmentsSelected || hasRoomFilters;
+    const slotMatchesLocationScope = (slot) => {
+      if (!slot) return false;
+      if (!hasLocationFilters) return true;
+      if (slot.location_kind === 'apartment') return apartmentsSelected;
+      if (slot.location_kind === 'room') {
+        if (!hasRoomFilters) return false;
+        const roomNameKey = normalizeNameKey(roomNameById.get(slot.location_id));
+        return selectedRoomNames.includes(roomNameKey);
+      }
+      return false;
+    };
+
+    data.transitCableLines.forEach((line) => {
+      const fromSlot = slotById.get(line.from_location_system_id) || null;
+      const toSlot = slotById.get(line.to_location_system_id) || null;
+      if (!fromSlot || !toSlot) return;
+
+      const lineSystemKey = line.system_id == null ? '' : String(line.system_id);
+      const lineCategoryKey = line.category_id == null ? '' : String(line.category_id);
+      if (selectedSystemIds.length && !selectedSystemIds.includes(lineSystemKey)) return;
+      if (selectedCategoryIds.length && !selectedCategoryIds.includes(lineCategoryKey)) return;
+      if (hasLocationFilters && !slotMatchesLocationScope(fromSlot) && !slotMatchesLocationScope(toSlot)) return;
+
+      const transitObjectId = line.transit_id ? transitById.get(Number(line.transit_id))?.object_id : null;
+      const objectId = transitObjectId || getSlotObjectId(fromSlot) || getSlotObjectId(toSlot);
+      if (!objectId) return;
+      pushEntry({
+        objectId,
+        source: 'cable',
+        name: line.name,
+        quantity: Number(line.length_m || 0),
+        unit: 'м',
+        systemIdValue: line.system_id ?? null,
+        systemNameValue: line.system_name || 'Без системы',
+        categoryIdValue: line.category_id ?? null,
+        categoryNameValue: line.category_name || 'Без категории',
+      });
     });
 
     const prepared = new Map();
@@ -747,6 +827,7 @@ export default function ObjectSettingsTabRefactored() {
       const entries = [...raw.entriesMap.values()]
         .map((row) => ({
           key: row.key,
+          source: row.source,
           name: row.name,
           quantity: row.quantity,
           unit: row.unit,
@@ -768,12 +849,18 @@ export default function ObjectSettingsTabRefactored() {
     data.locationSystemMaterials,
     data.locationSystemEquipment,
     data.locationSystemWorks,
+    data.transitCableLines,
     slotById,
     apartmentById,
     roomById,
     transitById,
     stairwellById,
     slotMatchesFilters,
+    selectedSystemIds,
+    selectedCategoryIds,
+    selectedApartmentScopes,
+    selectedRoomNames,
+    roomNameById,
   ]);
 
   const knownManualEntries = useMemo(() => {
@@ -900,26 +987,39 @@ export default function ObjectSettingsTabRefactored() {
   };
 
   useEffect(() => {
-    if (!slotModalOpen || !activeSlot?.id || !activeSlot?.system_id) return undefined;
+    if (!slotModalOpen || !activeSlot?.id) return undefined;
+    const chosenSystemId = Number.parseInt(slotSystemId, 10) || Number(activeSlot.system_id || 0);
+    if (!chosenSystemId) return undefined;
     const query = entryQuery.trim();
     if (!query) {
       setStockSuggestions([]);
       setStockSuggestionLoading(false);
       return undefined;
     }
+    const chosenCategoryId = slotCategoryId === ''
+      ? (activeSlot.category_id || null)
+      : (Number.parseInt(slotCategoryId, 10) || null);
     const timer = setTimeout(() => {
       setStockSuggestionLoading(true);
       settingsApi.objectSettings.materialSuggestions(
-        activeSlot.system_id,
+        chosenSystemId,
         query,
-        activeSlot.category_id || null,
+        chosenCategoryId,
       )
         .then((rows) => setStockSuggestions(Array.isArray(rows) ? rows : []))
         .catch(() => setStockSuggestions([]))
         .finally(() => setStockSuggestionLoading(false));
     }, 250);
     return () => clearTimeout(timer);
-  }, [slotModalOpen, activeSlot?.id, activeSlot?.system_id, activeSlot?.category_id, entryQuery]);
+  }, [
+    slotModalOpen,
+    activeSlot?.id,
+    activeSlot?.system_id,
+    activeSlot?.category_id,
+    slotSystemId,
+    slotCategoryId,
+    entryQuery,
+  ]);
 
   const handleDeleteSlot = async () => {
     if (!activeSlot?.id) return;
@@ -1385,8 +1485,41 @@ export default function ObjectSettingsTabRefactored() {
     setActiveCableTransitId(null);
     resetCableDraft();
     setCablePickTarget('');
+    setCableStockSuggestions([]);
+    setCableStockSuggestionLoading(false);
+    setCableSelectedMaterial(null);
     setError('');
   };
+
+  useEffect(() => {
+    if (!activeCableTransitId) {
+      setCableStockSuggestions([]);
+      setCableStockSuggestionLoading(false);
+      setCableSelectedMaterial(null);
+      return undefined;
+    }
+    const systemId = Number.parseInt(cableDraft.systemId, 10);
+    const query = String(cableDraft.name || '').trim();
+    if (!systemId || !query) {
+      setCableStockSuggestions([]);
+      setCableStockSuggestionLoading(false);
+      return undefined;
+    }
+    const categoryId = cableDraft.categoryId === '' ? null : Number.parseInt(cableDraft.categoryId, 10);
+    if (cableDraft.categoryId !== '' && !categoryId) {
+      setCableStockSuggestions([]);
+      setCableStockSuggestionLoading(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setCableStockSuggestionLoading(true);
+      settingsApi.objectSettings.materialSuggestions(systemId, query, categoryId)
+        .then((rows) => setCableStockSuggestions(Array.isArray(rows) ? rows : []))
+        .catch(() => setCableStockSuggestions([]))
+        .finally(() => setCableStockSuggestionLoading(false));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [activeCableTransitId, cableDraft.systemId, cableDraft.categoryId, cableDraft.name]);
 
   const handlePickCableSlot = useCallback((slot) => {
     if (!activeCableTransit) return;
@@ -1428,8 +1561,9 @@ export default function ObjectSettingsTabRefactored() {
     }
   }, [activeCableTransit, cablePickTarget, isSlotEligibleForCableDraft, revealCableSlotFloor, cableDraft.routeMode]);
 
-  const handleSaveCableLine = async (e, transitIdArg) => {
+  const handleSaveCableLine = async (e, transitIdArg, options = {}) => {
     e.preventDefault();
+    const keepOpen = Boolean(options?.keepOpen);
     const routeMode = cableDraft.routeMode === 'direct' ? 'direct' : 'transit';
     const transitSeed = cableDraft.transitId || transitIdArg || activeCableTransitId || '';
     const selectedTransitId = Number.parseInt(transitSeed, 10);
@@ -1472,9 +1606,6 @@ export default function ObjectSettingsTabRefactored() {
       ...prev,
       transitCableLines: mergeTransitCableLine(prev.transitCableLines, optimisticLine),
     }));
-    setActiveCableTransitId(null);
-    resetCableDraft();
-    setCablePickTarget('');
     setNotice('Сохранение кабельной линии…');
     try {
       const createdLine = await settingsApi.objectSettings.createCableLine({
@@ -1493,7 +1624,26 @@ export default function ObjectSettingsTabRefactored() {
           createdLine,
         ),
       }));
-      setNotice('Кабельная линия добавлена.');
+      if (keepOpen) {
+        setCableDraft((prev) => ({
+          ...prev,
+          fromSlotId: null,
+          toSlotId: null,
+          name: '',
+          lengthM: '',
+        }));
+        setCablePickTarget('from');
+        setCableSelectedMaterial(null);
+        setNotice('Кабельная линия добавлена. Выберите следующую пару блоков.');
+      } else {
+        setActiveCableTransitId(null);
+        resetCableDraft();
+        setCablePickTarget('');
+        setCableStockSuggestions([]);
+        setCableStockSuggestionLoading(false);
+        setCableSelectedMaterial(null);
+        setNotice('Кабельная линия добавлена.');
+      }
     } catch (err) {
       setData((prev) => ({
         ...prev,
@@ -2208,6 +2358,7 @@ export default function ObjectSettingsTabRefactored() {
                     toSlotId: null,
                   }));
                   setCablePickTarget('from');
+                  setCableSelectedMaterial(null);
                 }}
                 className="input h-7 text-xs"
                 disabled={cableBusy}
@@ -2227,6 +2378,7 @@ export default function ObjectSettingsTabRefactored() {
                       toSlotId: null,
                     }));
                     setCablePickTarget('from');
+                    setCableSelectedMaterial(null);
                   }}
                   className="input h-7 text-xs"
                   disabled={cableBusy}
@@ -2251,6 +2403,7 @@ export default function ObjectSettingsTabRefactored() {
                     toSlotId: null,
                   }));
                   setCablePickTarget('from');
+                  setCableSelectedMaterial(null);
                 }}
                 className="input h-7 text-xs"
                 disabled={cableBusy}
@@ -2271,6 +2424,7 @@ export default function ObjectSettingsTabRefactored() {
                     toSlotId: null,
                   }));
                   setCablePickTarget('from');
+                  setCableSelectedMaterial(null);
                 }}
                 className="input h-7 text-xs"
                 disabled={cableBusy}
@@ -2349,12 +2503,51 @@ export default function ObjectSettingsTabRefactored() {
               <input
                 type="text"
                 value={cableDraft.name}
-                onChange={(e) => setCableDraft((prev) => ({ ...prev, name: e.target.value }))}
+                onChange={(e) => {
+                  const nextName = e.target.value;
+                  setCableDraft((prev) => ({ ...prev, name: nextName }));
+                  if (!nextName || normalizeNameKey(nextName) !== normalizeNameKey(cableSelectedMaterial?.name)) {
+                    setCableSelectedMaterial(null);
+                  }
+                }}
                 placeholder="Название кабеля"
                 className="input h-7 text-xs"
                 disabled={cableBusy}
                 required
               />
+              {String(cableDraft.name || '').trim().length > 0 && (
+                <div className="rounded border border-white/10 bg-black/25 p-1.5 space-y-1">
+                  {!cableDraft.systemId ? (
+                    <p className="text-[9px] text-zinc-400">Для подсказок выберите систему кабеля.</p>
+                  ) : cableStockSuggestionLoading ? (
+                    <p className="text-[9px] text-zinc-400">Поиск материалов…</p>
+                  ) : cableStockSuggestions.length ? (
+                    <div className="max-h-28 overflow-auto space-y-0.5">
+                      {cableStockSuggestions.map((material) => (
+                        <button
+                          key={`cable-material-${material.id}`}
+                          type="button"
+                          onClick={() => {
+                            setCableDraft((prev) => ({ ...prev, name: material.name || '' }));
+                            setCableSelectedMaterial(material);
+                          }}
+                          className={`w-full text-left rounded border px-1.5 py-1 text-[9px] hover:bg-white/10 ${
+                            cableSelectedMaterial?.id === material.id
+                              ? 'border-cyan-300/45 text-cyan-100 bg-cyan-900/25'
+                              : 'border-white/10 text-zinc-200'
+                          }`}
+                          disabled={cableBusy}
+                        >
+                          <span className="truncate block">{material.name}</span>
+                          <span className="text-zinc-500">{formatQty(material.quantity)} {material.unit || ''}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[9px] text-zinc-500">На складе нет совпадений по системе/категории.</p>
+                  )}
+                </div>
+              )}
               <input
                 type="text"
                 inputMode="decimal"
@@ -2366,13 +2559,23 @@ export default function ObjectSettingsTabRefactored() {
                 required
               />
             </div>
-            <button
-              type="submit"
-              className="w-full rounded border border-cyan-300/40 bg-cyan-900/35 px-2 py-1 text-[10px] font-medium text-cyan-100 hover:bg-cyan-800/35 disabled:opacity-50"
-              disabled={cableBusy}
-            >
-              {cableBusy ? 'Сохранение…' : 'Сохранить'}
-            </button>
+            <div className="grid grid-cols-1 gap-1">
+              <button
+                type="submit"
+                className="w-full rounded border border-cyan-300/40 bg-cyan-900/35 px-2 py-1 text-[10px] font-medium text-cyan-100 hover:bg-cyan-800/35 disabled:opacity-50"
+                disabled={cableBusy}
+              >
+                {cableBusy ? 'Сохранение…' : 'Сохранить и закрыть'}
+              </button>
+              <button
+                type="button"
+                onClick={(e) => handleSaveCableLine(e, transitId, { keepOpen: true })}
+                className="w-full rounded border border-white/20 bg-white/5 px-2 py-1 text-[10px] font-medium text-zinc-200 hover:bg-white/10 disabled:opacity-50"
+                disabled={cableBusy}
+              >
+                {cableBusy ? 'Сохранение…' : 'Сохранить и добавить ещё'}
+              </button>
+            </div>
           </form>
         )}
       </div>
@@ -2507,13 +2710,15 @@ export default function ObjectSettingsTabRefactored() {
                             <span className="truncate">
                               {row.name} — <span className="text-zinc-400">{formatQty(row.quantity)}{row.unit ? ` ${row.unit}` : ''}</span>
                             </span>
-                            <button
-                              type="button"
-                              onClick={() => openSummaryEditModal(obj.name, row)}
-                              className="px-1.5 py-0.5 rounded border border-white/15 text-[10px] text-zinc-200 hover:bg-white/10 shrink-0"
-                            >
-                              Изменить
-                            </button>
+                            {row.source === 'slot' && row.slotIds.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => openSummaryEditModal(obj.name, row)}
+                                className="px-1.5 py-0.5 rounded border border-white/15 text-[10px] text-zinc-200 hover:bg-white/10 shrink-0"
+                              >
+                                Изменить
+                              </button>
+                            )}
                           </div>
                         ))}
                       </div>
