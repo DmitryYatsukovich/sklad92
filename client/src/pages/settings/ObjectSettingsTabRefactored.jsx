@@ -1302,7 +1302,12 @@ export default function ObjectSettingsTabRefactored() {
       setMultiCopyLocationKey('');
       setMultiCopySelectedSlotIds([]);
     }
-    setActiveCableTransitId(transitId);
+    const normalizedTransitId = Number.parseInt(transitId, 10);
+    if (!normalizedTransitId) {
+      setError('Неверный транзит для добавления кабеля');
+      return;
+    }
+    setActiveCableTransitId(normalizedTransitId);
     resetCableDraft();
     setCablePickTarget('from');
     setError('');
@@ -1359,9 +1364,10 @@ export default function ObjectSettingsTabRefactored() {
     }
   }, [activeCableTransit, cablePickTarget, isSlotEligibleForCableTransit, slotPlacementById]);
 
-  const handleSaveCableLine = async (e) => {
+  const handleSaveCableLine = async (e, transitIdArg) => {
     e.preventDefault();
-    if (!activeCableTransitId) return;
+    const transitId = Number.parseInt(transitIdArg ?? activeCableTransitId, 10);
+    if (!transitId) return setError('Транзит не выбран');
     const fromSlotId = Number.parseInt(cableDraft.fromSlotId, 10);
     const toSlotId = Number.parseInt(cableDraft.toSlotId, 10);
     const systemId = Number.parseInt(cableDraft.systemId, 10);
@@ -1378,7 +1384,7 @@ export default function ObjectSettingsTabRefactored() {
     setCableBusy(true);
     setError('');
     try {
-      await settingsApi.objectSettings.createTransitCableLine(activeCableTransitId, {
+      await settingsApi.objectSettings.createTransitCableLine(transitId, {
         from_location_system_id: fromSlotId,
         to_location_system_id: toSlotId,
         system_id: systemId,
@@ -1478,7 +1484,8 @@ export default function ObjectSettingsTabRefactored() {
 
   useEffect(() => {
     if (!activeCableTransitId) return;
-    if (!transitById.has(activeCableTransitId)) {
+    const activeId = Number.parseInt(activeCableTransitId, 10);
+    if (!activeId || !transitById.has(activeId)) {
       setActiveCableTransitId(null);
       resetCableDraft();
       setCablePickTarget('');
@@ -1985,7 +1992,7 @@ export default function ObjectSettingsTabRefactored() {
         </div>
 
         {isActive && (
-          <form className="space-y-1.5" onSubmit={handleSaveCableLine}>
+          <form className="space-y-1.5" onSubmit={(e) => handleSaveCableLine(e, transitId)}>
             <div className="grid grid-cols-1 gap-1.5">
               <select
                 value={cableDraft.systemId}
