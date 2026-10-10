@@ -240,6 +240,19 @@ export default function ObjectSettingsTabRefactored() {
   const [cableEditBusy, setCableEditBusy] = useState(false);
   const entranceGridRefs = useRef(new Map());
   const [entranceCableOverlay, setEntranceCableOverlay] = useState({});
+  const mergeTransitCableLine = useCallback((prevLines, nextLine) => {
+    const safePrev = Array.isArray(prevLines) ? prevLines : [];
+    if (!nextLine?.id) return safePrev;
+    const merged = [
+      ...safePrev.filter((line) => String(line.id) !== String(nextLine.id)),
+      nextLine,
+    ];
+    merged.sort((a, b) => (
+      (Number.parseInt(a?.transit_id, 10) || 0) - (Number.parseInt(b?.transit_id, 10) || 0)
+      || (Number.parseInt(a?.id, 10) || 0) - (Number.parseInt(b?.id, 10) || 0)
+    ));
+    return merged;
+  }, []);
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -1401,7 +1414,7 @@ export default function ObjectSettingsTabRefactored() {
     setCableBusy(true);
     setError('');
     try {
-      await settingsApi.objectSettings.createTransitCableLine(transitId, {
+      const createdLine = await settingsApi.objectSettings.createTransitCableLine(transitId, {
         from_location_system_id: fromSlotId,
         to_location_system_id: toSlotId,
         system_id: systemId,
@@ -1411,7 +1424,10 @@ export default function ObjectSettingsTabRefactored() {
       });
       revealCableSlotFloor(fromSlotId);
       revealCableSlotFloor(toSlotId);
-      await load({ silent: true });
+      setData((prev) => ({
+        ...prev,
+        transitCableLines: mergeTransitCableLine(prev.transitCableLines, createdLine),
+      }));
       setNotice('Кабельная линия добавлена.');
       setActiveCableTransitId(null);
       resetCableDraft();
@@ -1466,7 +1482,7 @@ export default function ObjectSettingsTabRefactored() {
     setCableEditBusy(true);
     setError('');
     try {
-      await settingsApi.objectSettings.updateTransitCableLine(cableEditDraft.lineId, {
+      const updatedLine = await settingsApi.objectSettings.updateTransitCableLine(cableEditDraft.lineId, {
         transit_id: transitId,
         from_location_system_id: fromSlotId,
         to_location_system_id: toSlotId,
@@ -1475,9 +1491,12 @@ export default function ObjectSettingsTabRefactored() {
         name,
         length_m: lengthM,
       });
+      setData((prev) => ({
+        ...prev,
+        transitCableLines: mergeTransitCableLine(prev.transitCableLines, updatedLine),
+      }));
       setNotice('Кабельная линия обновлена.');
       closeCableEditModal();
-      await load({ silent: true });
     } catch (err) {
       setError(err.message || 'Не удалось обновить кабельную линию');
     } finally {
@@ -1492,9 +1511,14 @@ export default function ObjectSettingsTabRefactored() {
     setError('');
     try {
       await settingsApi.objectSettings.deleteTransitCableLine(cableEditDraft.lineId);
+      setData((prev) => ({
+        ...prev,
+        transitCableLines: (prev.transitCableLines || []).filter(
+          (line) => String(line.id) !== String(cableEditDraft.lineId),
+        ),
+      }));
       setNotice('Кабельная линия удалена.');
       closeCableEditModal();
-      await load({ silent: true });
     } catch (err) {
       setError(err.message || 'Не удалось удалить кабельную линию');
     } finally {
