@@ -1392,10 +1392,11 @@ export default function ObjectSettingsTabRefactored() {
         name,
         length_m: lengthM,
       });
-      setNotice('Кабельная линия добавлена.');
-      resetCableDraft();
-      setCablePickTarget('from');
       await load({ silent: true });
+      setNotice('Кабельная линия добавлена.');
+      setActiveCableTransitId(null);
+      resetCableDraft();
+      setCablePickTarget('');
     } catch (err) {
       setError(err.message || 'Не удалось сохранить кабельную линию');
     } finally {
@@ -2288,6 +2289,7 @@ export default function ObjectSettingsTabRefactored() {
                       .filter(Boolean)
                       .filter((row) => {
                         if (!hasSlotFilters || activeCableTransitId) return true;
+                        if (row._kind === 'transit' && (transitCableLinesByTransit.get(row.id) || []).length) return true;
                         const slots = slotsByLocation.get(`${row._kind}:${row.id}`) || [];
                         return slots.some((slot) => slotMatchesFilters(slot));
                       });
@@ -2311,7 +2313,9 @@ export default function ObjectSettingsTabRefactored() {
                                   const locationTitle = `${prefix} ${locationRow.name}`;
                                   const locationRange = `Этаж ${locationRow.from_floor_name}–${locationRow.to_floor_name}`;
                                   const squares = renderSystemSquares(locationRow._kind, locationRow.id, locationTitle);
-                                  if (!squares && hasSlotFilters && !activeCableTransitId) return null;
+                                  const hasTransitCableLines = locationRow._kind === 'transit'
+                                    && (transitCableLinesByTransit.get(locationRow.id) || []).length > 0;
+                                  if (!squares && hasSlotFilters && !activeCableTransitId && !hasTransitCableLines) return null;
                                   const locationHasBlocks = hasLocationBlocks(locationRow._kind, locationRow.id);
                                   return (
                                     <div
