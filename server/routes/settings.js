@@ -506,8 +506,11 @@ async function validateTransitCableLineInput(db, {
 }) {
   const transit = await loadLocationByKind(db, 'transit', transitId);
   if (!transit) return { error: 'Транзит не найден' };
-  const system = (await db.query('SELECT id, name FROM material_systems WHERE id = $1', [systemId])).rows[0];
-  if (!system) return { error: 'Система кабельной линии не найдена' };
+  let system = null;
+  if (systemId) {
+    system = (await db.query('SELECT id, name FROM material_systems WHERE id = $1', [systemId])).rows[0];
+    if (!system) return { error: 'Система кабельной линии не найдена' };
+  }
   let category = null;
   if (categoryId) {
     category = (await db.query('SELECT id, name FROM material_categories WHERE id = $1', [categoryId])).rows[0];
@@ -524,10 +527,10 @@ async function validateTransitCableLineInput(db, {
   if (!isTransitCableEndpointKind(fromSlot.location_kind) || !isTransitCableEndpointKind(toSlot.location_kind)) {
     return { error: 'Кабель можно привязать только к блокам квартир и помещений' };
   }
-  if (Number(fromSlot.system_id || 0) !== Number(system.id) || Number(toSlot.system_id || 0) !== Number(system.id)) {
+  if (system && (Number(fromSlot.system_id || 0) !== Number(system.id) || Number(toSlot.system_id || 0) !== Number(system.id))) {
     return { error: 'Выбранные блоки должны относиться к выбранной системе' };
   }
-  if (categoryId) {
+  if (category) {
     if (Number(fromSlot.category_id || 0) !== Number(category.id) || Number(toSlot.category_id || 0) !== Number(category.id)) {
       return { error: 'Выбранные блоки должны относиться к выбранной категории' };
     }
@@ -1878,14 +1881,19 @@ router.post('/object-settings/transits/:transitId/cable-lines', requirePermissio
   const transitId = parseId(req.params.transitId);
   const fromLocationSystemId = parseId(req.body?.from_location_system_id);
   const toLocationSystemId = parseId(req.body?.to_location_system_id);
-  const systemId = parseId(req.body?.system_id);
+  const systemId = req.body?.system_id == null || req.body?.system_id === ''
+    ? null
+    : parseId(req.body?.system_id);
   const categoryId = req.body?.category_id == null || req.body?.category_id === ''
     ? null
     : parseId(req.body?.category_id);
   const name = parseRequiredName(req.body?.name, 200);
   const lengthM = parsePositiveDecimal(req.body?.length_m);
-  if (!transitId || !fromLocationSystemId || !toLocationSystemId || !systemId || !name || !lengthM) {
-    return res.status(400).json({ error: 'Укажите транзит, систему, 2 блока, название и длину кабеля' });
+  if (!transitId || !fromLocationSystemId || !toLocationSystemId || !name || !lengthM) {
+    return res.status(400).json({ error: 'Укажите транзит, 2 блока, название и длину кабеля' });
+  }
+  if (req.body?.system_id != null && req.body?.system_id !== '' && !systemId) {
+    return res.status(400).json({ error: 'Неверная система кабельной линии' });
   }
   if (req.body?.category_id != null && req.body?.category_id !== '' && !categoryId) {
     return res.status(400).json({ error: 'Неверная категория кабельной линии' });
@@ -1935,8 +1943,8 @@ router.put('/object-settings/transit-cable-lines/:id', requirePermission('can_se
     ? current.to_location_system_id
     : parseId(req.body?.to_location_system_id);
   const systemId = req.body?.system_id === undefined
-    ? parseId(current.system_id)
-    : parseId(req.body?.system_id);
+    ? (current.system_id == null ? null : parseId(current.system_id))
+    : (req.body?.system_id == null || req.body?.system_id === '' ? null : parseId(req.body?.system_id));
   const categoryId = req.body?.category_id === undefined
     ? (current.category_id == null ? null : parseId(current.category_id))
     : (req.body?.category_id == null || req.body?.category_id === '' ? null : parseId(req.body?.category_id));
@@ -1945,8 +1953,11 @@ router.put('/object-settings/transit-cable-lines/:id', requirePermission('can_se
     ? parsePositiveDecimal(current.length_m)
     : parsePositiveDecimal(req.body?.length_m);
 
-  if (!transitId || !fromLocationSystemId || !toLocationSystemId || !systemId || !name || !lengthM) {
+  if (!transitId || !fromLocationSystemId || !toLocationSystemId || !name || !lengthM) {
     return res.status(400).json({ error: 'Неверные данные кабельной линии' });
+  }
+  if (req.body?.system_id !== undefined && req.body?.system_id != null && req.body?.system_id !== '' && !systemId) {
+    return res.status(400).json({ error: 'Неверная система кабельной линии' });
   }
   if (req.body?.category_id !== undefined && req.body?.category_id != null && req.body?.category_id !== '' && !categoryId) {
     return res.status(400).json({ error: 'Неверная категория кабельной линии' });

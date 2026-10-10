@@ -1400,11 +1400,11 @@ export default function ObjectSettingsTabRefactored() {
     if (!transitId) return setError('Транзит не выбран');
     const fromSlotId = Number.parseInt(cableDraft.fromSlotId, 10);
     const toSlotId = Number.parseInt(cableDraft.toSlotId, 10);
-    const systemId = Number.parseInt(cableDraft.systemId, 10);
+    const systemId = cableDraft.systemId === '' ? null : Number.parseInt(cableDraft.systemId, 10);
     const categoryId = cableDraft.categoryId === '' ? null : Number.parseInt(cableDraft.categoryId, 10);
     const name = String(cableDraft.name || '').trim();
     const lengthM = parseDecimalInput(cableDraft.lengthM);
-    if (!systemId) return setError('Выберите систему кабельной линии');
+    if (cableDraft.systemId !== '' && !systemId) return setError('Выберите корректную систему кабельной линии');
     if (cableDraft.categoryId !== '' && !categoryId) return setError('Выберите корректную категорию');
     if (!fromSlotId || !toSlotId) return setError('Выберите два блока для кабельной линии');
     if (fromSlotId === toSlotId) return setError('Блоки «От» и «До» должны отличаться');
@@ -1471,9 +1471,8 @@ export default function ObjectSettingsTabRefactored() {
 
   const openCableEditModal = (line) => {
     if (!line) return;
-    const fromSlot = slotById.get(line.from_location_system_id);
-    const inferredSystemId = line.system_id || fromSlot?.system_id || '';
-    const inferredCategoryId = line.category_id ?? fromSlot?.category_id ?? '';
+    const inferredSystemId = line.system_id ?? '';
+    const inferredCategoryId = line.category_id ?? '';
     setCableEditDraft({
       lineId: line.id,
       transitId: line.transit_id,
@@ -1500,13 +1499,14 @@ export default function ObjectSettingsTabRefactored() {
     const transitId = Number.parseInt(cableEditDraft.transitId, 10);
     const fromSlotId = Number.parseInt(cableEditDraft.fromSlotId, 10);
     const toSlotId = Number.parseInt(cableEditDraft.toSlotId, 10);
-    const systemId = Number.parseInt(cableEditDraft.systemId, 10);
+    const systemId = cableEditDraft.systemId === '' ? null : Number.parseInt(cableEditDraft.systemId, 10);
     const categoryId = cableEditDraft.categoryId === '' ? null : Number.parseInt(cableEditDraft.categoryId, 10);
     const name = String(cableEditDraft.name || '').trim();
     const lengthM = parseDecimalInput(cableEditDraft.lengthM);
-    if (!transitId || !fromSlotId || !toSlotId || !systemId || !name || !Number.isFinite(lengthM) || lengthM <= 0) {
+    if (!transitId || !fromSlotId || !toSlotId || !name || !Number.isFinite(lengthM) || lengthM <= 0) {
       return setError('Проверьте поля редактирования кабеля');
     }
+    if (cableEditDraft.systemId !== '' && !systemId) return setError('Выберите корректную систему кабельной линии');
     if (fromSlotId === toSlotId) return setError('Блоки «От» и «До» должны отличаться');
     if (cableEditDraft.categoryId !== '' && !categoryId) return setError('Выберите корректную категорию');
     setCableEditBusy(true);
@@ -2102,9 +2102,8 @@ export default function ObjectSettingsTabRefactored() {
                 }}
                 className="input h-7 text-xs"
                 disabled={cableBusy}
-                required
               >
-                <option value="">Система</option>
+                <option value="">Система (не выбрана)</option>
                 {data.systems.map((system) => (
                   <option key={system.id} value={system.id}>{system.name}</option>
                 ))}
@@ -2661,9 +2660,8 @@ export default function ObjectSettingsTabRefactored() {
                   }}
                   className="input"
                   disabled={cableEditBusy}
-                  required
                 >
-                  <option value="">— Выберите систему —</option>
+                  <option value="">Без системы</option>
                   {data.systems.map((system) => (
                     <option key={system.id} value={system.id}>{system.name}</option>
                   ))}
