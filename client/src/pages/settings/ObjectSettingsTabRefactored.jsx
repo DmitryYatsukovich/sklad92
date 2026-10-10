@@ -2330,37 +2330,45 @@ export default function ObjectSettingsTabRefactored() {
       return (
         <div className="space-y-1 rounded border border-cyan-300/20 bg-cyan-950/20 p-1">
           <p className="text-[8px] text-cyan-100 uppercase tracking-wide">Секции транзита по этажам</p>
-          {spanFloors.map((floorRow, index) => (
-            <div
-              key={`transit-floor-segment-${locationRow.id}-${floorRow.id}-${index}`}
-              className="rounded border border-cyan-400/20 bg-black/25 p-1"
-            >
-              <div className="flex items-center justify-between gap-1">
-                <span className="text-[8px] text-zinc-200">Этаж {floorRow.name}</span>
-                <div className="flex gap-1">
-                  <button
-                    type="button"
-                    onClick={() => openCreateSlotModal(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name}`)}
-                    className="px-1 py-0.5 rounded border border-cyan-300/35 text-[8px] text-cyan-100 hover:bg-cyan-900/35 disabled:opacity-50"
-                    disabled={actionsDisabled}
-                  >
-                    +Блок
-                  </button>
-                  {canPasteSlot && (
-                    <button
-                      type="button"
-                      onClick={() => handlePasteSlotToLocation(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name}`)}
-                      className="px-1 py-0.5 rounded border border-sky-400/35 text-[8px] text-sky-200 hover:bg-sky-900/30 disabled:opacity-50"
-                      disabled={actionsDisabled}
-                      title={pasteTitle}
-                    >
-                      Встав.
-                    </button>
+          {spanFloors.map((floorRow, index) => {
+            const floorId = Number.parseInt(floorRow?.id, 10);
+            const isCollapsed = floorId ? collapsedFloorSet.has(floorId) : false;
+            return (
+              <div
+                key={`transit-floor-segment-${locationRow.id}-${floorRow.id}-${index}`}
+                className={`rounded border border-cyan-400/20 bg-black/25 p-1 ${isCollapsed ? 'opacity-75' : ''}`}
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[8px] text-zinc-200">Этаж {floorRow.name}</span>
+                  {isCollapsed ? (
+                    <span className="text-[8px] text-zinc-500">свернут</span>
+                  ) : (
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => openCreateSlotModal(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name}`)}
+                        className="px-1 py-0.5 rounded border border-cyan-300/35 text-[8px] text-cyan-100 hover:bg-cyan-900/35 disabled:opacity-50"
+                        disabled={actionsDisabled}
+                      >
+                        +Блок
+                      </button>
+                      {canPasteSlot && (
+                        <button
+                          type="button"
+                          onClick={() => handlePasteSlotToLocation(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name}`)}
+                          className="px-1 py-0.5 rounded border border-sky-400/35 text-[8px] text-sky-200 hover:bg-sky-900/30 disabled:opacity-50"
+                          disabled={actionsDisabled}
+                          title={pasteTitle}
+                        >
+                          Встав.
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       );
     }
@@ -2369,42 +2377,50 @@ export default function ObjectSettingsTabRefactored() {
       return (
         <div className="space-y-1 rounded border border-emerald-300/20 bg-emerald-950/20 p-1">
           <p className="text-[8px] text-emerald-100 uppercase tracking-wide">ЛК по этажам (площадка + межэтажье)</p>
-          {spanFloors.map((floorRow, index) => (
-            <div
-              key={`stair-floor-segment-${locationRow.id}-${floorRow.id}-${index}`}
-              className="relative rounded border border-emerald-400/20 bg-black/25 p-1 space-y-1"
-              style={{ marginLeft: `${(index % 2) * 12}px` }}
-            >
-              <div className="flex items-center justify-between gap-1">
-                <span className="text-[8px] text-zinc-200">Этаж {floorRow.name}</span>
-                <span className="text-[8px] text-zinc-500">{index % 2 === 0 ? '↗' : '↘'}</span>
+          {spanFloors.map((floorRow, index) => {
+            const floorId = Number.parseInt(floorRow?.id, 10);
+            const isCollapsed = floorId ? collapsedFloorSet.has(floorId) : false;
+            return (
+              <div
+                key={`stair-floor-segment-${locationRow.id}-${floorRow.id}-${index}`}
+                className={`relative rounded border border-emerald-400/20 bg-black/25 p-1 space-y-1 ${isCollapsed ? 'opacity-75' : ''}`}
+                style={{ marginLeft: `${(index % 2) * 12}px` }}
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[8px] text-zinc-200">Этаж {floorRow.name}</span>
+                  <span className="text-[8px] text-zinc-500">{index % 2 === 0 ? '↗' : '↘'}</span>
+                </div>
+                {!isCollapsed ? (
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => openCreateSlotModal(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name} · площадка`)}
+                      className="rounded border border-emerald-300/30 bg-emerald-900/20 px-1 py-0.5 text-[8px] text-emerald-100 hover:bg-emerald-800/30 disabled:opacity-50 text-left"
+                      disabled={actionsDisabled}
+                    >
+                      Площадка +блок
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openCreateSlotModal(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name} · межэтажье`)}
+                      className="rounded border border-emerald-200/25 bg-emerald-900/15 px-1 py-0.5 text-[8px] text-emerald-50 hover:bg-emerald-800/25 disabled:opacity-50 text-left"
+                      disabled={actionsDisabled}
+                    >
+                      Межэтажье +блок
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-[8px] text-zinc-500">Секция свернута вместе с этажом</p>
+                )}
+                {index < spanFloors.length - 1 && (
+                  <div
+                    className="pointer-events-none absolute -bottom-1.5 left-2 h-3 w-[calc(100%-1rem)] border-b border-dashed border-emerald-300/25"
+                    style={{ transform: index % 2 === 0 ? 'skewX(18deg)' : 'skewX(-18deg)' }}
+                  />
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-1">
-                <button
-                  type="button"
-                  onClick={() => openCreateSlotModal(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name} · площадка`)}
-                  className="rounded border border-emerald-300/30 bg-emerald-900/20 px-1 py-0.5 text-[8px] text-emerald-100 hover:bg-emerald-800/30 disabled:opacity-50 text-left"
-                  disabled={actionsDisabled}
-                >
-                  Площадка +блок
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openCreateSlotModal(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name} · межэтажье`)}
-                  className="rounded border border-emerald-200/25 bg-emerald-900/15 px-1 py-0.5 text-[8px] text-emerald-50 hover:bg-emerald-800/25 disabled:opacity-50 text-left"
-                  disabled={actionsDisabled}
-                >
-                  Межэтажье +блок
-                </button>
-              </div>
-              {index < spanFloors.length - 1 && (
-                <div
-                  className="pointer-events-none absolute -bottom-1.5 left-2 h-3 w-[calc(100%-1rem)] border-b border-dashed border-emerald-300/25"
-                  style={{ transform: index % 2 === 0 ? 'skewX(18deg)' : 'skewX(-18deg)' }}
-                />
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       );
     }
@@ -2791,6 +2807,24 @@ export default function ObjectSettingsTabRefactored() {
       },
     )
     : [];
+  const allFloorIds = useMemo(
+    () => sortedFloors.map((floor) => String(floor.id)),
+    [sortedFloors],
+  );
+  const areAllFloorsCollapsed = useMemo(() => {
+    if (!allFloorIds.length) return false;
+    const collapsedSet = new Set(collapsedFloors.map((id) => String(id)));
+    return allFloorIds.every((id) => collapsedSet.has(id));
+  }, [allFloorIds, collapsedFloors]);
+  const handleToggleAllFloors = useCallback(() => {
+    if (!allFloorIds.length) return;
+    setCollapsedFloors((prev) => {
+      const prevSet = new Set(prev.map((id) => String(id)));
+      const allCollapsed = allFloorIds.every((id) => prevSet.has(id));
+      if (allCollapsed) return [];
+      return [...allFloorIds];
+    });
+  }, [allFloorIds]);
 
   if (loading) return <p className="text-zinc-500 text-sm">Загрузка настроек объектов…</p>;
 
@@ -2831,6 +2865,15 @@ export default function ObjectSettingsTabRefactored() {
             selectedValues={selectedRoomNames}
             onToggle={(value) => setSelectedRoomNames((prev) => toggleSelection(prev, value))}
           />
+          {allFloorIds.length > 0 && (
+            <button
+              type="button"
+              className="btn-ghost text-xs"
+              onClick={handleToggleAllFloors}
+            >
+              {areAllFloorsCollapsed ? 'Развернуть все этажи' : 'Свернуть все этажи'}
+            </button>
+          )}
           {hasSlotFilters && (
             <button
               type="button"
@@ -2904,7 +2947,7 @@ export default function ObjectSettingsTabRefactored() {
               )}
 
               {objectEntrances.length ? (
-                <div className="grid gap-2.5 2xl:grid-cols-2">
+                <div className="space-y-2.5">
                   {objectEntrances.map((entrance) => {
                     const entranceFloors = floorsByEntrance.get(entrance.id) || [];
                     const entranceTransits = transitsByEntrance.get(entrance.id) || [];
@@ -2958,7 +3001,7 @@ export default function ObjectSettingsTabRefactored() {
                                 ref={(node) => setEntranceGridRef(entrance.id, node)}
                                 className="grid gap-1.5 min-w-0 relative z-10"
                                 style={{
-                                  gridTemplateColumns: `${entranceLinearLayoutRows.length ? `repeat(${entranceLinearLayoutRows.length}, minmax(7.5rem, 9rem)) ` : ''}minmax(16rem, 1fr)`,
+                                  gridTemplateColumns: `repeat(${Math.max(entranceLinearLayoutRows.length + 1, 1)}, minmax(16rem, 1fr))`,
                                   alignItems: 'stretch',
                                 }}
                               >
@@ -2983,7 +3026,7 @@ export default function ObjectSettingsTabRefactored() {
                                     <div
                                       key={`${locationRow._kind}:${locationRow.id}`}
                                       data-transit-id={locationRow._kind === 'transit' ? locationRow.id : undefined}
-                                      className={`rounded-lg border px-1 py-1 space-y-1 shadow-[0_6px_14px_rgba(0,0,0,0.2)] ${
+                                      className={`rounded-lg border px-1 py-1 shadow-[0_6px_14px_rgba(0,0,0,0.2)] h-full min-h-0 overflow-hidden flex flex-col ${
                                         locationHasBlocks
                                           ? 'border-cyan-400/25 bg-gradient-to-b from-cyan-950/25 to-zinc-950/60'
                                           : 'border-rose-500/45 bg-rose-950/15'
@@ -2995,10 +3038,12 @@ export default function ObjectSettingsTabRefactored() {
                                     >
                                       <p className="text-zinc-100 text-[9px] font-semibold leading-tight break-words uppercase tracking-wide">{locationTitle}</p>
                                       <p className="text-zinc-400 text-[8px] leading-tight">{locationRange}</p>
-                                      {renderLinearLocationSegments(locationRow, locationTitle)}
-                                      {renderLocationActions(locationRow._kind, locationRow.id, locationTitle)}
-                                      {locationRow._kind === 'transit' ? renderTransitCablePanel(locationRow) : null}
-                                      {squares}
+                                      <div className="space-y-1 overflow-auto min-h-0 pr-0.5">
+                                        {renderLinearLocationSegments(locationRow, locationTitle)}
+                                        {renderLocationActions(locationRow._kind, locationRow.id, locationTitle)}
+                                        {locationRow._kind === 'transit' ? renderTransitCablePanel(locationRow) : null}
+                                        {squares}
+                                      </div>
                                     </div>
                                   );
                                 })}
