@@ -2402,7 +2402,8 @@ export default function ObjectSettingsTabRefactored() {
           top: rect.top - gridRect.top,
           bottom: rect.bottom - gridRect.top,
         });
-        const pointFromRectCenter = (rect) => rectToAnchor(rect).center;
+        const clampX = (value) => Math.max(2, Math.min(gridRect.width - 2, value));
+        const clampY = (value) => Math.max(2, Math.min(gridRect.height - 2, value));
         const choosePreferredEdge = (anchor) => (anchor.center.y <= (gridRect.height / 2) ? 'top' : 'bottom');
         const getTerminalPoint = (anchor, edge) => (
           edge === 'top'
@@ -2413,6 +2414,91 @@ export default function ObjectSettingsTabRefactored() {
           x: terminalPoint.x,
           y: terminalPoint.y + (edge === 'top' ? -6 : 6),
         });
+        const slotObstacles = Array.from(gridEl.querySelectorAll('[data-slot-id]'))
+          .map((node) => {
+            if (!(node instanceof HTMLElement)) return null;
+            const slotId = Number.parseInt(node.dataset.slotId || '', 10);
+            if (!slotId) return null;
+            const rect = node.getBoundingClientRect();
+            return {
+              slotId,
+              left: rect.left - gridRect.left,
+              right: rect.right - gridRect.left,
+              top: rect.top - gridRect.top,
+              bottom: rect.bottom - gridRect.top,
+            };
+          })
+          .filter(Boolean);
+        const intersectsHorizontal = (rect, x1, x2, y) => (
+          y > rect.top - 1
+          && y < rect.bottom + 1
+          && Math.max(x1, x2) > rect.left - 1
+          && Math.min(x1, x2) < rect.right + 1
+        );
+        const intersectsVertical = (rect, x, y1, y2) => (
+          x > rect.left - 1
+          && x < rect.right + 1
+          && Math.max(y1, y2) > rect.top - 1
+          && Math.min(y1, y2) < rect.bottom + 1
+        );
+        const findSafeHorizontalY = ({
+          initialY,
+          x1,
+          x2,
+          preferredDirection = 'up',
+          excludeSlotIds = null,
+        }) => {
+          let y = clampY(initialY);
+          let direction = preferredDirection;
+          for (let attempt = 0; attempt < 12; attempt += 1) {
+            const conflicts = slotObstacles.filter((rect) => (
+              !(excludeSlotIds?.has(rect.slotId))
+              && intersectsHorizontal(rect, x1, x2, y)
+            ));
+            if (!conflicts.length) return y;
+            const nextY = direction === 'up'
+              ? clampY(Math.min(...conflicts.map((rect) => rect.top)) - 4)
+              : clampY(Math.max(...conflicts.map((rect) => rect.bottom)) + 4);
+            if (Math.abs(nextY - y) < 0.5) {
+              direction = direction === 'up' ? 'down' : 'up';
+            } else {
+              y = nextY;
+            }
+          }
+          return y;
+        };
+        const findSafeVerticalX = ({
+          initialX,
+          y1,
+          y2,
+          preferredDirection = 'right',
+          excludeSlotIds = null,
+        }) => {
+          let x = clampX(initialX);
+          let direction = preferredDirection;
+          for (let attempt = 0; attempt < 12; attempt += 1) {
+            const conflicts = slotObstacles.filter((rect) => (
+              !(excludeSlotIds?.has(rect.slotId))
+              && intersectsVertical(rect, x, y1, y2)
+            ));
+            if (!conflicts.length) return x;
+            const nextX = direction === 'left'
+              ? clampX(Math.min(...conflicts.map((rect) => rect.left)) - 4)
+              : clampX(Math.max(...conflicts.map((rect) => rect.right)) + 4);
+            if (Math.abs(nextX - x) < 0.5) {
+              direction = direction === 'left' ? 'right' : 'left';
+            } else {
+              x = nextX;
+            }
+          }
+          return x;
+        };
+        const pushPoint = (collection, point) => {
+          const normalized = { x: clampX(point.x), y: clampY(point.y) };
+          const prev = collection[collection.length - 1];
+          if (prev && Math.abs(prev.x - normalized.x) < 0.01 && Math.abs(prev.y - normalized.y) < 0.01) return;
+          collection.push(normalized);
+        };
         const resolveSlotAnchor = (slotIdValue, transitPoint) => {
           const slotId = Number.parseInt(slotIdValue, 10);
           if (!slotId) return null;
@@ -2467,25 +2553,27 @@ export default function ObjectSettingsTabRefactored() {
         const itemsByTransit = new Map();
         lines.forEach((line) => {
           const transitId = Number.parseInt(line.transit_id, 10);
-          let transitPoint = null;
+          let transitAnchor = null;
           if (transitId) {
             const transitEl = gridEl.querySelector(`[data-transit-id="${transitId}"]`);
             if (transitEl instanceof HTMLElement) {
-              transitPoint = pointFromRectCenter(transitEl.getBoundingClientRect());
+              transitAnchor = rectToAnchor(transitEl.getBoundingClientRect());
             }
           }
-          const fromAnchor = resolveSlotAnchor(line.from_location_system_id, transitPoint);
-          const toAnchor = resolveSlotAnchor(line.to_location_system_id, transitPoint);
+          const fromAnchor = resolveSlotAnchor(line.from_location_system_id, transitAnchor?.center || null);
+          const toAnchor = resolveSlotAnchor(line.to_location_system_id, transitAnchor?.center || null);
           if (!fromAnchor || !toAnchor) return;
 
-          const groupKey = transitPoint ? `transit:${transitId}` : 'direct';
+          const groupKey = transitAnchor ? `transit:${transitId}` : 'direct';
           const list = itemsByTransit.get(groupKey) || [];
           list.push({
             key: String(line.id),
             line,
             from: fromAnchor,
             to: toAnchor,
-            transit: transitPoint,
+            transit: transitAnchor,
+            fromSlotId: Number.parseInt(line.from_location_system_id, 10) || null,
+            toSlotId: Number.parseInt(line.to_location_system_id, 10) || null,
           });
           itemsByTransit.set(groupKey, list);
         });
@@ -2510,6 +2598,8 @@ export default function ObjectSettingsTabRefactored() {
           });
 
           const hasTransitRoute = Boolean(arranged[0]?.transit);
+          const globalRight = slotObstacles.length ? Math.max(...slotObstacles.map((rect) => rect.right)) : (gridRect.width - 2);
+          const globalLeft = slotObstacles.length ? Math.min(...slotObstacles.map((rect) => rect.left)) : 2;
           arranged.forEach((item, index) => {
             const fromEdge = choosePreferredEdge(item.from);
             const toEdge = choosePreferredEdge(item.to);
@@ -2517,33 +2607,88 @@ export default function ObjectSettingsTabRefactored() {
             const toTerminal = getTerminalPoint(item.to, toEdge);
             const fromJunction = getJunctionPoint(fromTerminal, fromEdge);
             const toJunction = getJunctionPoint(toTerminal, toEdge);
+            const excludeSlotIds = new Set([item.fromSlotId, item.toSlotId].filter(Boolean));
             const points = [];
             if (hasTransitRoute && item.transit) {
-              const laneShift = (index - ((arranged.length - 1) / 2)) * 3.2;
-              const laneX = item.transit.x + laneShift;
-              points.push(
-                fromTerminal,
-                fromJunction,
-                { x: laneX, y: fromJunction.y },
-                { x: laneX, y: toJunction.y },
-                { x: toJunction.x, y: toJunction.y },
-                toTerminal,
-              );
+              const laneShift = (index - ((arranged.length - 1) / 2)) * 1.9;
+              const laneBase = item.transit.right - 6;
+              const fromY = findSafeHorizontalY({
+                initialY: fromJunction.y,
+                x1: fromJunction.x,
+                x2: laneBase + laneShift,
+                preferredDirection: fromEdge === 'top' ? 'up' : 'down',
+                excludeSlotIds,
+              });
+              const toY = findSafeHorizontalY({
+                initialY: toJunction.y,
+                x1: laneBase + laneShift,
+                x2: toJunction.x,
+                preferredDirection: toEdge === 'top' ? 'up' : 'down',
+                excludeSlotIds,
+              });
+              const laneX = findSafeVerticalX({
+                initialX: laneBase + laneShift,
+                y1: fromY,
+                y2: toY,
+                preferredDirection: laneShift <= 0 ? 'left' : 'right',
+                excludeSlotIds,
+              });
+              pushPoint(points, fromTerminal);
+              pushPoint(points, fromJunction);
+              if (Math.abs(fromY - fromJunction.y) > 0.5) {
+                pushPoint(points, { x: fromJunction.x, y: fromY });
+              }
+              pushPoint(points, { x: laneX, y: fromY });
+              if (Math.abs(toY - fromY) > 0.5) {
+                pushPoint(points, { x: laneX, y: toY });
+              }
+              pushPoint(points, { x: toJunction.x, y: toY });
+              if (Math.abs(toY - toJunction.y) > 0.5) {
+                pushPoint(points, { x: toJunction.x, y: toJunction.y });
+              }
+              pushPoint(points, toTerminal);
             } else {
               const directionRight = item.to.center.x >= item.from.center.x;
-              const corridorBase = directionRight
-                ? Math.max(item.from.right, item.to.right) + 8
-                : Math.min(item.from.left, item.to.left) - 8;
-              const laneShift = (index - ((arranged.length - 1) / 2)) * 3.2;
-              const corridorX = corridorBase + laneShift;
-              points.push(
-                fromTerminal,
-                fromJunction,
-                { x: corridorX, y: fromJunction.y },
-                { x: corridorX, y: toJunction.y },
-                { x: toJunction.x, y: toJunction.y },
-                toTerminal,
-              );
+              const rightBase = globalRight + 10;
+              const leftBase = globalLeft - 10;
+              const preferredBase = directionRight ? rightBase : leftBase;
+              const laneShift = (index - ((arranged.length - 1) / 2)) * 1.9;
+              const laneBase = preferredBase + laneShift;
+              const fromY = findSafeHorizontalY({
+                initialY: fromJunction.y,
+                x1: fromJunction.x,
+                x2: laneBase,
+                preferredDirection: fromEdge === 'top' ? 'up' : 'down',
+                excludeSlotIds,
+              });
+              const toY = findSafeHorizontalY({
+                initialY: toJunction.y,
+                x1: laneBase,
+                x2: toJunction.x,
+                preferredDirection: toEdge === 'top' ? 'up' : 'down',
+                excludeSlotIds,
+              });
+              const corridorX = findSafeVerticalX({
+                initialX: laneBase,
+                y1: fromY,
+                y2: toY,
+                preferredDirection: directionRight ? 'right' : 'left',
+                excludeSlotIds,
+              });
+              pushPoint(points, fromTerminal);
+              pushPoint(points, fromJunction);
+              if (Math.abs(fromY - fromJunction.y) > 0.5) {
+                pushPoint(points, { x: fromJunction.x, y: fromY });
+              }
+              pushPoint(points, { x: corridorX, y: fromY });
+              if (Math.abs(toY - fromY) > 0.5) {
+                pushPoint(points, { x: corridorX, y: toY });
+              }
+              pushPoint(points, { x: toJunction.x, y: toY });
+              if (Math.abs(toY - toJunction.y) > 0.5) {
+                pushPoint(points, { x: toJunction.x, y: toJunction.y });
+              }
+              pushPoint(points, toTerminal);
             }
             const d = points.map((point, idx) => `${idx === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
             const segments = buildSegments(points);
@@ -3325,9 +3470,9 @@ export default function ObjectSettingsTabRefactored() {
                     const linearColumnsTemplate = entranceLinearLayoutRows.map((row) => {
                       if (row._kind === 'transit') {
                         const lineCount = transitLaneDemandById.get(Number(row.id)) || 0;
-                        const extra = Math.min(Math.max(lineCount - 1, 0), 24) * 0.09;
-                        const minRem = (3.55 + extra).toFixed(2);
-                        const maxRem = (4.25 + (extra * 1.1)).toFixed(2);
+                        const extra = Math.min(Math.max(lineCount - 1, 0), 40) * 0.07;
+                        const minRem = (3.25 + extra).toFixed(2);
+                        const maxRem = (3.95 + (extra * 1.05)).toFixed(2);
                         return `minmax(${minRem}rem, ${maxRem}rem)`;
                       }
                       return 'minmax(3.25rem, 3.85rem)';
