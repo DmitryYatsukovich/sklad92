@@ -2345,14 +2345,12 @@ export default function ObjectSettingsTabRefactored() {
     const resolveSegmentHeight = (floorId) => {
       const measured = floorId ? Number(floorHeights[floorId] || 0) : 0;
       if (!Number.isFinite(measured) || measured <= 0) return null;
-      return Math.max(24, Math.round(measured));
+      return measured;
     };
 
     if (locationRow._kind === 'transit') {
       return (
-        <div className="space-y-1 rounded border border-cyan-300/20 bg-cyan-950/20 p-1">
-          <p className="text-[8px] text-cyan-100 uppercase tracking-wide">Секции транзита по этажам</p>
-          <div className="space-y-0">
+        <div className="space-y-0 rounded border border-cyan-300/20 bg-cyan-950/20 overflow-hidden">
             {spanFloors.map((floorRow, index) => {
               const floorId = Number.parseInt(floorRow?.id, 10);
               const isCollapsed = floorId ? collapsedFloorSet.has(floorId) : false;
@@ -2394,16 +2392,13 @@ export default function ObjectSettingsTabRefactored() {
                 </div>
               );
             })}
-          </div>
         </div>
       );
     }
 
     if (locationRow._kind === 'stairwell') {
       return (
-        <div className="space-y-1 rounded border border-emerald-300/20 bg-emerald-950/20 p-1">
-          <p className="text-[8px] text-emerald-100 uppercase tracking-wide">ЛК по этажам (этаж + межэтаж)</p>
-          <div className="space-y-0">
+        <div className="space-y-0 rounded border border-emerald-300/20 bg-emerald-950/20 overflow-hidden">
             {spanFloors.map((floorRow, index) => {
             const floorId = Number.parseInt(floorRow?.id, 10);
             const isCollapsed = floorId ? collapsedFloorSet.has(floorId) : false;
@@ -2456,7 +2451,6 @@ export default function ObjectSettingsTabRefactored() {
               </div>
             );
             })}
-          </div>
         </div>
       );
     }
