@@ -1849,9 +1849,9 @@ export default function ObjectSettingsTabRefactored() {
           name: '',
           lengthM: '',
         }));
-        setCablePickTarget('from');
+        setCablePickTarget('');
         setCableSelectedMaterial(null);
-        setNotice('Кабельная линия добавлена. Выберите следующую пару блоков.');
+        setNotice('Кабельная линия добавлена. Нажмите «От» или «До», чтобы выбрать следующую пару блоков.');
       } else {
         setActiveCableTransitId(null);
         resetCableDraft();
@@ -2040,7 +2040,7 @@ export default function ObjectSettingsTabRefactored() {
     const blockCount = (slotsByLocation.get(key) || []).length;
     const selectingMultiple = multiCopyLocationKey === key;
     const selectedCount = selectingMultiple ? multiCopySelectedSlotIds.length : 0;
-    const cableSelectionActive = Boolean(activeCableTransitId);
+    const cableSelectionActive = Boolean(activeCableTransitId && cablePickTarget);
     return (
       <div className="flex flex-wrap items-center gap-1">
         <button
@@ -2224,7 +2224,7 @@ export default function ObjectSettingsTabRefactored() {
             type="button"
             onClick={() => openCreateSlotModal(locationKind, locationId, title)}
             className="w-[2.45rem] h-[2.45rem] rounded-md border border-dashed border-white/20 bg-black/20 hover:bg-white/10 text-zinc-300 text-[6px] shadow-[0_3px_8px_rgba(0,0,0,0.18)]"
-            disabled={Boolean(activeCableTransitId)}
+            disabled={Boolean(activeCableTransitId && cablePickTarget)}
           >
             +Сист.
           </button>
@@ -2233,7 +2233,7 @@ export default function ObjectSettingsTabRefactored() {
               type="button"
               onClick={() => handlePasteSlotToLocation(locationKind, locationId, title)}
               className="w-[2.45rem] h-[2.45rem] rounded-md border border-dashed border-sky-400/40 bg-sky-900/20 hover:bg-sky-800/30 text-sky-100 text-[6px] shadow-[0_3px_8px_rgba(0,0,0,0.18)]"
-              disabled={!!pasteBusyKey || slotBusy || Boolean(activeCableTransitId)}
+              disabled={!!pasteBusyKey || slotBusy || Boolean(activeCableTransitId && cablePickTarget)}
               title={`Вставить блок: ${copiedSlotTemplate.systemName}`}
             >
               {isPastingHere ? '…' : 'Встав.'}
@@ -2250,7 +2250,7 @@ export default function ObjectSettingsTabRefactored() {
   };
 
   const buildCableSelectionOptions = (locationKind) => {
-    if (!activeCableTransit) return null;
+    if (!activeCableTransit || !cablePickTarget) return null;
     if (!['room', 'apartment'].includes(locationKind)) return null;
     return {
       selectionMode: true,
@@ -2539,7 +2539,7 @@ export default function ObjectSettingsTabRefactored() {
     const spanFloors = Array.isArray(locationRow?.spanFloors) ? locationRow.spanFloors : [];
     if (!spanFloors.length) return null;
     const canPasteSlot = Boolean(copiedSlotTemplate);
-    const actionsDisabled = !!pasteBusyKey || slotBusy || Boolean(activeCableTransitId);
+    const actionsDisabled = !!pasteBusyKey || slotBusy || Boolean(activeCableTransitId && cablePickTarget);
     const pasteTitle = copiedSlotTemplate ? `Вставить блок: ${copiedSlotTemplate.systemName}` : 'Вставить блок';
     const floorHeights = entranceFloorHeights[Number(entranceId)] || {};
     const resolveSegmentHeight = (floorId) => {
@@ -3343,7 +3343,7 @@ export default function ObjectSettingsTabRefactored() {
                                           type="button"
                                           onClick={() => handleCopyFloorBlocks(floor)}
                                           className="px-2 py-0.5 rounded border border-white/15 text-[10px] text-zinc-200 hover:bg-white/10"
-                                          disabled={!!pasteBusyKey || slotBusy || Boolean(activeCableTransitId)}
+                                          disabled={!!pasteBusyKey || slotBusy || Boolean(activeCableTransitId && cablePickTarget)}
                                         >
                                           Копировать этаж
                                         </button>
@@ -3352,7 +3352,7 @@ export default function ObjectSettingsTabRefactored() {
                                             type="button"
                                             onClick={() => handlePasteFloorBlocks(floor)}
                                             className="px-2 py-0.5 rounded border border-sky-400/40 text-[10px] text-sky-200 hover:bg-sky-900/30"
-                                            disabled={!!pasteBusyKey || slotBusy || Boolean(activeCableTransitId)}
+                                            disabled={!!pasteBusyKey || slotBusy || Boolean(activeCableTransitId && cablePickTarget)}
                                           >
                                             {pasteBusyKey === `floor:${floor.id}` ? 'Вставка…' : 'Вставить этаж'}
                                           </button>
@@ -3456,7 +3456,7 @@ export default function ObjectSettingsTabRefactored() {
                               {entranceOverlay?.paths?.length ? (
                                 <svg
                                   className="absolute left-0 top-0 z-20"
-                                  style={{ pointerEvents: activeCableTransitId ? 'none' : 'auto' }}
+                                  style={{ pointerEvents: 'none' }}
                                   width={entranceOverlay.width}
                                   height={entranceOverlay.height}
                                   viewBox={`0 0 ${entranceOverlay.width} ${entranceOverlay.height}`}
