@@ -482,6 +482,46 @@ export default function ObjectSettingsTabRefactored() {
     }
     return true;
   }, [selectedSystemIds, selectedCategoryIds, selectedApartmentScopes, selectedRoomNames, roomNameById]);
+  const slotMatchesLocationScope = useCallback((slot) => {
+    if (!slot) return false;
+    const apartmentsSelected = selectedApartmentScopes.includes('all');
+    const hasRoomFilters = selectedRoomNames.length > 0;
+    const hasLocationFilters = apartmentsSelected || hasRoomFilters;
+    if (!hasLocationFilters) return true;
+    if (slot.location_kind === 'apartment') return apartmentsSelected;
+    if (slot.location_kind === 'room') {
+      if (!hasRoomFilters) return false;
+      const roomNameKey = normalizeNameKey(roomNameById.get(slot.location_id));
+      return selectedRoomNames.includes(roomNameKey);
+    }
+    return false;
+  }, [selectedApartmentScopes, selectedRoomNames, roomNameById]);
+  const lineMatchesActiveFilters = useCallback((line) => {
+    if (!line) return false;
+    const lineSystemKey = line.system_id == null ? '' : String(line.system_id);
+    const lineCategoryKey = line.category_id == null ? '' : String(line.category_id);
+    if (selectedSystemIds.length && !selectedSystemIds.includes(lineSystemKey)) return false;
+    if (selectedCategoryIds.length && !selectedCategoryIds.includes(lineCategoryKey)) return false;
+    const apartmentsSelected = selectedApartmentScopes.includes('all');
+    const hasRoomFilters = selectedRoomNames.length > 0;
+    const hasLocationFilters = apartmentsSelected || hasRoomFilters;
+    if (!hasLocationFilters) return true;
+    const resolveSlot = (slotIdRaw) => (
+      slotById.get(slotIdRaw)
+      || slotById.get(Number.parseInt(slotIdRaw, 10))
+      || null
+    );
+    const fromSlot = resolveSlot(line.from_location_system_id);
+    const toSlot = resolveSlot(line.to_location_system_id);
+    return slotMatchesLocationScope(fromSlot) || slotMatchesLocationScope(toSlot);
+  }, [
+    selectedSystemIds,
+    selectedCategoryIds,
+    selectedApartmentScopes,
+    selectedRoomNames,
+    slotById,
+    slotMatchesLocationScope,
+  ]);
 
   const slotsByLocation = useMemo(() => {
     const map = new Map();
@@ -578,12 +618,13 @@ export default function ObjectSettingsTabRefactored() {
   const transitLaneDemandById = useMemo(() => {
     const map = new Map();
     data.transitCableLines.forEach((line) => {
+      if (!lineMatchesActiveFilters(line)) return;
       const transitId = Number.parseInt(line.transit_id, 10);
       if (!transitId) return;
       map.set(transitId, (map.get(transitId) || 0) + 1);
     });
     return map;
-  }, [data.transitCableLines]);
+  }, [data.transitCableLines, lineMatchesActiveFilters]);
   const cableEndpointSlotIdSet = useMemo(() => {
     const set = new Set();
     data.transitCableLines.forEach((line) => {
@@ -814,31 +855,16 @@ export default function ObjectSettingsTabRefactored() {
       });
     });
 
-    const apartmentsSelected = selectedApartmentScopes.includes('all');
-    const hasRoomFilters = selectedRoomNames.length > 0;
-    const hasLocationFilters = apartmentsSelected || hasRoomFilters;
-    const slotMatchesLocationScope = (slot) => {
-      if (!slot) return false;
-      if (!hasLocationFilters) return true;
-      if (slot.location_kind === 'apartment') return apartmentsSelected;
-      if (slot.location_kind === 'room') {
-        if (!hasRoomFilters) return false;
-        const roomNameKey = normalizeNameKey(roomNameById.get(slot.location_id));
-        return selectedRoomNames.includes(roomNameKey);
-      }
-      return false;
-    };
-
     data.transitCableLines.forEach((line) => {
-      const fromSlot = slotById.get(line.from_location_system_id) || null;
-      const toSlot = slotById.get(line.to_location_system_id) || null;
+      const resolveSlot = (slotIdRaw) => (
+        slotById.get(slotIdRaw)
+        || slotById.get(Number.parseInt(slotIdRaw, 10))
+        || null
+      );
+      const fromSlot = resolveSlot(line.from_location_system_id);
+      const toSlot = resolveSlot(line.to_location_system_id);
       if (!fromSlot || !toSlot) return;
-
-      const lineSystemKey = line.system_id == null ? '' : String(line.system_id);
-      const lineCategoryKey = line.category_id == null ? '' : String(line.category_id);
-      if (selectedSystemIds.length && !selectedSystemIds.includes(lineSystemKey)) return;
-      if (selectedCategoryIds.length && !selectedCategoryIds.includes(lineCategoryKey)) return;
-      if (hasLocationFilters && !slotMatchesLocationScope(fromSlot) && !slotMatchesLocationScope(toSlot)) return;
+      if (!lineMatchesActiveFilters(line)) return;
 
       const transitObjectId = line.transit_id ? transitById.get(Number(line.transit_id))?.object_id : null;
       const objectId = transitObjectId || getSlotObjectId(fromSlot) || getSlotObjectId(toSlot);
@@ -890,11 +916,7 @@ export default function ObjectSettingsTabRefactored() {
     transitById,
     stairwellById,
     slotMatchesFilters,
-    selectedSystemIds,
-    selectedCategoryIds,
-    selectedApartmentScopes,
-    selectedRoomNames,
-    roomNameById,
+    lineMatchesActiveFilters,
   ]);
 
   const knownManualEntries = useMemo(() => {
@@ -2367,32 +2389,38 @@ export default function ObjectSettingsTabRefactored() {
   }, []);
 
   const overlayCableLines = useMemo(() => {
-    const base = (data.transitCableLines || []).map((line) => ({
+    const base = (data.transitCableLines || [])
+      .filter(lineMatchesActiveFilters)
+      .map((line) => ({
       ...line,
       __overlay_preview: false,
-    }));
+      }));
     const fromId = Number.parseInt(cableDraft.fromSlotId, 10);
     const toId = Number.parseInt(cableDraft.toSlotId, 10);
     const routeMode = cableDraft.routeMode === 'direct' ? 'direct' : 'transit';
     const selectedTransitId = Number.parseInt(cableDraft.transitId || activeCableTransitId, 10) || null;
     const transitId = routeMode === 'transit' ? selectedTransitId : null;
     if (fromId && toId && (routeMode === 'direct' || transitId)) {
-      base.push({
+      const previewLine = {
         id: `draft-${routeMode}-${transitId || 'none'}-${fromId}-${toId}`,
         route_mode: routeMode,
         transit_id: transitId,
         from_location_system_id: fromId,
         to_location_system_id: toId,
         system_id: Number.parseInt(cableDraft.systemId, 10) || null,
+        category_id: cableDraft.categoryId === '' ? null : (Number.parseInt(cableDraft.categoryId, 10) || null),
         __overlay_preview: true,
-      });
+      };
+      if (lineMatchesActiveFilters(previewLine)) base.push(previewLine);
     }
     return base;
   }, [
     data.transitCableLines,
+    lineMatchesActiveFilters,
     cableDraft.fromSlotId,
     cableDraft.toSlotId,
     cableDraft.systemId,
+    cableDraft.categoryId,
     cableDraft.routeMode,
     cableDraft.transitId,
     activeCableTransitId,
@@ -3435,9 +3463,10 @@ export default function ObjectSettingsTabRefactored() {
 
   const renderTransitCablePanel = (transitRow) => {
     const transitId = transitRow.id;
-    const transitLines = transitCableLinesByTransit.get(transitId) || [];
+    const transitLines = (transitCableLinesByTransit.get(transitId) || []).filter(lineMatchesActiveFilters);
     const directLines = (data.transitCableLines || []).filter((line) => {
       if (line.transit_id != null) return false;
+      if (!lineMatchesActiveFilters(line)) return false;
       const fromPlacement = slotPlacementById.get(Number(line.from_location_system_id));
       if (!fromPlacement?.location) return false;
       return Number(fromPlacement.location.entrance_id || 0) === Number(transitRow.entrance_id || 0);
@@ -4056,9 +4085,10 @@ export default function ObjectSettingsTabRefactored() {
                       .filter((row) => {
                         if (!hasSlotFilters || activeCableTransitId) return true;
                         if (row._kind === 'transit') {
-                          const hasTransitLines = (transitCableLinesByTransit.get(row.id) || []).length > 0;
+                          const hasTransitLines = (transitCableLinesByTransit.get(row.id) || []).some(lineMatchesActiveFilters);
                           const hasDirectEntranceLines = (data.transitCableLines || []).some((line) => {
                             if (line.transit_id != null) return false;
+                            if (!lineMatchesActiveFilters(line)) return false;
                             const fromPlacement = slotPlacementById.get(Number(line.from_location_system_id));
                             if (!fromPlacement?.location) return false;
                             return Number(fromPlacement.location.entrance_id || 0) === Number(row.entrance_id || 0);
@@ -4100,9 +4130,10 @@ export default function ObjectSettingsTabRefactored() {
                                   const locationRange = `Этаж ${locationRow.from_floor_name}–${locationRow.to_floor_name}`;
                                   const squares = renderSystemSquares(locationRow._kind, locationRow.id, locationTitle);
                                   const hasTransitCableLines = locationRow._kind === 'transit' && (() => {
-                                    const hasTransitLines = (transitCableLinesByTransit.get(locationRow.id) || []).length > 0;
+                                    const hasTransitLines = (transitCableLinesByTransit.get(locationRow.id) || []).some(lineMatchesActiveFilters);
                                     const hasDirectEntranceLines = (data.transitCableLines || []).some((line) => {
                                       if (line.transit_id != null) return false;
+                                      if (!lineMatchesActiveFilters(line)) return false;
                                       const fromPlacement = slotPlacementById.get(Number(line.from_location_system_id));
                                       if (!fromPlacement?.location) return false;
                                       return Number(fromPlacement.location.entrance_id || 0) === Number(locationRow.entrance_id || 0);
