@@ -3,6 +3,7 @@ import pool from '../db/pool.js';
 import { requireAuth, loadUser, requirePermission, requireAnyPermission, requireAdmin } from '../middleware/auth.js';
 import { logQuantityChange } from '../lib/material-quantity-log.js';
 import { buildExportXlsx, buildExportPdf } from '../lib/issuance-export.js';
+import { hasAdminPermissionBypass } from '../lib/admin-bypass.js';
 
 const router = Router();
 
@@ -320,7 +321,7 @@ router.post('/transfer', requirePermission('can_issuance'), async (req, res) => 
       return res.status(404).json({ error: 'Выдача не найдена' });
     }
     if (
-      req.user?.role !== 'admin'
+      !hasAdminPermissionBypass(req.user)
       && !req.user?.can_issuance_all
       && Number(iss.issued_to_user_id) !== Number(req.user?.id)
     ) {
@@ -647,10 +648,10 @@ router.delete('/issuances/all', requirePermission('can_issuance'), requireAdmin,
 
 // Список выдач (для вкладки выдачи и возвратов)
 router.get('/issuances', requirePermission('can_issuance'), async (req, res) => {
-  const canViewAllByIssued = req.user?.role === 'admin'
+  const canViewAllByIssued = hasAdminPermissionBypass(req.user)
     || !!req.user?.can_issuance_all
     || !!req.user?.can_issuance_all_issued;
-  const canViewAllByReceived = req.user?.role === 'admin'
+  const canViewAllByReceived = hasAdminPermissionBypass(req.user)
     || !!req.user?.can_issuance_all
     || !!req.user?.can_issuance_all_received;
   const viewerUserId = Number(req.user?.id || req.session?.userId || 0);
@@ -702,7 +703,7 @@ router.get('/issuances/:id/production-distribution', requirePermission('can_issu
   )).rows[0];
   if (!issuance) return res.status(404).json({ error: 'Выдача не найдена' });
   if (
-    req.user?.role !== 'admin'
+    !hasAdminPermissionBypass(req.user)
     && !req.user?.can_issuance_all
     && Number(issuance.issued_to_user_id) !== Number(req.user?.id)
   ) {
@@ -792,7 +793,7 @@ router.post('/issuances/:id/production-distribution', requirePermission('can_iss
     }
 
     if (
-      req.user?.role !== 'admin'
+      !hasAdminPermissionBypass(req.user)
       && !req.user?.can_issuance_all
       && Number(issuance.issued_to_user_id) !== Number(req.user?.id)
     ) {
@@ -1104,7 +1105,7 @@ router.delete('/issuances/:id/production-distribution', requirePermission('can_i
       return res.status(404).json({ error: 'Выдача не найдена' });
     }
     if (
-      req.user?.role !== 'admin'
+      !hasAdminPermissionBypass(req.user)
       && !req.user?.can_issuance_all
       && Number(issuance.issued_to_user_id) !== Number(req.user?.id)
     ) {

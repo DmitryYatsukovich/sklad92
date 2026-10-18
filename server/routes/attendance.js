@@ -43,6 +43,7 @@ import {
 } from '../lib/timesheet-data.js';
 import { buildTimesheetWorkbook, parseTimesheetImport } from '../lib/timesheet-excel.js';
 import { applyTimesheetImport } from '../lib/timesheet-import.js';
+import { hasAdminPermissionBypass } from '../lib/admin-bypass.js';
 
 const router = Router();
 
@@ -307,11 +308,11 @@ router.post('/register-face', async (req, res) => {
   let targetId = req.session.userId;
   const requestedId = req.body?.user_id != null ? parseInt(req.body.user_id, 10) : null;
   if (requestedId && requestedId !== req.session.userId) {
-    if (req.user.role !== 'admin' && !req.user.can_users) {
+    if (!hasAdminPermissionBypass(req.user) && !req.user.can_users) {
       return res.status(403).json({ error: 'Нет прав на запись лица другого пользователя' });
     }
     targetId = requestedId;
-  } else if (req.user.role !== 'admin' && !req.user.can_face) {
+  } else if (!hasAdminPermissionBypass(req.user) && !req.user.can_face) {
     return res.status(403).json({ error: 'Нет доступа к отметке' });
   }
   const exists = (await pool.query('SELECT id FROM users WHERE id = $1', [targetId])).rows[0];
@@ -346,8 +347,8 @@ router.post('/scan', requirePermission('can_face'), async (req, res) => {
     return res.status(400).json({ error: 'Передайте descriptor (128 чисел) или descriptors (массив векторов)' });
   }
   const currentUserId = Number(req.session.userId || req.user.id || 0) || null;
-  const canMarkAll = req.user.role === 'admin' || (!!req.user.can_face_all && !req.user.can_face_same_org);
-  const canMarkSameOrg = req.user.role !== 'admin' && !!req.user.can_face_all && !!req.user.can_face_same_org;
+  const canMarkAll = hasAdminPermissionBypass(req.user) || (!!req.user.can_face_all && !req.user.can_face_same_org);
+  const canMarkSameOrg = !hasAdminPermissionBypass(req.user) && !!req.user.can_face_all && !!req.user.can_face_same_org;
   let faceScope = 'self';
   if (canMarkAll) faceScope = 'all';
   else if (canMarkSameOrg) faceScope = 'same_org';
@@ -471,7 +472,7 @@ router.post('/scan', requirePermission('can_face'), async (req, res) => {
 /** Мои посещения; у администратора — последние отметки всех сотрудников */
 router.get('/my', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 60, 200);
-  if (req.user.role === 'admin') {
+  if (hasAdminPermissionBypass(req.user)) {
     const r = await pool.query(
       `SELECT a.id, a.user_id, a.visit_date, a.check_in_at, a.check_out_at,
               u.login, u.display_name, u.first_name, u.last_name

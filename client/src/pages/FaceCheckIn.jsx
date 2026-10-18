@@ -3,6 +3,7 @@ import { attendance as attendanceApi, isOfflineQueuedError } from '../api';
 import { recordAction } from '../lib/actionLog';
 import { loadFaceModels, captureFaceDescriptor, warmupFacePipeline } from '../lib/faceClient';
 import FaceCamera from '../components/FaceCamera';
+import { hasAdminPermissionBypass } from '../lib/adminAccess.js';
 
 const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 const TZ_MSK = 'Europe/Moscow';
@@ -70,7 +71,7 @@ function formatWorkedDuration(checkIn, checkOut) {
 }
 
 export default function FaceCheckIn({ user }) {
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = hasAdminPermissionBypass(user);
   const [videoEl, setVideoEl] = useState(null);
   const [modelsState, setModelsState] = useState('loading'); // loading | ready | error
   const [busy, setBusy] = useState(false);

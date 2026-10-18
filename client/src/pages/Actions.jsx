@@ -10,6 +10,7 @@ import ListPagination from '../components/ListPagination';
 import { useListPagination } from '../hooks/useListPagination';
 import { peekPageCache, setPageCache } from '../lib/pageCache';
 import { withPendingRowClass } from '../lib/actionLog/applyOptimistic';
+import { hasAdminPermissionBypass } from '../lib/adminAccess.js';
 
 function formatWhen(iso) {
   if (!iso) return '—';
@@ -80,7 +81,7 @@ function isConflictRow(row) {
 }
 
 function canViewAllActions(user) {
-  return user?.role === 'admin' || !!user?.can_actions_all;
+  return hasAdminPermissionBypass(user) || !!user?.can_actions_all;
 }
 
 export default function Actions({ user }) {

@@ -42,6 +42,7 @@ import { useReloadOnSyncComplete } from '../hooks/useReloadOnSyncComplete';
 import { applyPendingToMaterials, withPendingRowClass } from '../lib/actionLog/applyOptimistic';
 import { peekPageCache, setPageCache, hydrateFromCaches } from '../lib/pageCache';
 import { isQuickDeviceEnabled } from '../lib/offlineCache';
+import { hasAdminPermissionBypass } from '../lib/adminAccess.js';
 
 function createEmptyFilters() {
   return {
@@ -220,7 +221,7 @@ export default function Warehouse({ user }) {
   const expandedGroupIdsRef = useRef(expandedGroupIds);
   const fileInputRef = useRef(null);
   const pendingMutations = usePendingMutations();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = hasAdminPermissionBypass(user);
   const canWarehouseView = isAdmin || !!user?.can_warehouse_view;
   const canWarehouseEdit = isAdmin || !!user?.can_warehouse_edit;
   const canWarehouseQrScan = isAdmin || !!user?.can_warehouse_qr_scan;
@@ -702,7 +703,7 @@ export default function Warehouse({ user }) {
 
   const handleDeleteMaterial = async () => {
     if (!canWarehouseEdit) return;
-    if (!editing || user?.role !== 'admin') return;
+    if (!editing || !isAdmin) return;
     const isPart = isMaterialPart(editing);
     const msg = isPart
       ? `Удалить часть «${editing.part_label || `Часть ${editing.part_index}`}»?`
@@ -2491,7 +2492,7 @@ export default function Warehouse({ user }) {
                 </div>
               )}
               <div className="flex gap-2 justify-end flex-wrap">
-                {editing && user?.role === 'admin' && (
+                {editing && isAdmin && (
                   <button
                     type="button"
                     onClick={handleDeleteMaterial}

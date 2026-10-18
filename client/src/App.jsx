@@ -543,9 +543,9 @@ export default function App() {
           }
         })
         .catch(() => {});
-    }, getAdaptivePollInterval(60000, {
-      mobileMs: 120000,
-      lowPowerMs: 180000,
+    }, getAdaptivePollInterval(10000, {
+      mobileMs: 15000,
+      lowPowerMs: 20000,
     }));
     return () => clearInterval(t);
   }, [user?.id]);

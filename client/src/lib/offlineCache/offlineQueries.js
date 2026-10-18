@@ -1,4 +1,5 @@
 import { getOfflineDataset, setOfflineDataset } from './datasets.js';
+import { hasAdminPermissionBypass } from '../adminAccess.js';
 
 function toNum(v) {
   const n = Number(v);
@@ -88,7 +89,7 @@ function normalizeProductionRows(rows) {
 }
 
 function filterProductionRows(rows, currentUser, from, to) {
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdmin = hasAdminPermissionBypass(currentUser);
   const currentUserId = Number(currentUser?.id || 0);
   return rows.filter((row) => {
     if (!inDateRange(row.issued_at, from, to)) return false;

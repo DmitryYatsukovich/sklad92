@@ -347,6 +347,6 @@ export const ROLE_COLUMNS = PERMISSION_KEYS.join(', ');
 
 export function userHasAnyPermission(user, keys) {
   if (!user) return false;
-  if (user.role === 'admin') return true;
+  if (user.admin_permission_bypass || user.role === 'admin') return true;
   return keys.some((k) => user[k]);
 }

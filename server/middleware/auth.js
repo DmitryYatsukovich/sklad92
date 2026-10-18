@@ -1,6 +1,7 @@
 import pool from '../db/pool.js';
 import { PERMISSIONS_SELECT } from '../lib/permissions-sql.js';
 import { userAccessBlockReason } from '../lib/user-access.js';
+import { ADMIN_PERMISSION_BYPASS_SQL, hasAdminPermissionBypass } from '../lib/admin-bypass.js';
 
 const WAREHOUSE_GRANULAR_KEYS = [
   'can_warehouse_view',
@@ -12,7 +13,7 @@ const WAREHOUSE_GRANULAR_KEYS = [
 ];
 
 function applyLegacyWarehousePermissions(user) {
-  if (!user || user.role === 'admin') return user;
+  if (!user || hasAdminPermissionBypass(user)) return user;
   if (!user.can_warehouse) return user;
   if (user.warehouse_permissions_customized) return user;
   const hasGranularWarehouseAccess = WAREHOUSE_GRANULAR_KEYS.some((key) => !!user[key]);
@@ -40,8 +41,9 @@ export async function loadUser(req, res, next) {
             COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')) AS organization_name,
             COALESCE(u.profile_active, true) AS profile_active,
             COALESCE(u.employment_status, 'working') AS employment_status,
+            ${ADMIN_PERMISSION_BYPASS_SQL} AS admin_permission_bypass,
             CASE
-              WHEN u.role = 'admin' THEN true
+              WHEN ${ADMIN_PERMISSION_BYPASS_SQL} THEN true
               WHEN u.role_id IS NOT NULL THEN COALESCE(r.warehouse_permissions_customized, false)
               ELSE COALESCE(p.warehouse_permissions_customized, false)
             END AS warehouse_permissions_customized,
@@ -76,7 +78,7 @@ export async function loadUser(req, res, next) {
 export function requirePermission(permission) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'Требуется авторизация' });
-    if (req.user.role === 'admin') return next();
+    if (hasAdminPermissionBypass(req.user)) return next();
     if (req.user[permission]) return next();
     return res.status(403).json({ error: 'Нет доступа' });
   };
@@ -85,7 +87,7 @@ export function requirePermission(permission) {
 export function requireAnyPermission(...permissions) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'Требуется авторизация' });
-    if (req.user.role === 'admin') return next();
+    if (hasAdminPermissionBypass(req.user)) return next();
     if (permissions.some((p) => req.user[p])) return next();
     return res.status(403).json({ error: 'Нет доступа' });
   };
@@ -93,6 +95,6 @@ export function requireAnyPermission(...permissions) {
 
 export function requireAdmin(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Требуется авторизация' });
-  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Только администратор' });
+  if (!hasAdminPermissionBypass(req.user)) return res.status(403).json({ error: 'Только администратор' });
   next();
 }

@@ -1,11 +1,13 @@
+import { hasAdminPermissionBypass } from './admin-bypass.js';
+
 /** Табель всех сотрудников (иначе — только своя строка) */
 export function canAttendanceViewAll(user) {
-  return user?.role === 'admin' || !!user?.can_attendance_all;
+  return hasAdminPermissionBypass(user) || !!user?.can_attendance_all;
 }
 
 /** Ограничение табеля сотрудниками своей организации */
 export function canAttendanceScopeToOwnOrganization(user) {
-  return user?.role !== 'admin' && !!user?.can_attendance_same_org && canAttendanceViewAll(user);
+  return !hasAdminPermissionBypass(user) && !!user?.can_attendance_same_org && canAttendanceViewAll(user);
 }
 
 export function canAttendanceManageAll(user) {
@@ -14,7 +16,7 @@ export function canAttendanceManageAll(user) {
 
 /** Редактирование ячеек табеля */
 export function canAttendanceEditTimesheet(user) {
-  return user?.role === 'admin' || !!user?.can_attendance_edit;
+  return hasAdminPermissionBypass(user) || !!user?.can_attendance_edit;
 }
 
 export function requireAttendanceEdit(req, res, next) {
@@ -25,12 +27,12 @@ export function requireAttendanceEdit(req, res, next) {
 
 /** Столбцы ставок, заработка и премий в табеле */
 export function canAttendanceShowPay(user) {
-  return user?.role === 'admin' || !!user?.can_attendance_pay;
+  return hasAdminPermissionBypass(user) || !!user?.can_attendance_pay;
 }
 
 /** Изменение ставки и ставки премии */
 export function canAttendanceEditRates(user) {
-  return user?.role === 'admin' || !!user?.can_attendance_edit_rates;
+  return hasAdminPermissionBypass(user) || !!user?.can_attendance_edit_rates;
 }
 
 export function requireAttendanceEditRates(req, res, next) {
@@ -40,20 +42,20 @@ export function requireAttendanceEditRates(req, res, next) {
 }
 
 export function canAttendanceAddMember(user) {
-  return user?.role === 'admin' || (!!user?.can_attendance_add_member && canAttendanceViewAll(user));
+  return hasAdminPermissionBypass(user) || (!!user?.can_attendance_add_member && canAttendanceViewAll(user));
 }
 
 export function canAttendanceExport(user) {
-  return user?.role === 'admin' || !!user?.can_attendance_export;
+  return hasAdminPermissionBypass(user) || !!user?.can_attendance_export;
 }
 
 export function canAttendanceImport(user) {
-  return user?.role === 'admin' || (!!user?.can_attendance_import && canAttendanceViewAll(user));
+  return hasAdminPermissionBypass(user) || (!!user?.can_attendance_import && canAttendanceViewAll(user));
 }
 
 /** Переключение месяца в табеле */
 export function canAttendanceChangeMonth(user) {
-  return user?.role === 'admin' || !!user?.can_attendance_change_month;
+  return hasAdminPermissionBypass(user) || !!user?.can_attendance_change_month;
 }
 
 const TZ_MSK = 'Europe/Moscow';

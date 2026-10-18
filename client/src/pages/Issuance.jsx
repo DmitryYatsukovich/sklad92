@@ -12,6 +12,7 @@ import { applyPendingToIssuances, applyPendingToMaterials, withPendingRowClass }
 import { clearPendingMutationsForDeleteAll, waitForActionLogIdle } from '../lib/actionLog';
 import { peekPageCache, setPageCache } from '../lib/pageCache';
 import { isQuickDeviceEnabled } from '../lib/offlineCache';
+import { hasAdminPermissionBypass } from '../lib/adminAccess.js';
 
 const EMPTY_FILTERS = {
   date_from: '',
@@ -312,11 +313,12 @@ export default function Issuance({ user }) {
     [issuances, pendingMutations, materials, issueUsers, user],
   );
 
-  const canViewAllIssuances = user?.role === 'admin' || !!user?.can_issuance_all;
-  const canViewAllIssued = user?.role === 'admin'
+  const isAdminBypass = hasAdminPermissionBypass(user);
+  const canViewAllIssuances = isAdminBypass || !!user?.can_issuance_all;
+  const canViewAllIssued = isAdminBypass
     || !!user?.can_issuance_all
     || !!user?.can_issuance_all_issued;
-  const canViewAllReceived = user?.role === 'admin'
+  const canViewAllReceived = isAdminBypass
     || !!user?.can_issuance_all
     || !!user?.can_issuance_all_received;
   const scopedIssuances = useMemo(() => {
@@ -591,7 +593,7 @@ export default function Issuance({ user }) {
   };
 
   const handleDeleteIssuance = async () => {
-    if (!returnRow || user?.role !== 'admin') return;
+    if (!returnRow || !isAdminBypass) return;
     if (!window.confirm('Удалить эту выдачу? Невозвращённое количество вернётся на склад.')) return;
     setSubmitting(true);
     setError('');
@@ -611,7 +613,7 @@ export default function Issuance({ user }) {
   };
 
   const handleDeleteAllIssuances = async () => {
-    if (user?.role !== 'admin') return;
+    if (!isAdminBypass) return;
     if (!mergedIssuances.length) {
       setError('Выдач для удаления нет');
       return;
@@ -737,7 +739,7 @@ export default function Issuance({ user }) {
           <button type="button" onClick={() => load()} className="btn-ghost text-2xs">
             Обновить
           </button>
-          {user?.role === 'admin' && (
+          {isAdminBypass && (
             <button
               type="button"
               onClick={handleDeleteAllIssuances}
@@ -1028,7 +1030,7 @@ export default function Issuance({ user }) {
                 </p>
               </div>
               <div className="flex gap-2 justify-end flex-wrap">
-                {user?.role === 'admin' && (
+                {isAdminBypass && (
                   <button
                     type="button"
                     onClick={handleDeleteIssuance}

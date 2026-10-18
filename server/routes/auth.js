@@ -5,6 +5,7 @@ import { loadUser } from '../middleware/auth.js';
 import { PERMISSIONS_SELECT } from '../lib/permissions-sql.js';
 import { PERMISSION_KEYS } from '../lib/app-permissions.js';
 import { userAccessBlockReason } from '../lib/user-access.js';
+import { ADMIN_PERMISSION_BYPASS_SQL } from '../lib/admin-bypass.js';
 
 const router = Router();
 const ACCESS_PERMISSION_KEYS = PERMISSION_KEYS.filter((k) => k !== 'can_offline_mode');
@@ -19,6 +20,7 @@ function userPayload(base, perms = {}) {
     login: base.login,
     display_name: base.display_name,
     role: base.role,
+    admin_permission_bypass: !!(perms.admin_permission_bypass ?? base.admin_permission_bypass),
     ...Object.fromEntries(PERMISSION_KEYS.map((k) => [k, !!effectivePerms[k]])),
   };
 }
@@ -45,7 +47,7 @@ router.post('/login', async (req, res) => {
     return res.status(403).json({ error: accessBlock });
   }
   const perm = await pool.query(
-    `SELECT ${PERMISSIONS_SELECT}
+    `SELECT ${ADMIN_PERMISSION_BYPASS_SQL} AS admin_permission_bypass, ${PERMISSIONS_SELECT}
      FROM users u
      LEFT JOIN user_permissions p ON p.user_id = u.id
      LEFT JOIN roles r ON r.id = u.role_id
@@ -54,7 +56,7 @@ router.post('/login', async (req, res) => {
   );
   const p = perm.rows[0] || {};
   const hasAnyAccess =
-    user.role === 'admin' || ACCESS_PERMISSION_KEYS.some((k) => p[k]);
+    !!p.admin_permission_bypass || ACCESS_PERMISSION_KEYS.some((k) => p[k]);
   if (!hasAnyAccess) {
     return res.status(403).json({
       error: 'Нет назначенных прав доступа. Обратитесь к администратору.',

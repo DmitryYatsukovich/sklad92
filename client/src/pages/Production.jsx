@@ -14,6 +14,7 @@ import { formatWorkLocationFromSelection } from '../lib/workLocationLabel';
 import { materials as materialsApi } from '../api';
 import { peekPageCache, setPageCache } from '../lib/pageCache';
 import { isQuickDeviceEnabled } from '../lib/offlineCache';
+import { hasAdminPermissionBypass } from '../lib/adminAccess.js';
 
 const EMPTY_FILTERS = {
   date_from: '',
@@ -187,7 +188,7 @@ function ThWithSum({ label, column, sortBy, sortDir, onSort, sum, align = 'right
 }
 
 export default function Production({ user }) {
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = hasAdminPermissionBypass(user);
   const today = formatDateInput(new Date());
   const firstDay = formatDateInput(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
 

@@ -4,6 +4,7 @@ import { tools as toolsApi } from '../api';
 import QrScanner from '../components/QrScanner';
 import { useAutoRefreshOnVisible } from '../hooks/useAutoRefreshOnVisible';
 import { buildIosPrintPayload, canUseIosPrintBridge, openIosPrintBridge } from '../lib/iosPrintBridge';
+import { hasAdminPermissionBypass } from '../lib/adminAccess.js';
 
 function parseId(value) {
   const id = Number.parseInt(value, 10);
@@ -337,7 +338,7 @@ export default function Tools({ user }) {
   const [qrPreviewTool, setQrPreviewTool] = useState(null);
   const [qrPrintError, setQrPrintError] = useState('');
   const qrPreviewRef = useRef(null);
-  const canDeleteTools = !!(user?.role === 'admin' || user?.can_tools_delete);
+  const canDeleteTools = !!(hasAdminPermissionBypass(user) || user?.can_tools_delete);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);

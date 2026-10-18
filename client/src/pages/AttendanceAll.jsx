@@ -5,6 +5,7 @@ import { useAutoRefreshOnVisible } from '../hooks/useAutoRefreshOnVisible';
 import { withPendingRowClass } from '../lib/actionLog/applyOptimistic';
 import { peekPageCache, setPageCache, hydrateFromCaches } from '../lib/pageCache';
 import { isQuickDeviceEnabled } from '../lib/offlineCache';
+import { hasAdminPermissionBypass } from '../lib/adminAccess.js';
 
 const WEEKDAYS = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
 const TZ_MSK = 'Europe/Moscow';
@@ -1255,15 +1256,16 @@ function recalcEmployeeTotals(emp) {
 }
 
 export default function AttendanceAll({ user }) {
-  const canViewAll = user?.role === 'admin' || !!user?.can_attendance_all;
-  const ownOrganizationScope = canViewAll && user?.role !== 'admin' && !!user?.can_attendance_same_org;
-  const showPayColumns = user?.role === 'admin' || !!user?.can_attendance_pay;
-  const canEditTimes = user?.role === 'admin' || !!user?.can_attendance_edit;
-  const canEditRates = user?.role === 'admin' || !!user?.can_attendance_edit_rates;
-  const canAddMember = canViewAll && (user?.role === 'admin' || !!user?.can_attendance_add_member);
-  const canExportTimesheet = user?.role === 'admin' || !!user?.can_attendance_export;
-  const canImportTimesheet = canViewAll && (user?.role === 'admin' || !!user?.can_attendance_import);
-  const canChangeMonth = user?.role === 'admin' || !!user?.can_attendance_change_month;
+  const isAdminBypass = hasAdminPermissionBypass(user);
+  const canViewAll = isAdminBypass || !!user?.can_attendance_all;
+  const ownOrganizationScope = canViewAll && !isAdminBypass && !!user?.can_attendance_same_org;
+  const showPayColumns = isAdminBypass || !!user?.can_attendance_pay;
+  const canEditTimes = isAdminBypass || !!user?.can_attendance_edit;
+  const canEditRates = isAdminBypass || !!user?.can_attendance_edit_rates;
+  const canAddMember = canViewAll && (isAdminBypass || !!user?.can_attendance_add_member);
+  const canExportTimesheet = isAdminBypass || !!user?.can_attendance_export;
+  const canImportTimesheet = canViewAll && (isAdminBypass || !!user?.can_attendance_import);
+  const canChangeMonth = isAdminBypass || !!user?.can_attendance_change_month;
   const [month, setMonth] = useState(currentMonthValue);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);

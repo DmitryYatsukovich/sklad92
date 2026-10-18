@@ -6,6 +6,7 @@ import {
   FACE_MODEL_CACHE_NAME,
   FACE_MODEL_FILES,
 } from '../faceModelFiles.js';
+import { hasAdminPermissionBypass } from '../adminAccess.js';
 
 function monthBounds() {
   const d = new Date();
@@ -48,10 +49,11 @@ async function prefetchFaceModelsToCache() {
 export async function prefetchOfflineData(user, { onProgress } = {}) {
   if (!user?.id) return { ok: false };
   const uid = user.id;
+  const isAdminBypass = hasAdminPermissionBypass(user);
   const report = (msg) => onProgress?.(msg);
   const counts = {};
   const canReadSettingsCatalog = !!(
-    user.role === 'admin'
+    isAdminBypass
     || user.can_warehouse
     || user.can_settings_warehouses
     || user.can_settings_categories
@@ -202,7 +204,7 @@ export async function prefetchOfflineData(user, { onProgress } = {}) {
       await save('/api/tools/meta', toolsMeta, uid);
     }
 
-    if (user.can_users || user.role === 'admin') {
+    if (user.can_users || isAdminBypass) {
       report('Пользователи…');
       const usersList = await users.list();
       counts.users = Array.isArray(usersList) ? usersList.length : 0;
@@ -218,7 +220,7 @@ export async function prefetchOfflineData(user, { onProgress } = {}) {
       await save('/api/settings/organizations', orgs, uid);
     }
 
-    if (user.can_roles || user.role === 'admin') {
+    if (user.can_roles || isAdminBypass) {
       report('Роли…');
       const [rolesList, perms] = await Promise.all([
         roles.list(),

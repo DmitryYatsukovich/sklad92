@@ -5,6 +5,7 @@ import {
   getPushPublicKey,
   upsertPushSubscription,
 } from '../lib/push-notifications.js';
+import { hasAdminPermissionBypass } from '../lib/admin-bypass.js';
 
 const router = Router();
 
@@ -12,7 +13,7 @@ router.use(requireAuth);
 router.use(loadUser);
 
 router.get('/push-public-key', (req, res) => {
-  if (!req.user?.can_task_notifications && req.user?.role !== 'admin') {
+  if (!req.user?.can_task_notifications && !hasAdminPermissionBypass(req.user)) {
     return res.status(403).json({ error: 'Нет доступа' });
   }
   const publicKey = getPushPublicKey();
@@ -23,7 +24,7 @@ router.get('/push-public-key', (req, res) => {
 });
 
 router.post('/push-subscription', async (req, res) => {
-  if (!req.user?.can_task_notifications && req.user?.role !== 'admin') {
+  if (!req.user?.can_task_notifications && !hasAdminPermissionBypass(req.user)) {
     return res.status(403).json({ error: 'Нет доступа' });
   }
   const subscription = req.body?.subscription || req.body;

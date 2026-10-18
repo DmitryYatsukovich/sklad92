@@ -13,6 +13,7 @@ import {
   WORK_LOCATION_JOIN_PCL,
   WORK_LOCATION_SELECT_PCL,
 } from '../lib/work-location.js';
+import { hasAdminPermissionBypass } from '../lib/admin-bypass.js';
 
 const router = Router();
 
@@ -313,7 +314,7 @@ router.get('/production/history', async (req, res) => {
   }
 
   const sessionUserId = Number(req.session.userId);
-  const isAdmin = req.user.role === 'admin';
+  const isAdmin = hasAdminPermissionBypass(req.user);
   if (!isAdmin && userId !== sessionUserId) {
     return res.status(403).json({ error: 'Нет доступа к выработке другого пользователя' });
   }
@@ -551,7 +552,7 @@ router.get('/production', async (req, res) => {
     return res.status(400).json({ error: 'Укажите период: from и to (YYYY-MM-DD)' });
   }
 
-  const isAdmin = req.user.role === 'admin';
+  const isAdmin = hasAdminPermissionBypass(req.user);
   const params = [from, to];
   let where = `WHERE i.issued_at::date >= $1::date AND i.issued_at::date <= $2::date
                AND COALESCE(pa.produced_qty, 0) > 0`;
@@ -804,7 +805,7 @@ router.patch('/production/issuances/:id/location', async (req, res) => {
   );
   if (!cur.rowCount) return res.status(404).json({ error: 'Выдача не найдена' });
 
-  const isAdmin = req.user.role === 'admin';
+  const isAdmin = hasAdminPermissionBypass(req.user);
   if (!isAdmin && Number(cur.rows[0].issued_to_user_id) !== Number(req.session.userId)) {
     return res.status(403).json({ error: 'Нет доступа к чужой выдаче' });
   }

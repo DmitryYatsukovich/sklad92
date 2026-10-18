@@ -14,6 +14,7 @@ import CopyButton, { CopyFieldRow, CopyTableCell } from '../components/CopyButto
 import { parseExcelBlobForPreview, isExcelLaborContract } from '../lib/excelPreview';
 import { parseWordBlobForPreview, isWordLaborContract } from '../lib/wordPreview';
 import { getAdaptivePollInterval } from '../lib/device.js';
+import { hasAdminPermissionBypass } from '../lib/adminAccess.js';
 
 function isRowObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -2195,7 +2196,7 @@ export default function Users({ user, embedded = false }) {
             {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
             <form onSubmit={handleUpdate} className="space-y-4" noValidate>
               {formFields}
-              {user.role === 'admin' && (
+              {hasAdminPermissionBypass(user) && (
                 <>
                   <div>
                     <label className="label">Системная роль</label>

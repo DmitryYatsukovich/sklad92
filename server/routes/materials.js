@@ -3,6 +3,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import pool from '../db/pool.js';
 import { requireAuth, loadUser, requirePermission, requireAnyPermission, requireAdmin } from '../middleware/auth.js';
+import { hasAdminPermissionBypass } from '../lib/admin-bypass.js';
 import { MATERIAL_SELECT, MATERIAL_FROM } from '../lib/material-select.js';
 import {
   buildTemplateBuffer,
@@ -67,7 +68,7 @@ router.use(loadUser);
 function requireWarehouseFeature(permission) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'Требуется авторизация' });
-    if (req.user.role === 'admin') return next();
+    if (hasAdminPermissionBypass(req.user)) return next();
     if (!req.user.can_warehouse) return res.status(403).json({ error: 'Нет доступа' });
     if (req.user[permission]) return next();
     return res.status(403).json({ error: 'Нет доступа' });
@@ -796,7 +797,7 @@ router.put('/:id', requireAnyPermission('can_warehouse_edit', 'can_warehouse_mov
     object_id, warehouse_id, rack_id, category_id, system_id, organization_id,
   } = req.body || {};
 
-  const isAdmin = req.user?.role === 'admin';
+  const isAdmin = hasAdminPermissionBypass(req.user);
   if (!isAdmin) {
     if (!req.user?.can_warehouse) return res.status(403).json({ error: 'Нет доступа' });
     const payload = req.body && typeof req.body === 'object' ? req.body : {};

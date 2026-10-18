@@ -1,3 +1,5 @@
+import { hasAdminPermissionBypass } from './adminAccess.js';
+
 /** Ключи прав на вкладки раздела «Настройка» */
 export const SETTINGS_TAB_PERMISSIONS = {
   users: 'can_users',
@@ -16,13 +18,13 @@ export const SETTINGS_ACCESS_KEYS = Object.values(SETTINGS_TAB_PERMISSIONS);
 
 export function canAccessSettingsTab(user, permKey) {
   if (!user) return false;
-  if (user.role === 'admin') return true;
+  if (hasAdminPermissionBypass(user)) return true;
   return !!user[permKey];
 }
 
 export function hasAnySettingsAccess(user) {
   if (!user) return false;
-  if (user.role === 'admin') return true;
+  if (hasAdminPermissionBypass(user)) return true;
   return SETTINGS_ACCESS_KEYS.some((k) => user[k]);
 }
 
