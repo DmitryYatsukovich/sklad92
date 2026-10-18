@@ -64,6 +64,7 @@ export default function Layout({ user, onLogout }) {
   const mobileDevice = isMobileDevice();
 
   const isAppOnline = networkOnline && serverOnline;
+  const interactionLocked = !isAppOnline;
 
   const updateCacheSizeLabel = useCallback(() => {
     if (!isQuickDeviceEnabled()) {
@@ -175,7 +176,19 @@ export default function Layout({ user, onLogout }) {
                 <NavLink
                   key={tab.to}
                   to={tab.to}
-                  className={({ isActive }) => (isActive ? 'nav-pill-active' : 'nav-pill-inactive')}
+                  onClick={(event) => {
+                    if (!interactionLocked) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  aria-disabled={interactionLocked}
+                  tabIndex={interactionLocked ? -1 : 0}
+                  className={({ isActive }) => {
+                    const base = isActive ? 'nav-pill-active' : 'nav-pill-inactive';
+                    return interactionLocked
+                      ? `${base} opacity-50 cursor-not-allowed`
+                      : base;
+                  }}
                 >
                   {tab.label}
                 </NavLink>
@@ -213,7 +226,13 @@ export default function Layout({ user, onLogout }) {
               <span className="hidden md:inline text-2xs text-zinc-400 max-w-[5rem] truncate">
                 {user.display_name || user.login}
               </span>
-              <button type="button" onClick={onLogout} className="btn-ghost">
+              <button
+                type="button"
+                onClick={onLogout}
+                className="btn-ghost disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={interactionLocked}
+                title={interactionLocked ? 'Действия недоступны до восстановления сети' : undefined}
+              >
                 Выход
               </button>
             </div>
@@ -225,6 +244,16 @@ export default function Layout({ user, onLogout }) {
           <Outlet />
         </Suspense>
       </main>
+      {interactionLocked && (
+        <div className="fixed inset-0 z-[140] bg-black/60 backdrop-blur-[1px] flex items-center justify-center px-4">
+          <div className="max-w-md w-full rounded-xl border border-amber-500/40 bg-zinc-950/95 p-4 text-center shadow-2xl">
+            <p className="text-amber-300 text-sm font-semibold">Офлайн режим</p>
+            <p className="text-zinc-300 text-xs mt-1">
+              Действия временно заблокированы. Дождитесь восстановления сети.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
