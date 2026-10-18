@@ -2647,7 +2647,16 @@ export default function ObjectSettingsTabRefactored() {
           const fromBranchOffset = buildBranchOffsetMap('fromSlotId', 'to');
           const toBranchOffset = buildBranchOffsetMap('toSlotId', 'from');
           const usedLaneXs = [];
+          const usedHorizontalLanes = [];
           const hasLaneNear = (xValue) => usedLaneXs.some((used) => Math.abs(used - xValue) < 1.1);
+          const rangesOverlap = (a1, a2, b1, b2) => (
+            Math.max(Math.min(a1, a2), Math.min(b1, b2))
+            <= (Math.min(Math.max(a1, a2), Math.max(b1, b2)) + 0.01)
+          );
+          const hasHorizontalLaneNear = (yValue, x1, x2) => usedHorizontalLanes.some((used) => (
+            Math.abs(used.y - yValue) < 1.1
+            && rangesOverlap(used.x1, used.x2, x1, x2)
+          ));
           const reserveLaneX = ({
             initialX,
             y1,
@@ -2681,6 +2690,39 @@ export default function ObjectSettingsTabRefactored() {
             usedLaneXs.push(fallback);
             return fallback;
           };
+          const reserveHorizontalY = ({
+            initialY,
+            x1,
+            x2,
+            preferredDirection,
+            excludeSlotIds,
+          }) => {
+            for (let attempt = 0; attempt < 18; attempt += 1) {
+              const ring = Math.floor(attempt / 2) + 1;
+              const sign = attempt === 0 ? 0 : (attempt % 2 === 1 ? 1 : -1);
+              const baseY = attempt === 0 ? initialY : (initialY + (sign * ring * 1.25));
+              const safeY = findSafeHorizontalY({
+                initialY: baseY,
+                x1,
+                x2,
+                preferredDirection,
+                excludeSlotIds,
+              });
+              if (!hasHorizontalLaneNear(safeY, x1, x2)) {
+                usedHorizontalLanes.push({ y: safeY, x1, x2 });
+                return safeY;
+              }
+            }
+            const fallback = findSafeHorizontalY({
+              initialY,
+              x1,
+              x2,
+              preferredDirection,
+              excludeSlotIds,
+            });
+            usedHorizontalLanes.push({ y: fallback, x1, x2 });
+            return fallback;
+          };
           arranged.forEach((item, index) => {
             const fromEdge = choosePreferredEdge(item.from);
             const toEdge = choosePreferredEdge(item.to);
@@ -2695,22 +2737,43 @@ export default function ObjectSettingsTabRefactored() {
             if (hasTransitRoute && item.transit) {
               const laneShift = (index - ((arranged.length - 1) / 2)) * 1.9;
               const laneBase = item.transit.right - 6;
-              const fromY = findSafeHorizontalY({
+              const fromYBase = findSafeHorizontalY({
                 initialY: fromJunction.y + fromSpread,
                 x1: fromJunction.x,
                 x2: laneBase + laneShift,
                 preferredDirection: fromEdge === 'top' ? 'up' : 'down',
                 excludeSlotIds,
               });
-              const toY = findSafeHorizontalY({
+              const toYBase = findSafeHorizontalY({
                 initialY: toJunction.y + toSpread,
                 x1: laneBase + laneShift,
                 x2: toJunction.x,
                 preferredDirection: toEdge === 'top' ? 'up' : 'down',
                 excludeSlotIds,
               });
-              const laneX = reserveLaneX({
+              const laneXProbe = findSafeVerticalX({
                 initialX: laneBase + laneShift,
+                y1: fromYBase,
+                y2: toYBase,
+                preferredDirection: laneShift <= 0 ? 'left' : 'right',
+                excludeSlotIds,
+              });
+              const fromY = reserveHorizontalY({
+                initialY: fromYBase,
+                x1: fromJunction.x,
+                x2: laneXProbe,
+                preferredDirection: fromEdge === 'top' ? 'up' : 'down',
+                excludeSlotIds,
+              });
+              const toY = reserveHorizontalY({
+                initialY: toYBase,
+                x1: laneXProbe,
+                x2: toJunction.x,
+                preferredDirection: toEdge === 'top' ? 'up' : 'down',
+                excludeSlotIds,
+              });
+              const laneX = reserveLaneX({
+                initialX: laneXProbe,
                 y1: fromY,
                 y2: toY,
                 preferredDirection: laneShift <= 0 ? 'left' : 'right',
@@ -2742,22 +2805,43 @@ export default function ObjectSettingsTabRefactored() {
               const preferredBase = useRight ? rightBase : leftBase;
               const laneShift = (index - ((arranged.length - 1) / 2)) * 1.9;
               const laneBase = preferredBase + laneShift;
-              const fromY = findSafeHorizontalY({
+              const fromYBase = findSafeHorizontalY({
                 initialY: fromJunction.y + fromSpread,
                 x1: fromJunction.x,
                 x2: laneBase,
                 preferredDirection: fromEdge === 'top' ? 'up' : 'down',
                 excludeSlotIds,
               });
-              const toY = findSafeHorizontalY({
+              const toYBase = findSafeHorizontalY({
                 initialY: toJunction.y + toSpread,
                 x1: laneBase,
                 x2: toJunction.x,
                 preferredDirection: toEdge === 'top' ? 'up' : 'down',
                 excludeSlotIds,
               });
-              const corridorX = reserveLaneX({
+              const corridorXProbe = findSafeVerticalX({
                 initialX: laneBase,
+                y1: fromYBase,
+                y2: toYBase,
+                preferredDirection: useRight ? 'right' : 'left',
+                excludeSlotIds,
+              });
+              const fromY = reserveHorizontalY({
+                initialY: fromYBase,
+                x1: fromJunction.x,
+                x2: corridorXProbe,
+                preferredDirection: fromEdge === 'top' ? 'up' : 'down',
+                excludeSlotIds,
+              });
+              const toY = reserveHorizontalY({
+                initialY: toYBase,
+                x1: corridorXProbe,
+                x2: toJunction.x,
+                preferredDirection: toEdge === 'top' ? 'up' : 'down',
+                excludeSlotIds,
+              });
+              const corridorX = reserveLaneX({
+                initialX: corridorXProbe,
                 y1: fromY,
                 y2: toY,
                 preferredDirection: useRight ? 'right' : 'left',
@@ -2808,18 +2892,20 @@ export default function ObjectSettingsTabRefactored() {
                 if (segmentA.horizontal === segmentB.horizontal) return;
                 const horizontal = segmentA.horizontal ? segmentA : segmentB;
                 const vertical = segmentA.horizontal ? segmentB : segmentA;
+                const horizontalPath = segmentA.horizontal ? pathA : pathB;
                 const x = vertical.x1;
                 const y = horizontal.y1;
                 if (!segmentContains(horizontal, x, y) || !segmentContains(vertical, x, y)) return;
                 if (!farFromEndpoints(horizontal, x, y) || !farFromEndpoints(vertical, x, y)) return;
-                const key = `${pathB.key}:${Math.round(x)}:${Math.round(y)}`;
+                const key = `${horizontalPath.key}:${Math.round(x)}:${Math.round(y)}`;
                 if (jumpSeen.has(key)) return;
                 jumpSeen.add(key);
                 jumps.push({
                   key,
-                  pathKey: pathB.key,
+                  pathKey: horizontalPath.key,
                   x,
                   y,
+                  orientation: 'horizontal',
                 });
               });
             });
@@ -3859,12 +3945,18 @@ export default function ObjectSettingsTabRefactored() {
                                   ))}
                                   {(entranceOverlay.jumps || []).map((jump) => (
                                     <g key={`jump-${jump.key}`} pointerEvents="none">
-                                      <circle cx={jump.x} cy={jump.y} r="3" fill="#0B1220" />
                                       <path
-                                        d={`M ${jump.x - 3} ${jump.y} Q ${jump.x} ${jump.y - 4} ${jump.x + 3} ${jump.y}`}
+                                        d={`M ${jump.x - 4} ${jump.y} L ${jump.x + 4} ${jump.y}`}
                                         fill="none"
-                                        stroke="#F8FAFC"
-                                        strokeWidth="0.95"
+                                        stroke="#0B1220"
+                                        strokeWidth="2.35"
+                                        strokeLinecap="round"
+                                      />
+                                      <path
+                                        d={`M ${jump.x - 4} ${jump.y} Q ${jump.x} ${jump.y - 4.8} ${jump.x + 4} ${jump.y}`}
+                                        fill="none"
+                                        stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
+                                        strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '1.25' : '1.05'}
                                         strokeLinecap="round"
                                       />
                                     </g>
