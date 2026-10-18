@@ -6,6 +6,10 @@ import { PERMISSIONS_SELECT } from '../lib/permissions-sql.js';
 import { PERMISSION_KEYS } from '../lib/app-permissions.js';
 import { userAccessBlockReason } from '../lib/user-access.js';
 import { ADMIN_PERMISSION_BYPASS_SQL } from '../lib/admin-bypass.js';
+import {
+  resolveUserPermissionsForSave,
+  upsertUserPermissions,
+} from '../lib/sync-user-permissions-from-role.js';
 
 const router = Router();
 const ACCESS_PERMISSION_KEYS = PERMISSION_KEYS.filter((k) => k !== 'can_offline_mode');
@@ -39,7 +43,7 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'Укажите логин и пароль' });
   }
   const r = await pool.query(
-    `SELECT id, login, password_hash, display_name, role,
+    `SELECT id, login, password_hash, display_name, role, role_id,
             COALESCE(profile_active, true) AS profile_active,
             COALESCE(employment_status, 'working') AS employment_status
      FROM users WHERE LOWER(TRIM(login)) = LOWER($1)`,
@@ -53,6 +57,23 @@ router.post('/login', async (req, res) => {
   if (accessBlock) {
     return res.status(403).json({ error: accessBlock });
   }
+  // На каждом логине принудительно выравниваем user_permissions по выбранной роли,
+  // чтобы убрать влияние исторических/закэшированных персональных прав.
+  const loginSyncClient = await pool.connect();
+  try {
+    await loginSyncClient.query('BEGIN');
+    const syncedPerms = await resolveUserPermissionsForSave(loginSyncClient, {
+      role_id: user.role_id,
+    });
+    await upsertUserPermissions(loginSyncClient, user.id, syncedPerms);
+    await loginSyncClient.query('COMMIT');
+  } catch (syncErr) {
+    await loginSyncClient.query('ROLLBACK').catch(() => {});
+    console.error('auth login permission sync failed:', syncErr);
+  } finally {
+    loginSyncClient.release();
+  }
+
   const perm = await pool.query(
     `SELECT ${ADMIN_PERMISSION_BYPASS_SQL} AS admin_permission_bypass, ${PERMISSIONS_SELECT}
      FROM users u

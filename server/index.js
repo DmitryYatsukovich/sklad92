@@ -35,6 +35,7 @@ import objects from './routes/objects.js';
 import { loadUser } from './middleware/auth.js';
 import { ensureAdminUser } from './db/ensure-admin.js';
 import { ensureSchema } from './db/ensure-schema.js';
+import { syncAllUsersPermissionsFromRoles } from './lib/sync-user-permissions-from-role.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
@@ -243,6 +244,7 @@ async function initializeDatabaseWithRetry() {
         if (isProd) {
           await ensureAdminUser();
         }
+        await syncAllUsersPermissionsFromRoles(pool);
         dbReady = true;
         break;
       } catch (err) {
