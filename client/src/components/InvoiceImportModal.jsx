@@ -15,6 +15,7 @@ function toItemsWithIds(items = []) {
     price: Number(row?.price) || 0,
     description: String(row?.description || '').trim(),
     source_page: row?.source_page || null,
+    is_estimated: !!row?.is_estimated,
   }));
 }
 
@@ -55,6 +56,10 @@ export default function InvoiceImportModal({
 
   const validItems = useMemo(
     () => recognizedItems.filter((item) => String(item.name || '').trim() && Number(item.quantity) > 0),
+    [recognizedItems],
+  );
+  const estimatedCount = useMemo(
+    () => recognizedItems.filter((item) => item.is_estimated).length,
     [recognizedItems],
   );
 
@@ -119,6 +124,7 @@ export default function InvoiceImportModal({
       price: 0,
       description: '',
       source_page: null,
+      is_estimated: false,
     }]));
   };
 
@@ -126,9 +132,17 @@ export default function InvoiceImportModal({
     setRecognizedItems((prev) => prev.map((item) => {
       if (item._id !== id) return item;
       if (key === 'quantity' || key === 'price') {
-        return { ...item, [key]: Number.parseFloat(value) || 0 };
+        return {
+          ...item,
+          [key]: Number.parseFloat(value) || 0,
+          is_estimated: key === 'quantity' ? false : item.is_estimated,
+        };
       }
-      return { ...item, [key]: value };
+      return {
+        ...item,
+        [key]: value,
+        is_estimated: key === 'name' || key === 'unit' ? false : item.is_estimated,
+      };
     }));
   };
 
@@ -297,6 +311,11 @@ export default function InvoiceImportModal({
                 + Позиция вручную
               </button>
             </div>
+            {estimatedCount > 0 && (
+              <p className="text-amber-300 text-2xs">
+                {estimatedCount} поз. распознаны частично (единица/кол-во могли быть не считаны). Проверьте перед добавлением.
+              </p>
+            )}
             <div className="overflow-x-auto rounded-lg border border-white/10">
               <table className="w-full text-xs">
                 <thead className="bg-zinc-900/70 text-zinc-400">
@@ -319,6 +338,9 @@ export default function InvoiceImportModal({
                           onChange={(event) => updateItem(item._id, 'name', event.target.value)}
                           className="input h-9 text-xs"
                         />
+                        {item.is_estimated && (
+                          <p className="text-[10px] text-amber-300 mt-1">Проверьте строку</p>
+                        )}
                       </td>
                       <td className="p-2">
                         <input
