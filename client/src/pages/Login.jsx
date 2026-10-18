@@ -163,11 +163,6 @@ export default function Login({ onLogin }) {
                 required
               />
             </div>
-            {!offlineMode && (
-              <p className="text-2xs text-zinc-300 border border-white/10 rounded px-2 py-1.5 bg-white/[0.02]">
-                При входе онлайн приложение загружает данные на устройство, если для вашей роли разрешён офлайн-режим.
-              </p>
-            )}
             {prefetchStatus && (
               <p className="text-2xs text-zinc-400 border border-white/10 rounded px-2 py-1.5">{prefetchStatus}</p>
             )}
