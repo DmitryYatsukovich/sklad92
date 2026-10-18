@@ -302,6 +302,18 @@ export default function ObjectSettingsTabRefactored() {
     }
   }, [activeCableTransitId, cableEditModalOpen]);
 
+  useEffect(() => {
+    if (!cableEditPickTarget || cableEditModalOpen) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return;
+      setCableEditPickTarget('');
+      setCableEditModalOpen(true);
+      setNotice('Выбор на схеме отменен.');
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [cableEditPickTarget, cableEditModalOpen]);
+
   const sortedObjects = useMemo(() => [...data.objects].sort((a, b) => naturalCompare(a.name, b.name)), [data.objects]);
   const sortedEntrances = useMemo(() => [...data.entrances].sort((a, b) => (
     naturalCompare(a.object_name, b.object_name) || naturalCompare(a.name, b.name)
@@ -1920,6 +1932,15 @@ export default function ObjectSettingsTabRefactored() {
     setCableEditDraft(null);
   };
 
+  const handleStartCableEditPlanPick = useCallback((target) => {
+    if (cableEditBusy || !cableEditDraft) return;
+    const normalizedTarget = target === 'from' ? 'from' : 'to';
+    setCableEditPickTarget(normalizedTarget);
+    setCableEditModalOpen(false);
+    setError('');
+    setNotice(`Выбор точки «${normalizedTarget === 'from' ? 'От' : 'До'}»: кликните по блоку на схеме.`);
+  }, [cableEditBusy, cableEditDraft]);
+
   const handleSaveCableEdit = async (e) => {
     e.preventDefault();
     if (!cableEditDraft?.lineId) return;
@@ -2059,10 +2080,7 @@ export default function ObjectSettingsTabRefactored() {
     const blockCount = (slotsByLocation.get(key) || []).length;
     const selectingMultiple = multiCopyLocationKey === key;
     const selectedCount = selectingMultiple ? multiCopySelectedSlotIds.length : 0;
-    const cableSelectionActive = Boolean(
-      (activeCableTransitId && cablePickTarget)
-      || (cableEditModalOpen && cableEditPickTarget),
-    );
+    const cableSelectionActive = Boolean((activeCableTransitId && cablePickTarget) || cableEditPickTarget);
     return (
       <div className="flex flex-wrap items-center gap-1">
         <button
@@ -2246,7 +2264,7 @@ export default function ObjectSettingsTabRefactored() {
             type="button"
             onClick={() => openCreateSlotModal(locationKind, locationId, title)}
             className="w-[2.45rem] h-[2.45rem] rounded-md border border-dashed border-white/20 bg-black/20 hover:bg-white/10 text-zinc-300 text-[6px] shadow-[0_3px_8px_rgba(0,0,0,0.18)]"
-            disabled={Boolean((activeCableTransitId && cablePickTarget) || (cableEditModalOpen && cableEditPickTarget))}
+            disabled={Boolean((activeCableTransitId && cablePickTarget) || cableEditPickTarget)}
           >
             +Сист.
           </button>
@@ -2255,7 +2273,7 @@ export default function ObjectSettingsTabRefactored() {
               type="button"
               onClick={() => handlePasteSlotToLocation(locationKind, locationId, title)}
               className="w-[2.45rem] h-[2.45rem] rounded-md border border-dashed border-sky-400/40 bg-sky-900/20 hover:bg-sky-800/30 text-sky-100 text-[6px] shadow-[0_3px_8px_rgba(0,0,0,0.18)]"
-              disabled={!!pasteBusyKey || slotBusy || Boolean((activeCableTransitId && cablePickTarget) || (cableEditModalOpen && cableEditPickTarget))}
+              disabled={!!pasteBusyKey || slotBusy || Boolean((activeCableTransitId && cablePickTarget) || cableEditPickTarget)}
               title={`Вставить блок: ${copiedSlotTemplate.systemName}`}
             >
               {isPastingHere ? '…' : 'Встав.'}
@@ -2273,7 +2291,7 @@ export default function ObjectSettingsTabRefactored() {
 
   const buildCableSelectionOptions = (locationKind) => {
     if (!['room', 'apartment'].includes(locationKind)) return null;
-    if (cableEditModalOpen && cableEditPickTarget) {
+    if (cableEditDraft && cableEditPickTarget) {
       return {
         selectionMode: true,
         selectionTone: 'cable',
@@ -2956,7 +2974,7 @@ export default function ObjectSettingsTabRefactored() {
     const canPasteSlot = Boolean(copiedSlotTemplate);
     const actionsDisabled = !!pasteBusyKey || slotBusy || Boolean(
       (activeCableTransitId && cablePickTarget)
-      || (cableEditModalOpen && cableEditPickTarget),
+      || cableEditPickTarget,
     );
     const pasteTitle = copiedSlotTemplate ? `Вставить блок: ${copiedSlotTemplate.systemName}` : 'Вставить блок';
     const floorHeights = entranceFloorHeights[Number(entranceId)] || {};
@@ -3449,9 +3467,25 @@ export default function ObjectSettingsTabRefactored() {
       },
     )
     : [];
+  const cableEditSlotOptions = useMemo(() => {
+    const map = new Map();
+    cableEditSelectableSlots.forEach((slot) => {
+      map.set(String(slot.id), slot);
+    });
+    [cableEditDraft?.fromSlotId, cableEditDraft?.toSlotId].forEach((slotIdValue) => {
+      const slotId = Number.parseInt(slotIdValue, 10);
+      if (!slotId) return;
+      const key = String(slotId);
+      if (map.has(key)) return;
+      const slot = slotById.get(slotId);
+      if (!slot) return;
+      map.set(key, slot);
+    });
+    return [...map.values()];
+  }, [cableEditSelectableSlots, cableEditDraft?.fromSlotId, cableEditDraft?.toSlotId, slotById]);
   const cableEditSelectableSlotIdSet = useMemo(
-    () => new Set(cableEditSelectableSlots.map((slot) => String(slot.id))),
-    [cableEditSelectableSlots],
+    () => new Set(cableEditSlotOptions.map((slot) => String(slot.id))),
+    [cableEditSlotOptions],
   );
   const cableEditSelectedSlotIds = useMemo(() => {
     const values = [cableEditDraft?.fromSlotId, cableEditDraft?.toSlotId]
@@ -3460,7 +3494,7 @@ export default function ObjectSettingsTabRefactored() {
     return new Set(values.map(String));
   }, [cableEditDraft?.fromSlotId, cableEditDraft?.toSlotId]);
   const handlePickCableEditSlot = useCallback((slot) => {
-    if (!cableEditModalOpen || !cableEditDraft) return;
+    if (!cableEditDraft) return;
     if (!cableEditPickTarget) {
       setError('Нажмите «Выбрать От» или «Выбрать До».');
       return;
@@ -3488,16 +3522,11 @@ export default function ObjectSettingsTabRefactored() {
       };
     });
     revealCableSlotFloor(slot.id);
-    if (cableEditPickTarget === 'from') {
-      setCableEditPickTarget('to');
-      setNotice('Блок «От» выбран в режиме редактирования. Выберите «До».');
-    } else {
-      setCableEditPickTarget('');
-      setNotice('Блок «До» выбран. Сохраните изменения линии.');
-    }
+    setCableEditPickTarget('');
+    setCableEditModalOpen(true);
+    setNotice(`Точка «${cableEditPickTarget === 'from' ? 'От' : 'До'}» выбрана. Проверьте и сохраните изменения.`);
     setError('');
   }, [
-    cableEditModalOpen,
     cableEditDraft,
     cableEditPickTarget,
     cableEditSelectableSlotIdSet,
@@ -3819,7 +3848,7 @@ export default function ObjectSettingsTabRefactored() {
                                           type="button"
                                           onClick={() => handleCopyFloorBlocks(floor)}
                                           className="px-2 py-0.5 rounded border border-white/15 text-[10px] text-zinc-200 hover:bg-white/10"
-                                          disabled={!!pasteBusyKey || slotBusy || Boolean((activeCableTransitId && cablePickTarget) || (cableEditModalOpen && cableEditPickTarget))}
+                                          disabled={!!pasteBusyKey || slotBusy || Boolean((activeCableTransitId && cablePickTarget) || cableEditPickTarget)}
                                         >
                                           Копировать этаж
                                         </button>
@@ -3828,7 +3857,7 @@ export default function ObjectSettingsTabRefactored() {
                                             type="button"
                                             onClick={() => handlePasteFloorBlocks(floor)}
                                             className="px-2 py-0.5 rounded border border-sky-400/40 text-[10px] text-sky-200 hover:bg-sky-900/30"
-                                            disabled={!!pasteBusyKey || slotBusy || Boolean((activeCableTransitId && cablePickTarget) || (cableEditModalOpen && cableEditPickTarget))}
+                                            disabled={!!pasteBusyKey || slotBusy || Boolean((activeCableTransitId && cablePickTarget) || cableEditPickTarget)}
                                           >
                                             {pasteBusyKey === `floor:${floor.id}` ? 'Вставка…' : 'Вставить этаж'}
                                           </button>
@@ -3948,7 +3977,7 @@ export default function ObjectSettingsTabRefactored() {
                                           d={pathItem.d}
                                           fill="none"
                                           stroke={pathItem.color}
-                                          strokeWidth={pathItem.preview ? 0.95 : (isHovered ? 1.8 : 1.0)}
+                                          strokeWidth={pathItem.preview ? 0.78 : (isHovered ? 1.25 : 0.78)}
                                           strokeLinecap="round"
                                           strokeLinejoin="round"
                                           strokeDasharray={pathItem.preview ? '4 3' : undefined}
@@ -4004,34 +4033,34 @@ export default function ObjectSettingsTabRefactored() {
                                       {jump.orientation === 'vertical' ? (
                                         <>
                                           <path
-                                            d={`M ${jump.x} ${jump.y - 3.7} L ${jump.x} ${jump.y + 3.7}`}
+                                            d={`M ${jump.x} ${jump.y - 2.8} L ${jump.x} ${jump.y + 2.8}`}
                                             fill="none"
                                             stroke="#0B1220"
-                                            strokeWidth="2.25"
+                                            strokeWidth="1.75"
                                             strokeLinecap="round"
                                           />
                                           <path
-                                            d={`M ${jump.x} ${jump.y - 3.7} Q ${jump.x + 4.1} ${jump.y} ${jump.x} ${jump.y + 3.7}`}
+                                            d={`M ${jump.x} ${jump.y - 2.8} Q ${jump.x + 3.1} ${jump.y} ${jump.x} ${jump.y + 2.8}`}
                                             fill="none"
                                             stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
-                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '1.22' : '1.0'}
+                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '0.95' : '0.82'}
                                             strokeLinecap="round"
                                           />
                                         </>
                                       ) : (
                                         <>
                                           <path
-                                            d={`M ${jump.x - 3.7} ${jump.y} L ${jump.x + 3.7} ${jump.y}`}
+                                            d={`M ${jump.x - 2.8} ${jump.y} L ${jump.x + 2.8} ${jump.y}`}
                                             fill="none"
                                             stroke="#0B1220"
-                                            strokeWidth="2.25"
+                                            strokeWidth="1.75"
                                             strokeLinecap="round"
                                           />
                                           <path
-                                            d={`M ${jump.x - 3.7} ${jump.y} Q ${jump.x} ${jump.y - 4.1} ${jump.x + 3.7} ${jump.y}`}
+                                            d={`M ${jump.x - 2.8} ${jump.y} Q ${jump.x} ${jump.y - 3.1} ${jump.x + 2.8} ${jump.y}`}
                                             fill="none"
                                             stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
-                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '1.22' : '1.0'}
+                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '0.95' : '0.82'}
                                             strokeLinecap="round"
                                           />
                                         </>
@@ -4097,8 +4126,6 @@ export default function ObjectSettingsTabRefactored() {
                         transitId: routeMode === 'transit'
                           ? (prev.transitId || String(cableEditTransitOptions[0]?.id || ''))
                           : '',
-                        fromSlotId: null,
-                        toSlotId: null,
                       }));
                     }}
                     className="input"
@@ -4118,8 +4145,6 @@ export default function ObjectSettingsTabRefactored() {
                         setCableEditDraft((prev) => ({
                           ...prev,
                           transitId,
-                          fromSlotId: null,
-                          toSlotId: null,
                         }));
                       }}
                       className="input"
@@ -4185,13 +4210,13 @@ export default function ObjectSettingsTabRefactored() {
                     required
                   >
                     <option value="">— Выберите блок —</option>
-                    {cableEditSelectableSlots.map((slot) => (
+                    {cableEditSlotOptions.map((slot) => (
                       <option key={`edit-from-${slot.id}`} value={slot.id}>{describeSlot(slot.id)}</option>
                     ))}
                   </select>
                   <button
                     type="button"
-                    onClick={() => setCableEditPickTarget((prev) => (prev === 'from' ? '' : 'from'))}
+                    onClick={() => handleStartCableEditPlanPick('from')}
                     className={`mt-1 w-full px-2 py-1 rounded border text-xs ${
                       cableEditPickTarget === 'from'
                         ? 'border-cyan-300/70 text-cyan-100 bg-cyan-900/35'
@@ -4212,13 +4237,13 @@ export default function ObjectSettingsTabRefactored() {
                     required
                   >
                     <option value="">— Выберите блок —</option>
-                    {cableEditSelectableSlots.map((slot) => (
+                    {cableEditSlotOptions.map((slot) => (
                       <option key={`edit-to-${slot.id}`} value={slot.id}>{describeSlot(slot.id)}</option>
                     ))}
                   </select>
                   <button
                     type="button"
-                    onClick={() => setCableEditPickTarget((prev) => (prev === 'to' ? '' : 'to'))}
+                    onClick={() => handleStartCableEditPlanPick('to')}
                     className={`mt-1 w-full px-2 py-1 rounded border text-xs ${
                       cableEditPickTarget === 'to'
                         ? 'border-cyan-300/70 text-cyan-100 bg-cyan-900/35'
