@@ -10,6 +10,13 @@ import { ADMIN_PERMISSION_BYPASS_SQL } from '../lib/admin-bypass.js';
 const router = Router();
 const ACCESS_PERMISSION_KEYS = PERMISSION_KEYS.filter((k) => k !== 'can_offline_mode');
 
+router.use((_req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
+
 function userPayload(base, perms = {}) {
   const effectivePerms = {
     ...perms,
@@ -49,7 +56,6 @@ router.post('/login', async (req, res) => {
   const perm = await pool.query(
     `SELECT ${ADMIN_PERMISSION_BYPASS_SQL} AS admin_permission_bypass, ${PERMISSIONS_SELECT}
      FROM users u
-     LEFT JOIN user_permissions p ON p.user_id = u.id
      LEFT JOIN roles r ON r.id = u.role_id
      WHERE u.id = $1`,
     [user.id]

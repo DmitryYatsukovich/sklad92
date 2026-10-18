@@ -355,7 +355,6 @@ const USERS_EXPORT_SQL = `
          r.name AS role_profile_name,
          ${PERMISSIONS_SELECT}
   FROM users u
-  LEFT JOIN user_permissions p ON p.user_id = u.id
   LEFT JOIN roles r ON r.id = u.role_id
   LEFT JOIN organizations o ON o.id = u.organization_id`;
 

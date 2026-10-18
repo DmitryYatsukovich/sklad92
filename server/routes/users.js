@@ -89,7 +89,6 @@ router.get('/', async (req, res) => {
             ${LABOR_CONTRACT_COUNT_SQL} AS labor_contract_count,
             ${PERMISSIONS_SELECT}
      FROM users u
-     LEFT JOIN user_permissions p ON p.user_id = u.id
      LEFT JOIN roles r ON r.id = u.role_id
      ORDER BY u.login`,
   );

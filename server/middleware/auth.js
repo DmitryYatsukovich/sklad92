@@ -44,12 +44,10 @@ export async function loadUser(req, res, next) {
             ${ADMIN_PERMISSION_BYPASS_SQL} AS admin_permission_bypass,
             CASE
               WHEN ${ADMIN_PERMISSION_BYPASS_SQL} THEN true
-              WHEN u.role_id IS NOT NULL THEN COALESCE(r.warehouse_permissions_customized, false)
-              ELSE COALESCE(p.warehouse_permissions_customized, false)
+              ELSE COALESCE(r.warehouse_permissions_customized, false)
             END AS warehouse_permissions_customized,
             ${PERMISSIONS_SELECT}
      FROM users u
-     LEFT JOIN user_permissions p ON p.user_id = u.id
      LEFT JOIN roles r ON r.id = u.role_id
      LEFT JOIN organizations o ON o.id = u.organization_id
      WHERE u.id = $1`,
