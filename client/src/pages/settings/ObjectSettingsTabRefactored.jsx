@@ -209,6 +209,7 @@ export default function ObjectSettingsTabRefactored() {
   const [slotCableModalOpen, setSlotCableModalOpen] = useState(false);
   const [slotCableDraft, setSlotCableDraft] = useState(null);
   const [slotCableBusy, setSlotCableBusy] = useState(false);
+  const [slotCablePlanPick, setSlotCablePlanPick] = useState(null);
   const [copiedSlotTemplate, setCopiedSlotTemplate] = useState(null);
   const [copiedLocationTemplate, setCopiedLocationTemplate] = useState(null);
   const [copiedFloorTemplate, setCopiedFloorTemplate] = useState(null);
@@ -950,6 +951,7 @@ export default function ObjectSettingsTabRefactored() {
     setSlotCableModalOpen(false);
     setSlotCableDraft(null);
     setSlotCableBusy(false);
+    setSlotCablePlanPick(null);
     setActiveSlot(null);
     setSlotDraft({ locationKind: '', locationId: null, title: '' });
     setSlotSystemId('');
@@ -962,6 +964,7 @@ export default function ObjectSettingsTabRefactored() {
     if (slotCableBusy && !force) return;
     setSlotCableModalOpen(false);
     setSlotCableDraft(null);
+    setSlotCablePlanPick(null);
   }, [slotCableBusy]);
 
   const activeSlotPlacement = useMemo(
@@ -1026,9 +1029,63 @@ export default function ObjectSettingsTabRefactored() {
       systemId: '',
       categoryId: '',
     });
+    setSlotCablePlanPick(null);
     setError('');
     setSlotCableModalOpen(true);
   }, [activeSlot, activeSlotCableAnchor, slotCableTransitOptions]);
+
+  const handleSlotCablePickOnPlanStart = useCallback(() => {
+    if (!activeSlot?.id || !slotCableDraft) return;
+    setSlotCablePlanPick({
+      fromSlotId: activeSlot.id,
+      draft: { ...slotCableDraft },
+    });
+    setSlotCableModalOpen(false);
+    setSlotModalOpen(false);
+    setNotice('Режим выбора: нажмите на блок на плане, с которым нужно соединить.');
+    setError('');
+  }, [activeSlot, slotCableDraft]);
+
+  const handleCancelSlotCablePlanPick = useCallback(() => {
+    setSlotCablePlanPick(null);
+    setNotice('');
+  }, []);
+
+  const handleSystemSquareOpen = useCallback((slot) => {
+    if (!slotCablePlanPick?.fromSlotId) {
+      openSlotModal(slot);
+      return;
+    }
+    const fromSlot = slotById.get(slotCablePlanPick.fromSlotId);
+    if (!fromSlot) {
+      setSlotCablePlanPick(null);
+      openSlotModal(slot);
+      return;
+    }
+    if (Number(slot.id) === Number(fromSlot.id)) {
+      setError('Нельзя соединить блок сам с собой');
+      return;
+    }
+    const fromPlacement = slotPlacementById.get(fromSlot.id);
+    const toPlacement = slotPlacementById.get(slot.id);
+    const sameScope = (
+      Number(fromPlacement?.location?.object_id || 0) === Number(toPlacement?.location?.object_id || 0)
+      && Number(fromPlacement?.location?.entrance_id || 0) === Number(toPlacement?.location?.entrance_id || 0)
+    );
+    if (!sameScope) {
+      setError('Выберите блок в том же подъезде');
+      return;
+    }
+    openSlotModal(fromSlot);
+    setSlotCableDraft((prev) => ({
+      ...(slotCablePlanPick.draft || prev || {}),
+      toSlotId: String(slot.id),
+    }));
+    setSlotCablePlanPick(null);
+    setSlotCableModalOpen(true);
+    setNotice('Блок для соединения выбран.');
+    setError('');
+  }, [slotCablePlanPick, slotById, slotPlacementById]);
 
   const handleSaveSlotCableConnection = async (e, options = {}) => {
     e.preventDefault();
@@ -2145,7 +2202,7 @@ export default function ObjectSettingsTabRefactored() {
                             entryNames,
                             missingFieldsText: completeness.missing.join(', '),
                           }}
-                          onOpen={openSlotModal}
+                          onOpen={handleSystemSquareOpen}
                           totals={{ positions: entries.length }}
                           incomplete={completeness.isIncomplete}
                           selectionMode={selectingMultiple || isCustomSelectionMode}
@@ -3010,6 +3067,20 @@ export default function ObjectSettingsTabRefactored() {
       </div>
       {error && <p className="text-rose-400 text-sm">{error}</p>}
       {notice && <p className="text-emerald-300 text-sm">{notice}</p>}
+      {slotCablePlanPick?.fromSlotId && (
+        <div className="rounded-lg border border-cyan-300/35 bg-cyan-950/25 px-3 py-2 flex items-center justify-between gap-2">
+          <p className="text-cyan-100 text-xs">
+            Выбор на плане активен: кликните по блоку, который нужно соединить с текущим.
+          </p>
+          <button
+            type="button"
+            className="px-2 py-0.5 rounded border border-white/20 text-[10px] text-zinc-200 hover:bg-white/10"
+            onClick={handleCancelSlotCablePlanPick}
+          >
+            Отменить
+          </button>
+        </div>
+      )}
 
       <div className="rounded-xl border border-white/10 bg-zinc-900/65 p-3 space-y-2 shadow-[0_8px_24px_rgba(0,0,0,0.2)]">
         <p className="text-zinc-200 text-xs font-semibold tracking-wide uppercase">Фильтры блоков</p>
@@ -3892,7 +3963,7 @@ export default function ObjectSettingsTabRefactored() {
             <p className="text-zinc-400 text-sm mt-1">
               От: {activeSlot ? describeSlot(activeSlot.id) : '—'}
             </p>
-            <form className="space-y-3 mt-4" onSubmit={(e) => handleSaveSlotCableConnection(e, { keepOpen: true })}>
+            <form className="space-y-3 mt-4" onSubmit={handleSaveSlotCableConnection}>
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <label className="label">Маршрут</label>
@@ -3936,20 +4007,30 @@ export default function ObjectSettingsTabRefactored() {
 
               <div>
                 <label className="label">Блок «До»</label>
-                <select
-                  value={slotCableDraft.toSlotId || ''}
-                  onChange={(e) => setSlotCableDraft((prev) => ({ ...prev, toSlotId: e.target.value }))}
-                  className="input"
-                  disabled={slotCableBusy}
-                  required
-                >
-                  <option value="">— Выберите второй блок —</option>
-                  {slotCableSelectableSlots.map((slot) => (
-                    <option key={`slot-cable-target-${slot.id}`} value={slot.id}>
-                      {describeSlot(slot.id)}
-                    </option>
-                  ))}
-                </select>
+                <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                  <select
+                    value={slotCableDraft.toSlotId || ''}
+                    onChange={(e) => setSlotCableDraft((prev) => ({ ...prev, toSlotId: e.target.value }))}
+                    className="input"
+                    disabled={slotCableBusy}
+                    required
+                  >
+                    <option value="">— Выберите второй блок —</option>
+                    {slotCableSelectableSlots.map((slot) => (
+                      <option key={`slot-cable-target-${slot.id}`} value={slot.id}>
+                        {describeSlot(slot.id)}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn-secondary text-sm whitespace-nowrap"
+                    onClick={handleSlotCablePickOnPlanStart}
+                    disabled={slotCableBusy}
+                  >
+                    Выбрать на плане
+                  </button>
+                </div>
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
@@ -4016,13 +4097,13 @@ export default function ObjectSettingsTabRefactored() {
                 <button
                   type="button"
                   className="btn-secondary text-sm"
-                  onClick={(e) => handleSaveSlotCableConnection(e, { keepOpen: false })}
+                  onClick={(e) => handleSaveSlotCableConnection(e, { keepOpen: true })}
                   disabled={slotCableBusy}
                 >
-                  {slotCableBusy ? 'Сохранение…' : 'Сохранить и закрыть'}
+                  {slotCableBusy ? 'Сохранение…' : 'Сохранить и добавить ещё'}
                 </button>
                 <button type="submit" className="btn-primary text-sm" disabled={slotCableBusy}>
-                  {slotCableBusy ? 'Сохранение…' : 'Сохранить и добавить ещё'}
+                  {slotCableBusy ? 'Сохранение…' : 'Сохранить и закрыть'}
                 </button>
               </div>
             </form>
