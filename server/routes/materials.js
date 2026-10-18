@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { Router } from 'express';
 import multer from 'multer';
 import pool from '../db/pool.js';
-import { requireAuth, loadUser, requirePermission, requireAdmin } from '../middleware/auth.js';
+import { requireAuth, loadUser, requirePermission, requireAnyPermission, requireAdmin } from '../middleware/auth.js';
 import { MATERIAL_SELECT, MATERIAL_FROM } from '../lib/material-select.js';
 import {
   buildTemplateBuffer,
@@ -63,6 +63,16 @@ async function loadCatalog(client) {
 
 router.use(requireAuth);
 router.use(loadUser);
+
+function requireWarehouseFeature(permission) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: 'Требуется авторизация' });
+    if (req.user.role === 'admin') return next();
+    if (!req.user.can_warehouse) return res.status(403).json({ error: 'Нет доступа' });
+    if (req.user[permission]) return next();
+    return res.status(403).json({ error: 'Нет доступа' });
+  };
+}
 
 function parseId(v) {
   if (v === null || v === undefined || v === '') return null;
@@ -180,7 +190,7 @@ async function insertMaterial(client, {
   return ins.rows[0].id;
 }
 
-router.get('/', requirePermission('can_warehouse'), async (req, res) => {
+router.get('/', requireWarehouseFeature('can_warehouse_view'), async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT ${MATERIAL_SELECT}${MATERIAL_GROUP_SELECT_EXTRA}
@@ -196,7 +206,7 @@ router.get('/', requirePermission('can_warehouse'), async (req, res) => {
   }
 });
 
-router.get('/by-code/:code', requirePermission('can_warehouse'), async (req, res) => {
+router.get('/by-code/:code', requireWarehouseFeature('can_warehouse_qr_scan'), async (req, res) => {
   const code = (req.params.code || '').trim();
   const r = await pool.query(
     `SELECT ${MATERIAL_SELECT}${MATERIAL_GROUP_SELECT_EXTRA}
@@ -209,7 +219,7 @@ router.get('/by-code/:code', requirePermission('can_warehouse'), async (req, res
   res.json(r.rows[0]);
 });
 
-router.get('/:id/parts', requirePermission('can_warehouse'), async (req, res) => {
+router.get('/:id/parts', requireWarehouseFeature('can_warehouse_view'), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Неверный id' });
   const client = await pool.connect();
@@ -229,7 +239,7 @@ router.get('/:id/parts', requirePermission('can_warehouse'), async (req, res) =>
   }
 });
 
-router.post('/', requirePermission('can_warehouse'), async (req, res) => {
+router.post('/', requireWarehouseFeature('can_warehouse_edit'), async (req, res) => {
   const {
     name, description, unit, price, production_price, quantity,
     object_id, warehouse_id, rack_id, category_id, system_id, organization_id,
@@ -396,7 +406,7 @@ router.post('/', requirePermission('can_warehouse'), async (req, res) => {
 });
 
 /** Сгруппировать несколько одноимённых материалов под новым общим QR-кодом */
-router.post('/group', requirePermission('can_warehouse'), async (req, res) => {
+router.post('/group', requireWarehouseFeature('can_warehouse_split'), async (req, res) => {
   const name = String(req.body?.name || '').trim();
   const materialIds = Array.isArray(req.body?.material_ids)
     ? [...new Set(req.body.material_ids.map((v) => parseId(v)).filter(Boolean))]
@@ -504,7 +514,7 @@ router.post('/group', requirePermission('can_warehouse'), async (req, res) => {
 });
 
 /** Разделить существующий одиночный материал на части */
-router.post('/:id/split', requirePermission('can_warehouse'), async (req, res) => {
+router.post('/:id/split', requireWarehouseFeature('can_warehouse_split'), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Неверный id' });
 
@@ -680,7 +690,7 @@ router.post('/:id/split', requirePermission('can_warehouse'), async (req, res) =
   }
 });
 
-router.post('/:id/parts', requirePermission('can_warehouse'), async (req, res) => {
+router.post('/:id/parts', requireWarehouseFeature('can_warehouse_split'), async (req, res) => {
   const refId = parseId(req.params.id);
   if (!refId) return res.status(400).json({ error: 'Неверный id' });
 
@@ -777,7 +787,7 @@ router.post('/:id/parts', requirePermission('can_warehouse'), async (req, res) =
   }
 });
 
-router.put('/:id', requirePermission('can_warehouse'), async (req, res) => {
+router.put('/:id', requireAnyPermission('can_warehouse_edit', 'can_warehouse_move'), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Неверный id' });
 
@@ -785,6 +795,20 @@ router.put('/:id', requirePermission('can_warehouse'), async (req, res) => {
     name, description, unit, price, production_price, quantity, part_label,
     object_id, warehouse_id, rack_id, category_id, system_id, organization_id,
   } = req.body || {};
+
+  const isAdmin = req.user?.role === 'admin';
+  if (!isAdmin) {
+    if (!req.user?.can_warehouse) return res.status(403).json({ error: 'Нет доступа' });
+    const payload = req.body && typeof req.body === 'object' ? req.body : {};
+    const keys = Object.keys(payload).filter((key) => payload[key] !== undefined);
+    const locationKeys = new Set(['object_id', 'warehouse_id', 'rack_id']);
+    const isMoveOnly = keys.length > 0 && keys.every((key) => locationKeys.has(key));
+    if (isMoveOnly) {
+      if (!req.user?.can_warehouse_move) return res.status(403).json({ error: 'Нет доступа' });
+    } else if (!req.user?.can_warehouse_edit) {
+      return res.status(403).json({ error: 'Нет доступа' });
+    }
+  }
 
   const client = await pool.connect();
   try {
@@ -1134,7 +1158,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   }
 });
 
-router.get('/:id/quantity-history', requirePermission('can_warehouse'), async (req, res) => {
+router.get('/:id/quantity-history', requireWarehouseFeature('can_warehouse_view'), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Неверный id' });
 
@@ -1190,7 +1214,7 @@ router.get('/:id/quantity-history', requirePermission('can_warehouse'), async (r
   });
 });
 
-router.post('/:id/add', requirePermission('can_warehouse'), async (req, res) => {
+router.post('/:id/add', requireWarehouseFeature('can_warehouse_edit'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const amount = parseFloat(req.body?.amount) || 0;
   if (id <= 0 || amount <= 0) return res.status(400).json({ error: 'Укажите количество' });
@@ -1236,21 +1260,21 @@ router.post('/:id/add', requirePermission('can_warehouse'), async (req, res) => 
   }
 });
 
-router.get('/users-for-issuance', async (req, res) => {
+router.get('/users-for-issuance', requireAnyPermission('can_issuance', 'can_warehouse_issue'), async (req, res) => {
   const r = await pool.query(
     'SELECT id, login, display_name FROM users ORDER BY COALESCE(display_name, login)'
   );
   res.json(r.rows);
 });
 
-router.get('/import-template', requirePermission('can_warehouse'), (_req, res) => {
+router.get('/import-template', requireWarehouseFeature('can_warehouse_edit'), (_req, res) => {
   const buf = buildTemplateBuffer();
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="materials-template.xlsx"');
   res.send(buf);
 });
 
-router.post('/import/preview', requirePermission('can_warehouse'), upload.single('file'), async (req, res) => {
+router.post('/import/preview', requireWarehouseFeature('can_warehouse_edit'), upload.single('file'), async (req, res) => {
   if (!req.file?.buffer) {
     return res.status(400).json({ error: 'Выберите файл Excel (.xlsx)' });
   }
@@ -1314,7 +1338,7 @@ router.post('/import/preview', requirePermission('can_warehouse'), upload.single
   }
 });
 
-router.post('/import', requirePermission('can_warehouse'), upload.single('file'), async (req, res) => {
+router.post('/import', requireWarehouseFeature('can_warehouse_edit'), upload.single('file'), async (req, res) => {
   if (!req.file?.buffer) {
     return res.status(400).json({ error: 'Выберите файл Excel (.xlsx)' });
   }
@@ -1395,7 +1419,7 @@ router.post('/import', requirePermission('can_warehouse'), upload.single('file')
   }
 });
 
-router.post('/qr-pdf', requirePermission('can_warehouse'), async (req, res) => {
+router.post('/qr-pdf', requireWarehouseFeature('can_warehouse_view'), async (req, res) => {
   const body = req.body || {};
   const { name, code, location } = body;
   if (!code) {
@@ -1427,7 +1451,7 @@ async function loadMaterialsForExport(client, ids) {
   return r.rows;
 }
 
-router.post('/export', requirePermission('can_warehouse'), async (req, res) => {
+router.post('/export', requireWarehouseFeature('can_warehouse_view'), async (req, res) => {
   const { format, rows, ids } = req.body || {};
   const fmt = String(format || 'xlsx').toLowerCase();
   const client = await pool.connect();

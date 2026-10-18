@@ -220,6 +220,14 @@ export default function Warehouse({ user }) {
   const expandedGroupIdsRef = useRef(expandedGroupIds);
   const fileInputRef = useRef(null);
   const pendingMutations = usePendingMutations();
+  const isAdmin = user?.role === 'admin';
+  const canWarehouseView = isAdmin || !!user?.can_warehouse_view;
+  const canWarehouseEdit = isAdmin || !!user?.can_warehouse_edit;
+  const canWarehouseQrScan = isAdmin || !!user?.can_warehouse_qr_scan;
+  const canWarehouseIssue = isAdmin || !!user?.can_warehouse_issue;
+  const canWarehouseMove = isAdmin || !!user?.can_warehouse_move;
+  const canWarehouseSplit = isAdmin || !!user?.can_warehouse_split;
+  const canOpenMaterialMenu = canWarehouseEdit || canWarehouseIssue || canWarehouseMove || canWarehouseSplit;
 
   const displayList = useMemo(
     () => applyPendingToMaterials(list, pendingMutations, { catalog, issueUsers: users }),
@@ -288,6 +296,12 @@ export default function Warehouse({ user }) {
   };
 
   const load = (opts = { silent: false }) => {
+    if (!canWarehouseView) {
+      setList([]);
+      setLoading(false);
+      setError('');
+      return;
+    }
     const silent = opts.silent || list.length > 0;
     if (!silent) setLoading(true);
     materialsApi.list()
@@ -312,6 +326,11 @@ export default function Warehouse({ user }) {
   useReloadOnSyncComplete(() => load({ silent: true }));
 
   useEffect(() => {
+    if (!canWarehouseView) {
+      setList([]);
+      setLoading(false);
+      return () => {};
+    }
     let cancelled = false;
     const quick = isQuickDeviceEnabled();
     const mem = peekPageCache('warehouse:materials');
@@ -339,7 +358,7 @@ export default function Warehouse({ user }) {
       cancelled = true;
       clearInterval(t);
     };
-  }, []);
+  }, [canWarehouseView]);
 
   useEffect(() => {
     const onPointerDown = (event) => {
@@ -361,6 +380,7 @@ export default function Warehouse({ user }) {
   };
 
   const openAdd = () => {
+    if (!canWarehouseEdit) return;
     setForm(emptyMaterialForm());
     resetSplitState();
     setShowAdd(true);
@@ -419,7 +439,9 @@ export default function Warehouse({ user }) {
   };
 
   const openMaterialRowClick = (m) => {
+    if (!canWarehouseView) return;
     if (isMaterialGroupRow(m)) {
+      if (!canWarehouseSplit) return;
       setPartsModalStartAdd(false);
       setPartsModalMaterial(m);
       return;
@@ -427,7 +449,7 @@ export default function Warehouse({ user }) {
     openMaterialMenu(m);
   };
 
-  const canUseSplit = !editing || (!isMaterialPart(editing) && !isMaterialGroupRow(editing));
+  const canUseSplit = canWarehouseSplit && (!editing || (!isMaterialPart(editing) && !isMaterialGroupRow(editing)));
 
   const buildSplitPartsPayload = () => splitParts.map((p) => ({
     quantity: parseFloat(p.quantity) || 0,
@@ -483,6 +505,7 @@ export default function Warehouse({ user }) {
   };
 
   const openEdit = (m) => {
+    if (!canWarehouseEdit) return;
     resetSplitState();
     setForm(materialToForm(m));
     setEditing(m);
@@ -500,6 +523,7 @@ export default function Warehouse({ user }) {
   };
 
   const openGroupFromEdit = () => {
+    if (!canWarehouseSplit) return;
     if (!editing) return;
     if (isMaterialPart(editing)) {
       setError('Часть материала нельзя группировать');
@@ -527,6 +551,7 @@ export default function Warehouse({ user }) {
 
   const handleAdd = async (e) => {
     e.preventDefault();
+    if (!canWarehouseEdit) return;
     setError('');
     try {
       if (splitEnabled) {
@@ -555,6 +580,7 @@ export default function Warehouse({ user }) {
 
   const handleEdit = async (e) => {
     e.preventDefault();
+    if (!canWarehouseEdit && !canWarehouseMove) return;
     if (!editing) return;
     setError('');
     const isPart = isMaterialPart(editing);
@@ -611,6 +637,7 @@ export default function Warehouse({ user }) {
 
   const handleGroupMaterials = async (e) => {
     e.preventDefault();
+    if (!canWarehouseSplit) return;
     const groupedName = String(groupNameQuery || '').trim();
     if (!groupedName) {
       setError('Введите наименование для группировки');
@@ -666,6 +693,7 @@ export default function Warehouse({ user }) {
   };
 
   const handleDeleteMaterial = async () => {
+    if (!canWarehouseEdit) return;
     if (!editing || user?.role !== 'admin') return;
     const isPart = isMaterialPart(editing);
     const msg = isPart
@@ -706,6 +734,7 @@ export default function Warehouse({ user }) {
   }, [users, issueUserQuery, issueToUserId]);
 
   const openMaterialMenu = (m) => {
+    if (!canOpenMaterialMenu) return;
     setActiveMaterial(m);
     setActiveStep('menu');
     setAddQtyAmount('');
@@ -713,7 +742,7 @@ export default function Warehouse({ user }) {
     setIssueToUserId('');
     setIssueUserQuery('');
     setError('');
-    loadUsers();
+    if (canWarehouseIssue) loadUsers();
   };
 
   const closeMaterialAction = () => {
@@ -758,6 +787,7 @@ export default function Warehouse({ user }) {
   }, [activeMaterial?.id, activeStep]);
 
   const openMoveStep = () => {
+    if (!canWarehouseMove) return;
     if (!activeMaterial) return;
     if (isMaterialGroupRow(activeMaterial)) {
       setError('У группового материала перемещайте отдельные части');
@@ -770,6 +800,7 @@ export default function Warehouse({ user }) {
   };
 
   const openSplitFromMenu = () => {
+    if (!canWarehouseSplit) return;
     if (!activeMaterial) return;
     if (isMaterialGroupRow(activeMaterial)) {
       setError('Групповой материал уже разделён на части');
@@ -806,6 +837,7 @@ export default function Warehouse({ user }) {
 
   const handleMoveMaterial = async (e) => {
     e.preventDefault();
+    if (!canWarehouseMove) return;
     if (!activeMaterial || isMaterialGroupRow(activeMaterial)) return;
     setError('');
     try {
@@ -827,6 +859,7 @@ export default function Warehouse({ user }) {
 
   const handleAddQuantity = async (e) => {
     e.preventDefault();
+    if (!canWarehouseEdit) return;
     if (!activeMaterial) return;
     const amount = parseFloat(addQtyAmount);
     if (!(amount > 0)) return setError('Укажите количество');
@@ -846,6 +879,7 @@ export default function Warehouse({ user }) {
 
   const handleIssue = async (e) => {
     e.preventDefault();
+    if (!canWarehouseIssue) return;
     if (!activeMaterial) return;
     const qty = parseFloat(issueQty);
     if (!(qty > 0)) return setError('Укажите количество');
@@ -869,6 +903,7 @@ export default function Warehouse({ user }) {
   };
 
   const handleScan = (decoded) => {
+    if (!canWarehouseQrScan) return;
     const code = (decoded || '').trim();
     if (!code) return;
     materialsApi
@@ -1331,8 +1366,6 @@ export default function Warehouse({ user }) {
     }
   };
 
-  const isAdmin = user?.role === 'admin';
-
   const handleDeleteAllWarehouse = async () => {
     setClearingAll(true);
     setError('');
@@ -1383,60 +1416,72 @@ export default function Warehouse({ user }) {
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-1">
-          <button
-            type="button"
-            onClick={() => { closeMaterialAction(); setShowScan(true); setError(''); }}
-            className="btn-primary basis-full w-full sm:basis-auto sm:w-auto order-first py-3 sm:py-2 text-sm -mt-1 sm:mt-0"
-          >
-            Распознать QR код
-          </button>
+          {canWarehouseQrScan && (
+            <button
+              type="button"
+              onClick={() => { closeMaterialAction(); setShowScan(true); setError(''); }}
+              className="btn-primary basis-full w-full sm:basis-auto sm:w-auto order-first py-3 sm:py-2 text-sm -mt-1 sm:mt-0"
+            >
+              Распознать QR код
+            </button>
+          )}
           {hasActiveFilters && (
             <button type="button" onClick={resetFilters} className="btn-ghost">
               Сброс
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => { setInfo(''); fileInputRef.current?.click(); }}
-            disabled={importing || importPreviewing}
-            className="btn-ghost"
-            title="Загрузить из Excel"
-          >
-            {importPreviewing ? '…' : importing ? '…' : 'Импорт'}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={handleImportFile}
-          />
-          <button
-            type="button"
-            onClick={() => handleExport('xlsx')}
-            disabled={exporting || !sortedList.length}
-            className="btn-ghost"
-            title="Выгрузить отображаемые строки в Excel"
-          >
-            Excel
-          </button>
-          <button
-            type="button"
-            onClick={() => handleExport('pdf')}
-            disabled={exporting || !sortedList.length}
-            className="btn-ghost"
-            title="Выгрузить отображаемые строки в PDF"
-          >
-            PDF
-          </button>
-          <button
-            type="button"
-            onClick={openAdd}
-            className="btn-secondary basis-full w-full sm:basis-auto sm:w-auto order-first sm:order-none"
-          >
-            + Материал
-          </button>
-          {isAdmin && (
+          {canWarehouseEdit && (
+            <button
+              type="button"
+              onClick={() => { setInfo(''); fileInputRef.current?.click(); }}
+              disabled={importing || importPreviewing}
+              className="btn-ghost"
+              title="Загрузить из Excel"
+            >
+              {importPreviewing ? '…' : importing ? '…' : 'Импорт'}
+            </button>
+          )}
+          {canWarehouseEdit && (
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+          )}
+          {canWarehouseView && (
+            <>
+              <button
+                type="button"
+                onClick={() => handleExport('xlsx')}
+                disabled={exporting || !sortedList.length}
+                className="btn-ghost"
+                title="Выгрузить отображаемые строки в Excel"
+              >
+                Excel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleExport('pdf')}
+                disabled={exporting || !sortedList.length}
+                className="btn-ghost"
+                title="Выгрузить отображаемые строки в PDF"
+              >
+                PDF
+              </button>
+            </>
+          )}
+          {canWarehouseEdit && (
+            <button
+              type="button"
+              onClick={openAdd}
+              className="btn-secondary basis-full w-full sm:basis-auto sm:w-auto order-first sm:order-none"
+            >
+              + Материал
+            </button>
+          )}
+          {isAdmin && canWarehouseEdit && (
             <button
               type="button"
               onClick={() => setDeleteAllConfirm(true)}
@@ -1705,6 +1750,11 @@ export default function Warehouse({ user }) {
 
       {loading && <p className="text-zinc-500 text-xs">Загрузка…</p>}
 
+      {!canWarehouseView ? (
+        <div className="rounded-xl border border-white/10 bg-zinc-900/60 p-4">
+          <p className="text-zinc-400 text-sm">Нет доступа к отображению материалов склада.</p>
+        </div>
+      ) : (
       <div className="table-wrap">
         <div className="filter-toolbar">
           <MultiSelectFilter
@@ -1925,15 +1975,22 @@ export default function Warehouse({ user }) {
                   const rowCost = rowQty * rowUnitPrice;
                   const rowSmr = rowQty * rowUnitSmr;
                   const partNames = isChild ? materialPartDisplayName(row, m.name) : null;
+                  const rowCanOpen = isChild
+                    ? canOpenMaterialMenu
+                    : (isGroup ? canWarehouseSplit : canOpenMaterialMenu);
                   return (
                     <tr
                       key={isChild ? `part-${row.id}` : row.id}
                       className={withPendingRowClass(
-                        `cursor-pointer ${isChild ? 'bg-zinc-900/50' : ''}`,
+                        `${rowCanOpen ? 'cursor-pointer' : ''} ${isChild ? 'bg-zinc-900/50' : ''}`,
                         row,
                       )}
                       title={row._pending ? 'Ожидает отправки на сервер' : undefined}
-                      onClick={() => (isChild ? openMaterialMenu(row) : openMaterialRowClick(row))}
+                      onClick={() => {
+                        if (!rowCanOpen) return;
+                        if (isChild) openMaterialMenu(row);
+                        else openMaterialRowClick(row);
+                      }}
                     >
                       <td className="text-center text-zinc-500 text-2xs tabular-nums whitespace-nowrap">
                         <span className="inline-flex items-center justify-center gap-1 min-w-[3rem]">
@@ -2060,7 +2117,7 @@ export default function Warehouse({ user }) {
                       </td>
                       <td className="w-40" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1 justify-end whitespace-nowrap">
-                          {!isChild && isGroup && (
+                          {!isChild && isGroup && canWarehouseSplit && (
                             <button
                               type="button"
                               onClick={(e) => {
@@ -2073,13 +2130,15 @@ export default function Warehouse({ user }) {
                               + В группу
                             </button>
                           )}
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); openEdit(row); }}
-                            className="btn-ghost px-1"
-                          >
-                            Изм
-                          </button>
+                          {canWarehouseEdit && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); openEdit(row); }}
+                              className="btn-ghost px-1"
+                            >
+                              Изм
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -2111,6 +2170,7 @@ export default function Warehouse({ user }) {
           <p className="p-4 text-center text-zinc-500 text-xs">Ничего не найдено</p>
         )}
       </div>
+      )}
 
       {showQrMaterial && (
         <MaterialQrModal
@@ -2120,7 +2180,7 @@ export default function Warehouse({ user }) {
         />
       )}
 
-      {partsModalMaterial && (
+      {canWarehouseSplit && partsModalMaterial && (
         <MaterialPartsModal
           material={partsModalMaterial}
           startAddPart={partsModalStartAdd}
@@ -2139,7 +2199,7 @@ export default function Warehouse({ user }) {
         />
       )}
 
-      {(showAdd || editing) && (
+      {canWarehouseEdit && (showAdd || editing) && (
         <div className="modal-backdrop">
           <div className="card p-6 max-w-lg w-full my-8 max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-medium text-white mb-2">
@@ -2545,7 +2605,7 @@ export default function Warehouse({ user }) {
         </div>
       )}
 
-      {showScan && !activeMaterial && (
+      {canWarehouseQrScan && showScan && !activeMaterial && (
         <QrScanner onScan={handleScan} onClose={closeScan} />
       )}
 
@@ -2600,18 +2660,22 @@ export default function Warehouse({ user }) {
             })()}
             {error && <p className="text-red-400 text-xs mb-3">{error}</p>}
             <div className="flex flex-col gap-2">
-              <button type="button" onClick={() => setActiveStep('add')} className="btn-primary w-full py-2.5">
-                Добавить
-              </button>
-              <button type="button" onClick={() => setActiveStep('issue')} className="btn-secondary w-full py-2.5">
-                Выдать
-              </button>
-              {!isMaterialGroupRow(activeMaterial) && (
+              {canWarehouseEdit && (
+                <button type="button" onClick={() => setActiveStep('add')} className="btn-primary w-full py-2.5">
+                  Добавить
+                </button>
+              )}
+              {canWarehouseIssue && (
+                <button type="button" onClick={() => setActiveStep('issue')} className="btn-secondary w-full py-2.5">
+                  Выдать
+                </button>
+              )}
+              {!isMaterialGroupRow(activeMaterial) && canWarehouseMove && (
                 <button type="button" onClick={openMoveStep} className="btn-secondary w-full py-2.5">
                   Переместить
                 </button>
               )}
-              {!isMaterialGroupRow(activeMaterial) && !isMaterialPart(activeMaterial) && (
+              {!isMaterialGroupRow(activeMaterial) && !isMaterialPart(activeMaterial) && canWarehouseSplit && (
                 <button type="button" onClick={openSplitFromMenu} className="btn-secondary w-full py-2.5">
                   Разделить
                 </button>
@@ -2624,7 +2688,7 @@ export default function Warehouse({ user }) {
         </div>
       )}
 
-      {activeMaterial && activeStep === 'add' && (
+      {canWarehouseEdit && activeMaterial && activeStep === 'add' && (
         <div className="modal-backdrop z-50" onClick={closeMaterialAction}>
           <div className="card p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-white mb-1">Добавить: {activeMaterial.name}</h3>
@@ -2663,7 +2727,7 @@ export default function Warehouse({ user }) {
         />
       )}
 
-      {activeMaterial && activeStep === 'move' && (
+      {canWarehouseMove && activeMaterial && activeStep === 'move' && (
         <div className="modal-backdrop z-50" onClick={closeMaterialAction}>
           <div className="card p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-white mb-1">
@@ -2695,7 +2759,7 @@ export default function Warehouse({ user }) {
         </div>
       )}
 
-      {activeMaterial && activeStep === 'issue' && (
+      {canWarehouseIssue && activeMaterial && activeStep === 'issue' && (
         <div className="modal-backdrop z-50" onClick={closeMaterialAction}>
           <div className="card p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-white mb-1">Выдать: {activeMaterial.name}</h3>

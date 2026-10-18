@@ -78,6 +78,12 @@ export default function RolesTab() {
       name: '',
       ...base,
       can_warehouse: true,
+      can_warehouse_view: true,
+      can_warehouse_edit: true,
+      can_warehouse_qr_scan: true,
+      can_warehouse_issue: true,
+      can_warehouse_move: true,
+      can_warehouse_split: true,
       can_issuance: true,
       can_issuance_all_issued: false,
       can_issuance_all_received: false,
@@ -109,6 +115,21 @@ export default function RolesTab() {
       if (key === 'can_tasks' && !value) {
         next.can_task_notifications = false;
         next.can_tasks_all = false;
+      }
+      if (key === 'can_warehouse' && !value) {
+        next.can_warehouse_view = false;
+        next.can_warehouse_edit = false;
+        next.can_warehouse_qr_scan = false;
+        next.can_warehouse_issue = false;
+        next.can_warehouse_move = false;
+        next.can_warehouse_split = false;
+      } else if (key === 'can_warehouse' && value) {
+        next.can_warehouse_view = true;
+        next.can_warehouse_edit = true;
+        next.can_warehouse_qr_scan = true;
+        next.can_warehouse_issue = true;
+        next.can_warehouse_move = true;
+        next.can_warehouse_split = true;
       }
       if (key === 'can_issuance' && !value) {
         next.can_issuance_all = false;
@@ -366,9 +387,19 @@ export default function RolesTab() {
                           .map((p) => {
                             const requiresTasks = p.key === 'can_task_notifications';
                             const requiresTools = p.key === 'can_tools_delete';
+                            const warehouseFeatureKeys = new Set([
+                              'can_warehouse_view',
+                              'can_warehouse_edit',
+                              'can_warehouse_qr_scan',
+                              'can_warehouse_issue',
+                              'can_warehouse_move',
+                              'can_warehouse_split',
+                            ]);
+                            const requiresWarehouse = warehouseFeatureKeys.has(p.key);
                             const disabledByDependencies = (
                               (requiresTasks && !(editing?.is_admin_role || form.can_tasks))
                               || (requiresTools && !(editing?.is_admin_role || form.can_tools))
+                              || (requiresWarehouse && !(editing?.is_admin_role || form.can_warehouse))
                             );
                             return (
                             <div key={p.key}>

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import pool from '../db/pool.js';
-import { requireAuth, loadUser, requirePermission, requireAdmin } from '../middleware/auth.js';
+import { requireAuth, loadUser, requirePermission, requireAnyPermission, requireAdmin } from '../middleware/auth.js';
 import { logQuantityChange } from '../lib/material-quantity-log.js';
 import { buildExportXlsx, buildExportPdf } from '../lib/issuance-export.js';
 
@@ -8,7 +8,7 @@ const router = Router();
 
 router.use(requireAuth);
 router.use(loadUser);
-router.use(requirePermission('can_issuance'));
+router.use(requireAnyPermission('can_issuance', 'can_warehouse_issue'));
 
 let ensureProductionAllocationSchemaPromise = null;
 
@@ -200,7 +200,7 @@ router.post('/issue', async (req, res) => {
 });
 
 // Вернуть на склад (частичный или полный возврат)
-router.post('/return', async (req, res) => {
+router.post('/return', requirePermission('can_issuance'), async (req, res) => {
   const { issuance_id, returned_quantity } = req.body || {};
   const retQty = parseFloat(returned_quantity);
   if (!issuance_id || !(retQty > 0)) {
@@ -294,7 +294,7 @@ router.post('/return', async (req, res) => {
 });
 
 // Передать материал от одного получателя другому (без изменения остатков склада)
-router.post('/transfer', async (req, res) => {
+router.post('/transfer', requirePermission('can_issuance'), async (req, res) => {
   const { issuance_id, issued_to_user_id, quantity, note } = req.body || {};
   const issuanceId = Number(issuance_id);
   const toUserId = Number(issued_to_user_id);
@@ -410,7 +410,7 @@ router.post('/transfer', async (req, res) => {
 });
 
 // Установить итоговое возвращённое количество (редактирование возврата)
-router.patch('/issuances/:id/returned', async (req, res) => {
+router.patch('/issuances/:id/returned', requirePermission('can_issuance'), async (req, res) => {
   const issuanceId = parseInt(req.params.id, 10);
   const newReturned = parseFloat(req.body?.returned_quantity);
   if (!issuanceId || Number.isNaN(newReturned) || newReturned < 0) {
@@ -510,7 +510,7 @@ router.patch('/issuances/:id/returned', async (req, res) => {
   }
 });
 
-router.delete('/issuances/:id(\\d+)', requireAdmin, async (req, res) => {
+router.delete('/issuances/:id(\\d+)', requirePermission('can_issuance'), requireAdmin, async (req, res) => {
   const issuanceId = parseInt(req.params.id, 10);
   if (!issuanceId) return res.status(400).json({ error: 'Неверный id' });
 
@@ -576,7 +576,7 @@ router.delete('/issuances/:id(\\d+)', requireAdmin, async (req, res) => {
   }
 });
 
-router.delete('/issuances/all', requireAdmin, async (req, res) => {
+router.delete('/issuances/all', requirePermission('can_issuance'), requireAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -646,7 +646,7 @@ router.delete('/issuances/all', requireAdmin, async (req, res) => {
 });
 
 // Список выдач (для вкладки выдачи и возвратов)
-router.get('/issuances', async (req, res) => {
+router.get('/issuances', requirePermission('can_issuance'), async (req, res) => {
   const canViewAllByIssued = req.user?.role === 'admin'
     || !!req.user?.can_issuance_all
     || !!req.user?.can_issuance_all_issued;
@@ -690,7 +690,7 @@ router.get('/issuances', async (req, res) => {
   res.json(r.rows);
 });
 
-router.get('/issuances/:id/production-distribution', async (req, res) => {
+router.get('/issuances/:id/production-distribution', requirePermission('can_issuance'), async (req, res) => {
   const issuanceId = parseId(req.params.id);
   if (!issuanceId) return res.status(400).json({ error: 'Неверный id выдачи' });
 
@@ -739,7 +739,7 @@ router.get('/issuances/:id/production-distribution', async (req, res) => {
   res.json(rows);
 });
 
-router.post('/issuances/:id/production-distribution', async (req, res) => {
+router.post('/issuances/:id/production-distribution', requirePermission('can_issuance'), async (req, res) => {
   const issuanceId = parseId(req.params.id);
   if (!issuanceId) return res.status(400).json({ error: 'Неверный id выдачи' });
 
@@ -1081,7 +1081,7 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
   }
 });
 
-router.delete('/issuances/:id/production-distribution', async (req, res) => {
+router.delete('/issuances/:id/production-distribution', requirePermission('can_issuance'), async (req, res) => {
   const issuanceId = parseId(req.params.id);
   const locationSystemId = parseId(req.body?.location_system_id);
   const transitCableLineId = parseId(req.body?.transit_cable_line_id);
@@ -1202,7 +1202,7 @@ router.delete('/issuances/:id/production-distribution', async (req, res) => {
   }
 });
 
-router.post('/export', async (req, res) => {
+router.post('/export', requirePermission('can_issuance'), async (req, res) => {
   const { format, rows, meta } = req.body || {};
   if (!Array.isArray(rows) || rows.length === 0) {
     return res.status(400).json({ error: 'Нет данных для выгрузки' });

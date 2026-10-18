@@ -7,6 +7,42 @@ export const APP_PERMISSIONS = [
     group: 'Основные разделы',
   },
   {
+    key: 'can_warehouse_view',
+    label: 'Склад: просмотр материалов',
+    description: 'Отображение списка материалов и просмотр карточек',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_edit',
+    label: 'Склад: редактирование материалов',
+    description: 'Добавление и изменение материалов, приход, импорт',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_qr_scan',
+    label: 'Склад: распознавание QR',
+    description: 'Поиск материалов через QR-сканер',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_issue',
+    label: 'Склад: выдача материалов',
+    description: 'Выдача материалов сотрудникам из карточки склада',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_move',
+    label: 'Склад: перемещение материалов',
+    description: 'Перемещение между объектами/складами/стеллажами',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_split',
+    label: 'Склад: разделение материалов',
+    description: 'Разделение на части и группировка',
+    group: 'Основные разделы',
+  },
+  {
     key: 'can_issuance',
     label: 'Выдача',
     description: 'Выдача материалов сотрудникам, возвраты, сканирование QR',
@@ -271,6 +307,14 @@ export function permissionsFromBody(body = {}) {
   }
   if (!perms.can_actions) {
     perms.can_actions_all = false;
+  }
+  if (!perms.can_warehouse) {
+    perms.can_warehouse_view = false;
+    perms.can_warehouse_edit = false;
+    perms.can_warehouse_qr_scan = false;
+    perms.can_warehouse_issue = false;
+    perms.can_warehouse_move = false;
+    perms.can_warehouse_split = false;
   }
   if (!perms.can_attendance) {
     perms.can_attendance_all = false;
