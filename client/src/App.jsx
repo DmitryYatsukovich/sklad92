@@ -90,6 +90,11 @@ export default function App() {
   const taskSeenStorageKeyRef = useRef('');
   userRef.current = user;
 
+  useEffect(() => {
+    setQuickDeviceEnabled(false);
+    clearOfflineSession().catch(() => {});
+  }, []);
+
   const markActiveSession = useCallback((active) => {
     try {
       if (active) sessionStorage.setItem(ACTIVE_SESSION_KEY, '1');

@@ -90,7 +90,6 @@ export default function RolesTab() {
       can_production: true,
       can_objects: true,
       can_tools: true,
-      can_offline_mode: true,
     });
     setError('');
     setFormOpen(true);

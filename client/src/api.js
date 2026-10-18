@@ -85,13 +85,13 @@ async function readFromOfflineCache(path) {
 async function request(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const bodyText = typeof options.body === 'string' ? options.body : null;
+  const quickDevice = isQuickDeviceEnabled();
   const queueable = shouldQueueOfflineMutation(path, method);
   const cacheableGet = method === 'GET' && shouldCacheGetPath(path);
-  const quickDevice = isQuickDeviceEnabled();
 
   const deferForPendingRefs = queueable && mutationNeedsOfflineQueue(path, method, bodyText);
 
-  if (queueable && (!navigator.onLine || deferForPendingRefs)) {
+  if (quickDevice && queueable && (!navigator.onLine || deferForPendingRefs)) {
     await enqueueOfflineMutation(path, method, bodyText);
   }
 
@@ -131,7 +131,7 @@ async function request(path, options = {}) {
       const cached = await readFromOfflineCache(path);
       if (cached != null) return cached;
     }
-    if (queueable && (isNetworkFailure(e) || !navigator.onLine || deferForPendingRefs)) {
+    if (quickDevice && queueable && (isNetworkFailure(e) || !navigator.onLine || deferForPendingRefs)) {
       await enqueueOfflineMutation(path, method, bodyText);
     }
     throw e;

@@ -7,5 +7,5 @@ function permCase(key) {
        ELSE COALESCE(p.${key}, false) END AS ${key}`;
 }
 
-/** Права: системный admin — всё; при role_id — только роль; иначе user_permissions */
+/** Права: полный доступ только через admin_permission_bypass; иначе из роли или user_permissions. */
 export const PERMISSIONS_SELECT = PERMISSION_KEYS.map(permCase).join(',\n  ');
