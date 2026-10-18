@@ -2869,7 +2869,7 @@ export default function ObjectSettingsTabRefactored() {
                       Math.min(segmentA.x1, segmentA.x2),
                       Math.min(segmentB.x1, segmentB.x2),
                     );
-                    if (overlap > 0.2) score += (0.8 + (overlap * 0.18));
+                    if (overlap > 0.2) score += (1.25 + (overlap * 0.42));
                   } else {
                     if (Math.abs(segmentA.x1 - segmentB.x1) > 0.8) return;
                     const overlap = Math.min(
@@ -2879,7 +2879,7 @@ export default function ObjectSettingsTabRefactored() {
                       Math.min(segmentA.y1, segmentA.y2),
                       Math.min(segmentB.y1, segmentB.y2),
                     );
-                    if (overlap > 0.2) score += (0.8 + (overlap * 0.18));
+                    if (overlap > 0.2) score += (1.25 + (overlap * 0.42));
                   }
                   return;
                 }
@@ -2889,19 +2889,22 @@ export default function ObjectSettingsTabRefactored() {
                 const y = horizontal.y1;
                 if (!segmentContains(horizontal, x, y) || !segmentContains(vertical, x, y)) return;
                 if (!farFromEndpoints(horizontal, x, y, 2.2) || !farFromEndpoints(vertical, x, y, 2.2)) return;
-                score += 1.6;
+                score += 2.8;
               });
             });
             return score;
           };
-          const buildCandidateSegments = (item, laneRank) => {
+          const buildCandidateSegments = (item, laneRank, sideMode = 'auto') => {
             const excludeSlotIds = new Set([item.fromSlotId, item.toSlotId].filter(Boolean));
             const duplicateOffset = duplicateOffsetByKey.get(item.key) || 0;
             const laneShift = (laneRank - ((arranged.length - 1) / 2)) * laneSpacing;
             const points = [];
             if (hasTransitRoute && item.transit) {
               const averageX = (item.from.center.x + item.to.center.x) / 2;
-              const useRightTransitSide = averageX >= item.transit.center.x;
+              const autoRight = averageX >= item.transit.center.x;
+              const useRightTransitSide = sideMode === 'left'
+                ? false
+                : (sideMode === 'right' ? true : autoRight);
               const laneBase = useRightTransitSide ? (item.transit.right - 6) : (item.transit.left + 6);
               const laneXHint = laneBase + laneShift;
               const fromEdge = chooseAdaptiveEdge({
@@ -2953,7 +2956,7 @@ export default function ObjectSettingsTabRefactored() {
               const directionRight = item.to.center.x >= item.from.center.x;
               const freeRight = gridRect.width - globalRight;
               const freeLeft = globalLeft;
-              let useRight = directionRight;
+              let useRight = sideMode === 'left' ? false : (sideMode === 'right' ? true : directionRight);
               if (useRight && freeRight < 10 && freeLeft > freeRight) useRight = false;
               if (!useRight && freeLeft < 10 && freeRight > freeLeft) useRight = true;
               const rightBase = Math.min(gridRect.width - 6, globalRight + 8);
@@ -3008,34 +3011,46 @@ export default function ObjectSettingsTabRefactored() {
             return buildSegments(points);
           };
           const laneRankByKey = new Map();
+          const sideModeByKey = new Map();
           const availableLaneRanks = new Set(arranged.map((_, index) => index));
           const groupPreviewSegments = [];
           const lanePickOrder = [...arranged].sort((a, b) => (
             Math.abs(b.from.center.y - b.to.center.y) - Math.abs(a.from.center.y - a.to.center.y)
           ) || naturalCompare(a.key, b.key));
+          const sideOptions = ['auto', 'left', 'right'];
           lanePickOrder.forEach((item) => {
             let bestRank = null;
+            let bestSideMode = 'auto';
             let bestScore = Number.POSITIVE_INFINITY;
             let bestSegments = null;
             availableLaneRanks.forEach((laneRank) => {
-              const candidateSegments = buildCandidateSegments(item, laneRank);
-              const crossingScore = scoreSegmentsAgainst(candidateSegments, [...committedSegments, ...groupPreviewSegments]);
-              const distancePenalty = Math.abs((preferredRankByKey.get(item.key) ?? laneRank) - laneRank) * 0.09;
-              const score = crossingScore + distancePenalty;
-              if (score + 0.0001 < bestScore) {
-                bestScore = score;
-                bestRank = laneRank;
-                bestSegments = candidateSegments;
-              }
+              sideOptions.forEach((sideMode) => {
+                const candidateSegments = buildCandidateSegments(item, laneRank, sideMode);
+                const crossingScore = scoreSegmentsAgainst(candidateSegments, [...committedSegments, ...groupPreviewSegments]);
+                const distancePenalty = Math.abs((preferredRankByKey.get(item.key) ?? laneRank) - laneRank) * 0.09;
+                const sidePenalty = sideMode === 'auto' ? 0 : 0.05;
+                const score = crossingScore + distancePenalty + sidePenalty;
+                if (score + 0.0001 < bestScore) {
+                  bestScore = score;
+                  bestRank = laneRank;
+                  bestSideMode = sideMode;
+                  bestSegments = candidateSegments;
+                }
+              });
             });
             if (bestRank == null) return;
             laneRankByKey.set(item.key, bestRank);
+            sideModeByKey.set(item.key, bestSideMode);
             availableLaneRanks.delete(bestRank);
             if (bestSegments?.length) groupPreviewSegments.push(...bestSegments);
           });
-          const evaluateLaneMapScore = (rankMap) => {
+          const evaluateLaneMapScore = (rankMap, sideMap) => {
             const itemSegments = arranged.map((item, idx) => (
-              buildCandidateSegments(item, rankMap.get(item.key) ?? idx)
+              buildCandidateSegments(
+                item,
+                rankMap.get(item.key) ?? idx,
+                sideMap.get(item.key) || 'auto',
+              )
             ));
             let score = 0;
             for (let i = 0; i < itemSegments.length; i += 1) {
@@ -3046,7 +3061,7 @@ export default function ObjectSettingsTabRefactored() {
             }
             return score;
           };
-          let laneScore = evaluateLaneMapScore(laneRankByKey);
+          let laneScore = evaluateLaneMapScore(laneRankByKey, sideModeByKey);
           for (let pass = 0; pass < Math.min(8, arranged.length + 1); pass += 1) {
             let improved = false;
             const rankedItems = [...arranged].sort((a, b) => (
@@ -3061,7 +3076,7 @@ export default function ObjectSettingsTabRefactored() {
               const candidateMap = new Map(laneRankByKey);
               candidateMap.set(left.key, rightRank);
               candidateMap.set(right.key, leftRank);
-              const candidateScore = evaluateLaneMapScore(candidateMap);
+              const candidateScore = evaluateLaneMapScore(candidateMap, sideModeByKey);
               if (candidateScore + 0.001 < laneScore) {
                 laneRankByKey.set(left.key, rightRank);
                 laneRankByKey.set(right.key, leftRank);
@@ -3069,17 +3084,35 @@ export default function ObjectSettingsTabRefactored() {
                 improved = true;
               }
             }
+            arranged.forEach((item) => {
+              const currentSide = sideModeByKey.get(item.key) || 'auto';
+              sideOptions.forEach((candidateSide) => {
+                if (candidateSide === currentSide) return;
+                const candidateSideMap = new Map(sideModeByKey);
+                candidateSideMap.set(item.key, candidateSide);
+                const candidateScore = evaluateLaneMapScore(laneRankByKey, candidateSideMap);
+                if (candidateScore + 0.001 < laneScore) {
+                  sideModeByKey.set(item.key, candidateSide);
+                  laneScore = candidateScore;
+                  improved = true;
+                }
+              });
+            });
             if (!improved) break;
           }
           arranged.forEach((item, index) => {
             const laneRank = laneRankByKey.get(item.key) ?? index;
+            const sideMode = sideModeByKey.get(item.key) || 'auto';
             const excludeSlotIds = new Set([item.fromSlotId, item.toSlotId].filter(Boolean));
             const duplicateOffset = duplicateOffsetByKey.get(item.key) || 0;
             const points = [];
             if (hasTransitRoute && item.transit) {
               const laneShift = (laneRank - ((arranged.length - 1) / 2)) * laneSpacing;
               const averageX = (item.from.center.x + item.to.center.x) / 2;
-              const useRightTransitSide = averageX >= item.transit.center.x;
+              const autoRight = averageX >= item.transit.center.x;
+              const useRightTransitSide = sideMode === 'left'
+                ? false
+                : (sideMode === 'right' ? true : autoRight);
               const laneBase = useRightTransitSide ? (item.transit.right - 6) : (item.transit.left + 6);
               const laneXHint = laneBase + laneShift;
               const fromEdge = chooseAdaptiveEdge({
@@ -3158,7 +3191,7 @@ export default function ObjectSettingsTabRefactored() {
               const directionRight = item.to.center.x >= item.from.center.x;
               const freeRight = gridRect.width - globalRight;
               const freeLeft = globalLeft;
-              let useRight = directionRight;
+              let useRight = sideMode === 'left' ? false : (sideMode === 'right' ? true : directionRight);
               if (useRight && freeRight < 10 && freeLeft > freeRight) useRight = false;
               if (!useRight && freeLeft < 10 && freeRight > freeLeft) useRight = true;
               const rightBase = Math.min(gridRect.width - 6, globalRight + 8);
@@ -4402,21 +4435,39 @@ export default function ObjectSettingsTabRefactored() {
                                   {(entranceOverlay.jumps || []).map((jump) => (
                                     <g key={`jump-${jump.key}`} pointerEvents="none">
                                       {jump.orientation === 'vertical' ? (
-                                        <path
-                                          d={`M ${jump.x} ${jump.y - 2.45} Q ${jump.x + 2.55} ${jump.y} ${jump.x} ${jump.y + 2.45}`}
-                                          fill="none"
-                                          stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
-                                          strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '0.86' : '0.72'}
-                                          strokeLinecap="round"
-                                        />
+                                        <>
+                                          <path
+                                            d={`M ${jump.x} ${jump.y - 2.2} L ${jump.x} ${jump.y + 2.2}`}
+                                            fill="none"
+                                            stroke="#09090B"
+                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '1.5' : '1.35'}
+                                            strokeLinecap="round"
+                                          />
+                                          <path
+                                            d={`M ${jump.x} ${jump.y - 2.45} Q ${jump.x + 2.55} ${jump.y} ${jump.x} ${jump.y + 2.45}`}
+                                            fill="none"
+                                            stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
+                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '0.86' : '0.72'}
+                                            strokeLinecap="round"
+                                          />
+                                        </>
                                       ) : (
-                                        <path
-                                          d={`M ${jump.x - 2.45} ${jump.y} Q ${jump.x} ${jump.y - 2.55} ${jump.x + 2.45} ${jump.y}`}
-                                          fill="none"
-                                          stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
-                                          strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '0.86' : '0.72'}
-                                          strokeLinecap="round"
-                                        />
+                                        <>
+                                          <path
+                                            d={`M ${jump.x - 2.2} ${jump.y} L ${jump.x + 2.2} ${jump.y}`}
+                                            fill="none"
+                                            stroke="#09090B"
+                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '1.5' : '1.35'}
+                                            strokeLinecap="round"
+                                          />
+                                          <path
+                                            d={`M ${jump.x - 2.45} ${jump.y} Q ${jump.x} ${jump.y - 2.55} ${jump.x + 2.45} ${jump.y}`}
+                                            fill="none"
+                                            stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
+                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '0.86' : '0.72'}
+                                            strokeLinecap="round"
+                                          />
+                                        </>
                                       )}
                                     </g>
                                   ))}
