@@ -210,6 +210,7 @@ export default function Warehouse({ user }) {
   const [partsModalStartAdd, setPartsModalStartAdd] = useState(false);
   const [activePartGroupParts, setActivePartGroupParts] = useState([]);
   const [activePartGroupLoading, setActivePartGroupLoading] = useState(false);
+  const [activeMaterialSource, setActiveMaterialSource] = useState(null); // 'row' | 'scan' | null
   const [splitEnabled, setSplitEnabled] = useState(false);
   const [splitSaved, setSplitSaved] = useState(false);
   const [splitParts, setSplitParts] = useState(() => defaultSplitParts(1));
@@ -231,7 +232,51 @@ export default function Warehouse({ user }) {
   const canWarehouseMove = isAdmin || !!user?.can_warehouse_move;
   const canWarehouseSplit = isAdmin || !!user?.can_warehouse_split;
   const canWarehouseDelete = isAdmin || !!user?.can_warehouse_delete;
+  const canWarehouseFilters = isAdmin || !!user?.can_warehouse_filters;
+  const canWarehouseIssueQrOnly = isAdmin || !!user?.can_warehouse_issue_qr_only;
+  const canWarehouseImport = isAdmin || !!user?.can_warehouse_import;
+  const canWarehouseExport = isAdmin || !!user?.can_warehouse_export;
+  const canWarehouseColNumber = isAdmin || !!user?.can_warehouse_col_number;
+  const canWarehouseColQr = isAdmin || !!user?.can_warehouse_col_qr;
+  const canWarehouseColName = isAdmin || !!user?.can_warehouse_col_name;
+  const canWarehouseColUnit = isAdmin || !!user?.can_warehouse_col_unit;
+  const canWarehouseColQuantity = isAdmin || !!user?.can_warehouse_col_quantity;
+  const canWarehouseColOnHands = isAdmin || !!user?.can_warehouse_col_on_hands;
+  const canWarehouseColObject = isAdmin || !!user?.can_warehouse_col_object;
+  const canWarehouseColWarehouse = isAdmin || !!user?.can_warehouse_col_warehouse;
+  const canWarehouseColRack = isAdmin || !!user?.can_warehouse_col_rack;
+  const canWarehouseColSystem = isAdmin || !!user?.can_warehouse_col_system;
+  const canWarehouseColOrganization = isAdmin || !!user?.can_warehouse_col_organization;
+  const canWarehouseColCategory = isAdmin || !!user?.can_warehouse_col_category;
+  const canWarehouseColPrice = isAdmin || !!user?.can_warehouse_col_price;
+  const canWarehouseColCostTotal = isAdmin || !!user?.can_warehouse_col_cost_total;
+  const canWarehouseColSmrUnit = isAdmin || !!user?.can_warehouse_col_smr_unit;
+  const canWarehouseColSmrTotal = isAdmin || !!user?.can_warehouse_col_smr_total;
+  const canWarehouseColUpdatedAt = isAdmin || !!user?.can_warehouse_col_updated_at;
+  const canWarehouseColDescription = isAdmin || !!user?.can_warehouse_col_description;
   const canOpenMaterialMenu = canWarehouseEdit || canWarehouseIssue || canWarehouseMove || canWarehouseSplit || canWarehouseDelete;
+  const canIssueFromMaterialMenu = canWarehouseIssue && !(canWarehouseIssueQrOnly && activeMaterialSource !== 'scan');
+  const visibleTableColumnCount = [
+    canWarehouseColNumber,
+    canWarehouseColQr,
+    canWarehouseColName,
+    canWarehouseColUnit,
+    canWarehouseColQuantity,
+    canWarehouseColOnHands,
+    canWarehouseColObject,
+    canWarehouseColWarehouse,
+    canWarehouseColRack,
+    canWarehouseColSystem,
+    canWarehouseColOrganization,
+    canWarehouseColCategory,
+    canWarehouseColPrice,
+    canWarehouseColCostTotal,
+    canWarehouseColSmrUnit,
+    canWarehouseColSmrTotal,
+    canWarehouseColUpdatedAt,
+    canWarehouseColDescription,
+    canOpenMaterialMenu || canWarehouseEdit || canWarehouseSplit,
+  ].filter(Boolean).length || 1;
 
   const displayList = useMemo(
     () => applyPendingToMaterials(list, pendingMutations, { catalog, issueUsers: users }),
@@ -458,7 +503,7 @@ export default function Warehouse({ user }) {
       setPartsModalMaterial(m);
       return;
     }
-    openMaterialMenu(m);
+    openMaterialMenu(m, { source: 'row' });
   };
 
   const canUseSplit = canWarehouseSplit && (!editing || (!isMaterialPart(editing) && !isMaterialGroupRow(editing)));
@@ -766,9 +811,10 @@ export default function Warehouse({ user }) {
     setIssueUserHighlightIndex(-1);
   };
 
-  const openMaterialMenu = (m) => {
+  const openMaterialMenu = (m, { source = 'row' } = {}) => {
     if (!canOpenMaterialMenu) return;
     setActiveMaterial(m);
+    setActiveMaterialSource(source);
     setActiveStep('menu');
     setAddQtyAmount('');
     setIssueQty('');
@@ -782,6 +828,7 @@ export default function Warehouse({ user }) {
 
   const closeMaterialAction = () => {
     setActiveMaterial(null);
+    setActiveMaterialSource(null);
     setActiveStep(null);
     setAddQtyAmount('');
     setIssueQty('');
@@ -950,7 +997,7 @@ export default function Warehouse({ user }) {
         if (isMaterialGroupRow(m)) {
           openMaterialRowClick(m);
         } else {
-          openMaterialMenu(m);
+          openMaterialMenu(m, { source: 'scan' });
         }
       })
       .catch(() => setError('Материал не найден'));
@@ -974,27 +1021,31 @@ export default function Warehouse({ user }) {
     return catalog.racks.filter((r) => warehouseIds.has(Number(r.warehouse_id)));
   }, [catalog.racks, filters.warehouse_ids]);
 
+  const effectiveFilters = canWarehouseFilters ? filters : createEmptyFilters();
+  const effectiveNameSearch = canWarehouseFilters ? nameSearch : '';
+  const effectiveDescriptionSearch = canWarehouseFilters ? descriptionSearch : '';
+
   const hasActiveFilters = useMemo(
     () => (
-      Object.values(filters).some((values) => Array.isArray(values) && values.length > 0)
-      || Boolean(nameSearch.trim())
-      || Boolean(descriptionSearch.trim())
+      Object.values(effectiveFilters).some((values) => Array.isArray(values) && values.length > 0)
+      || Boolean(effectiveNameSearch.trim())
+      || Boolean(effectiveDescriptionSearch.trim())
     ),
-    [filters, nameSearch, descriptionSearch],
+    [effectiveFilters, effectiveNameSearch, effectiveDescriptionSearch],
   );
 
   const materialMatchesActiveFilters = (row) => {
-    const nameQuery = nameSearch.trim().toLowerCase();
-    const descriptionQuery = descriptionSearch.trim().toLowerCase();
+    const nameQuery = effectiveNameSearch.trim().toLowerCase();
+    const descriptionQuery = effectiveDescriptionSearch.trim().toLowerCase();
     if (nameQuery && !String(row.name || '').toLowerCase().includes(nameQuery)) return false;
     if (descriptionQuery && !String(row.description || '').toLowerCase().includes(descriptionQuery)) return false;
-    if (filters.object_ids.length && !filters.object_ids.includes(String(row.object_id || ''))) return false;
-    if (filters.warehouse_ids.length && !filters.warehouse_ids.includes(String(row.warehouse_id || ''))) return false;
-    if (filters.rack_ids.length && !filters.rack_ids.includes(String(row.rack_id || ''))) return false;
-    if (filters.category_ids.length && !filters.category_ids.includes(String(row.category_id || ''))) return false;
-    if (filters.system_ids.length && !filters.system_ids.includes(String(row.system_id || ''))) return false;
-    if (filters.organization_ids.length && !filters.organization_ids.includes(String(row.organization_id || ''))) return false;
-    if (filters.updated_dates.length && !filters.updated_dates.includes(updatedDayKey(row.updated_at))) return false;
+    if (effectiveFilters.object_ids.length && !effectiveFilters.object_ids.includes(String(row.object_id || ''))) return false;
+    if (effectiveFilters.warehouse_ids.length && !effectiveFilters.warehouse_ids.includes(String(row.warehouse_id || ''))) return false;
+    if (effectiveFilters.rack_ids.length && !effectiveFilters.rack_ids.includes(String(row.rack_id || ''))) return false;
+    if (effectiveFilters.category_ids.length && !effectiveFilters.category_ids.includes(String(row.category_id || ''))) return false;
+    if (effectiveFilters.system_ids.length && !effectiveFilters.system_ids.includes(String(row.system_id || ''))) return false;
+    if (effectiveFilters.organization_ids.length && !effectiveFilters.organization_ids.includes(String(row.organization_id || ''))) return false;
+    if (effectiveFilters.updated_dates.length && !effectiveFilters.updated_dates.includes(updatedDayKey(row.updated_at))) return false;
     return true;
   };
 
@@ -1007,7 +1058,7 @@ export default function Warehouse({ user }) {
     }
     // Пока части группы не загружены, не прячем группу при активных фильтрах.
     return hasActiveFilters;
-  }), [displayList, filters, nameSearch, descriptionSearch, groupPartsCache, hasActiveFilters]);
+  }), [displayList, effectiveFilters, effectiveNameSearch, effectiveDescriptionSearch, groupPartsCache, hasActiveFilters]);
 
   useEffect(() => {
     const groupRows = displayList.filter((row) => isMaterialGroupRow(row));
@@ -1227,11 +1278,11 @@ export default function Warehouse({ user }) {
 
   const paginationResetKey = useMemo(
     () => JSON.stringify({
-      filters,
-      nameSearch: nameSearch.trim().toLowerCase(),
-      descriptionSearch: descriptionSearch.trim().toLowerCase(),
+      filters: effectiveFilters,
+      nameSearch: effectiveNameSearch.trim().toLowerCase(),
+      descriptionSearch: effectiveDescriptionSearch.trim().toLowerCase(),
     }),
-    [filters, nameSearch, descriptionSearch],
+    [effectiveFilters, effectiveNameSearch, effectiveDescriptionSearch],
   );
   const pagination = useListPagination(sortedList, 'warehouse-page-size', paginationResetKey);
 
@@ -1249,12 +1300,14 @@ export default function Warehouse({ user }) {
   };
 
   const resetFilters = () => {
+    if (!canWarehouseFilters) return;
     setFilters(createEmptyFilters());
     setNameSearch('');
     setDescriptionSearch('');
   };
 
   const toggleFilterValue = (key, value) => {
+    if (!canWarehouseFilters) return;
     setFilters((prev) => ({
       ...prev,
       [key]: toggleMultiSelectValue(prev[key], value),
@@ -1262,6 +1315,7 @@ export default function Warehouse({ user }) {
   };
 
   const toggleObjectFilter = (objectId) => {
+    if (!canWarehouseFilters) return;
     setFilters((prev) => {
       const nextObjectIds = toggleMultiSelectValue(prev.object_ids, objectId);
       const allowedWarehouses = nextObjectIds.length
@@ -1284,6 +1338,7 @@ export default function Warehouse({ user }) {
   };
 
   const toggleWarehouseFilter = (warehouseId) => {
+    if (!canWarehouseFilters) return;
     setFilters((prev) => {
       const nextWarehouseIds = toggleMultiSelectValue(prev.warehouse_ids, warehouseId);
       const allowedRacks = nextWarehouseIds.length
@@ -1320,6 +1375,7 @@ export default function Warehouse({ user }) {
   };
 
   const handleImportFile = async (e) => {
+    if (!canWarehouseImport) return;
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
@@ -1429,6 +1485,7 @@ export default function Warehouse({ user }) {
   };
 
   const handleExport = async (format) => {
+    if (!canWarehouseExport) return;
     if (!sortedList.length) return setError('Нет данных для выгрузки');
     setExporting(true);
     setError('');
@@ -1462,12 +1519,12 @@ export default function Warehouse({ user }) {
               Распознать QR код
             </button>
           )}
-          {hasActiveFilters && (
+          {canWarehouseFilters && hasActiveFilters && (
             <button type="button" onClick={resetFilters} className="btn-ghost">
               Сброс
             </button>
           )}
-          {canWarehouseEdit && (
+          {canWarehouseImport && (
             <button
               type="button"
               onClick={() => { setInfo(''); fileInputRef.current?.click(); }}
@@ -1478,7 +1535,7 @@ export default function Warehouse({ user }) {
               {importPreviewing ? '…' : importing ? '…' : 'Импорт'}
             </button>
           )}
-          {canWarehouseEdit && (
+          {canWarehouseImport && (
             <input
               ref={fileInputRef}
               type="file"
@@ -1487,7 +1544,7 @@ export default function Warehouse({ user }) {
               onChange={handleImportFile}
             />
           )}
-          {canWarehouseView && (
+          {canWarehouseExport && (
             <>
               <button
                 type="button"
@@ -1793,179 +1850,215 @@ export default function Warehouse({ user }) {
         </div>
       ) : (
       <div className="table-wrap">
-        <div className="filter-toolbar">
-          <MultiSelectFilter
-            label="Объект"
-            options={objectFilterOptions}
-            selectedValues={filters.object_ids}
-            onToggle={toggleObjectFilter}
-          />
-          <MultiSelectFilter
-            label="Склад"
-            options={warehouseFilterOptions}
-            selectedValues={filters.warehouse_ids}
-            onToggle={toggleWarehouseFilter}
-          />
-          <MultiSelectFilter
-            label="Стеллаж"
-            options={rackFilterOptions}
-            selectedValues={filters.rack_ids}
-            onToggle={(value) => toggleFilterValue('rack_ids', value)}
-          />
-          <MultiSelectFilter
-            label="Катег."
-            options={categoryFilterOptions}
-            selectedValues={filters.category_ids}
-            onToggle={(value) => toggleFilterValue('category_ids', value)}
-          />
-          <MultiSelectFilter
-            label="Система"
-            options={systemFilterOptions}
-            selectedValues={filters.system_ids}
-            onToggle={(value) => toggleFilterValue('system_ids', value)}
-          />
-          <MultiSelectFilter
-            label="Орг."
-            options={organizationFilterOptions}
-            selectedValues={filters.organization_ids}
-            onToggle={(value) => toggleFilterValue('organization_ids', value)}
-          />
-          <MultiSelectFilter
-            label="Изменён"
-            options={updatedFilterOptions}
-            selectedValues={filters.updated_dates}
-            onToggle={(value) => toggleFilterValue('updated_dates', value)}
-          />
-        </div>
-        <div className="px-2 pb-2 bg-surface-850 border-b border-white/10 space-y-2">
-          <input
-            type="text"
-            value={nameSearch}
-            onChange={(e) => setNameSearch(e.target.value)}
-            className="filter-input"
-            placeholder="Поиск по наименованию"
-          />
-          <input
-            type="text"
-            value={descriptionSearch}
-            onChange={(e) => setDescriptionSearch(e.target.value)}
-            className="filter-input"
-            placeholder="Поиск по описанию"
-          />
-        </div>
+        {canWarehouseFilters && (
+          <>
+            <div className="filter-toolbar">
+              <MultiSelectFilter
+                label="Объект"
+                options={objectFilterOptions}
+                selectedValues={filters.object_ids}
+                onToggle={toggleObjectFilter}
+              />
+              <MultiSelectFilter
+                label="Склад"
+                options={warehouseFilterOptions}
+                selectedValues={filters.warehouse_ids}
+                onToggle={toggleWarehouseFilter}
+              />
+              <MultiSelectFilter
+                label="Стеллаж"
+                options={rackFilterOptions}
+                selectedValues={filters.rack_ids}
+                onToggle={(value) => toggleFilterValue('rack_ids', value)}
+              />
+              <MultiSelectFilter
+                label="Катег."
+                options={categoryFilterOptions}
+                selectedValues={filters.category_ids}
+                onToggle={(value) => toggleFilterValue('category_ids', value)}
+              />
+              <MultiSelectFilter
+                label="Система"
+                options={systemFilterOptions}
+                selectedValues={filters.system_ids}
+                onToggle={(value) => toggleFilterValue('system_ids', value)}
+              />
+              <MultiSelectFilter
+                label="Орг."
+                options={organizationFilterOptions}
+                selectedValues={filters.organization_ids}
+                onToggle={(value) => toggleFilterValue('organization_ids', value)}
+              />
+              <MultiSelectFilter
+                label="Изменён"
+                options={updatedFilterOptions}
+                selectedValues={filters.updated_dates}
+                onToggle={(value) => toggleFilterValue('updated_dates', value)}
+              />
+            </div>
+            <div className="px-2 pb-2 bg-surface-850 border-b border-white/10 space-y-2">
+              <input
+                type="text"
+                value={nameSearch}
+                onChange={(e) => setNameSearch(e.target.value)}
+                className="filter-input"
+                placeholder="Поиск по наименованию"
+              />
+              <input
+                type="text"
+                value={descriptionSearch}
+                onChange={(e) => setDescriptionSearch(e.target.value)}
+                className="filter-input"
+                placeholder="Поиск по описанию"
+              />
+            </div>
+          </>
+        )}
         <div className="overflow-x-auto max-h-[calc(100vh-7.5rem)] overflow-y-auto">
           <table className="table-compact table-auto min-w-[120rem] w-full">
             <thead className="sticky top-0 bg-surface-900 z-10">
               <tr>
-                <th className="w-16 text-center text-zinc-500 text-2xs font-normal">№</th>
-                <th className="w-14 text-center text-zinc-500 text-2xs font-normal">QR</th>
-                <th className="w-[22rem] min-w-[20rem]">
-                  <button type="button" onClick={() => toggleSort('name')} className="sort-btn">
-                    Наимен. <SortIcon column="name" />
-                  </button>
-                </th>
-                <th className="w-[4.5rem]">
-                  <button type="button" onClick={() => toggleSort('unit')} className="sort-btn">
-                    Ед. <SortIcon column="unit" />
-                  </button>
-                </th>
-                <ThWithSum
-                  label="Кол."
-                  column="quantity"
-                  sortBy={sortBy}
-                  sortDir={sortDir}
-                  onSort={toggleSort}
-                  sum={formatSumQty(totals.quantity)}
-                  thClassName="w-[6.5rem]"
-                />
-                <ThWithSum
-                  label="На руках"
-                  column="on_hands_quantity"
-                  sortBy={sortBy}
-                  sortDir={sortDir}
-                  onSort={toggleSort}
-                  sum={formatSumQty(totals.onHandsQuantity)}
-                  thClassName="w-[7rem]"
-                />
-                <th className="w-[7rem]">
-                  <button type="button" onClick={() => toggleSort('object_name')} className="sort-btn">
-                    Объект <SortIcon column="object_name" />
-                  </button>
-                </th>
-                <th className="w-[7rem]">
-                  <button type="button" onClick={() => toggleSort('warehouse_name')} className="sort-btn">
-                    Склад <SortIcon column="warehouse_name" />
-                  </button>
-                </th>
-                <th className="w-[7rem]">
-                  <button type="button" onClick={() => toggleSort('rack_name')} className="sort-btn">
-                    Стеллаж <SortIcon column="rack_name" />
-                  </button>
-                </th>
-                <th className="w-[7rem]">
-                  <button type="button" onClick={() => toggleSort('system_name')} className="sort-btn">
-                    Система <SortIcon column="system_name" />
-                  </button>
-                </th>
-                <th className="w-[8rem]">
-                  <button type="button" onClick={() => toggleSort('organization_name')} className="sort-btn">
-                    Организация <SortIcon column="organization_name" />
-                  </button>
-                </th>
-                <th className="w-[7rem]">
-                  <button type="button" onClick={() => toggleSort('category_name')} className="sort-btn">
-                    Кат. <SortIcon column="category_name" />
-                  </button>
-                </th>
-                <ThWithSum
-                  label="Стоимость за ед."
-                  column="price"
-                  sortBy={sortBy}
-                  sortDir={sortDir}
-                  onSort={toggleSort}
-                  sum={formatSumMoney(totals.price)}
-                  thClassName="w-[8.5rem]"
-                />
-                <ThWithSum
-                  label="Стоимость"
-                  column="cost_total"
-                  sortBy={sortBy}
-                  sortDir={sortDir}
-                  onSort={toggleSort}
-                  sum={formatSumMoney(totals.costTotal)}
-                  sumClassName="text-zinc-400"
-                  thClassName="w-[8.5rem]"
-                />
-                <ThWithSum
-                  label="СМР за ед."
-                  column="production_price"
-                  sortBy={sortBy}
-                  sortDir={sortDir}
-                  onSort={toggleSort}
-                  sum={formatSumMoney(totals.smr)}
-                  thClassName="w-[8.5rem]"
-                />
-                <ThWithSum
-                  label="СМР"
-                  column="smr_total"
-                  sortBy={sortBy}
-                  sortDir={sortDir}
-                  onSort={toggleSort}
-                  sum={formatSumMoney(totals.smrTotal)}
-                  sumClassName="text-zinc-400"
-                  thClassName="w-[8.5rem]"
-                />
-                <th className="w-[8rem]">
-                  <button type="button" onClick={() => toggleSort('updated_at')} className="sort-btn">
-                    Изменён <SortIcon column="updated_at" />
-                  </button>
-                </th>
-                <th className="w-[14rem] min-w-[12rem]">
-                  <button type="button" onClick={() => toggleSort('description')} className="sort-btn">
-                    Описание <SortIcon column="description" />
-                  </button>
-                </th>
-                <th className="w-40" />
+                {canWarehouseColNumber && <th className="w-16 text-center text-zinc-500 text-2xs font-normal">№</th>}
+                {canWarehouseColQr && <th className="w-14 text-center text-zinc-500 text-2xs font-normal">QR</th>}
+                {canWarehouseColName && (
+                  <th className="w-[22rem] min-w-[20rem]">
+                    <button type="button" onClick={() => toggleSort('name')} className="sort-btn">
+                      Наимен. <SortIcon column="name" />
+                    </button>
+                  </th>
+                )}
+                {canWarehouseColUnit && (
+                  <th className="w-[4.5rem]">
+                    <button type="button" onClick={() => toggleSort('unit')} className="sort-btn">
+                      Ед. <SortIcon column="unit" />
+                    </button>
+                  </th>
+                )}
+                {canWarehouseColQuantity && (
+                  <ThWithSum
+                    label="Кол."
+                    column="quantity"
+                    sortBy={sortBy}
+                    sortDir={sortDir}
+                    onSort={toggleSort}
+                    sum={formatSumQty(totals.quantity)}
+                    thClassName="w-[6.5rem]"
+                  />
+                )}
+                {canWarehouseColOnHands && (
+                  <ThWithSum
+                    label="На руках"
+                    column="on_hands_quantity"
+                    sortBy={sortBy}
+                    sortDir={sortDir}
+                    onSort={toggleSort}
+                    sum={formatSumQty(totals.onHandsQuantity)}
+                    thClassName="w-[7rem]"
+                  />
+                )}
+                {canWarehouseColObject && (
+                  <th className="w-[7rem]">
+                    <button type="button" onClick={() => toggleSort('object_name')} className="sort-btn">
+                      Объект <SortIcon column="object_name" />
+                    </button>
+                  </th>
+                )}
+                {canWarehouseColWarehouse && (
+                  <th className="w-[7rem]">
+                    <button type="button" onClick={() => toggleSort('warehouse_name')} className="sort-btn">
+                      Склад <SortIcon column="warehouse_name" />
+                    </button>
+                  </th>
+                )}
+                {canWarehouseColRack && (
+                  <th className="w-[7rem]">
+                    <button type="button" onClick={() => toggleSort('rack_name')} className="sort-btn">
+                      Стеллаж <SortIcon column="rack_name" />
+                    </button>
+                  </th>
+                )}
+                {canWarehouseColSystem && (
+                  <th className="w-[7rem]">
+                    <button type="button" onClick={() => toggleSort('system_name')} className="sort-btn">
+                      Система <SortIcon column="system_name" />
+                    </button>
+                  </th>
+                )}
+                {canWarehouseColOrganization && (
+                  <th className="w-[8rem]">
+                    <button type="button" onClick={() => toggleSort('organization_name')} className="sort-btn">
+                      Организация <SortIcon column="organization_name" />
+                    </button>
+                  </th>
+                )}
+                {canWarehouseColCategory && (
+                  <th className="w-[7rem]">
+                    <button type="button" onClick={() => toggleSort('category_name')} className="sort-btn">
+                      Кат. <SortIcon column="category_name" />
+                    </button>
+                  </th>
+                )}
+                {canWarehouseColPrice && (
+                  <ThWithSum
+                    label="Стоимость за ед."
+                    column="price"
+                    sortBy={sortBy}
+                    sortDir={sortDir}
+                    onSort={toggleSort}
+                    sum={formatSumMoney(totals.price)}
+                    thClassName="w-[8.5rem]"
+                  />
+                )}
+                {canWarehouseColCostTotal && (
+                  <ThWithSum
+                    label="Стоимость"
+                    column="cost_total"
+                    sortBy={sortBy}
+                    sortDir={sortDir}
+                    onSort={toggleSort}
+                    sum={formatSumMoney(totals.costTotal)}
+                    sumClassName="text-zinc-400"
+                    thClassName="w-[8.5rem]"
+                  />
+                )}
+                {canWarehouseColSmrUnit && (
+                  <ThWithSum
+                    label="СМР за ед."
+                    column="production_price"
+                    sortBy={sortBy}
+                    sortDir={sortDir}
+                    onSort={toggleSort}
+                    sum={formatSumMoney(totals.smr)}
+                    thClassName="w-[8.5rem]"
+                  />
+                )}
+                {canWarehouseColSmrTotal && (
+                  <ThWithSum
+                    label="СМР"
+                    column="smr_total"
+                    sortBy={sortBy}
+                    sortDir={sortDir}
+                    onSort={toggleSort}
+                    sum={formatSumMoney(totals.smrTotal)}
+                    sumClassName="text-zinc-400"
+                    thClassName="w-[8.5rem]"
+                  />
+                )}
+                {canWarehouseColUpdatedAt && (
+                  <th className="w-[8rem]">
+                    <button type="button" onClick={() => toggleSort('updated_at')} className="sort-btn">
+                      Изменён <SortIcon column="updated_at" />
+                    </button>
+                  </th>
+                )}
+                {canWarehouseColDescription && (
+                  <th className="w-[14rem] min-w-[12rem]">
+                    <button type="button" onClick={() => toggleSort('description')} className="sort-btn">
+                      Описание <SortIcon column="description" />
+                    </button>
+                  </th>
+                )}
+                {(canOpenMaterialMenu || canWarehouseEdit || canWarehouseSplit) && <th className="w-40" />}
               </tr>
             </thead>
             <tbody>
@@ -2025,159 +2118,187 @@ export default function Warehouse({ user }) {
                       title={row._pending ? 'Ожидает отправки на сервер' : undefined}
                       onClick={() => {
                         if (!rowCanOpen) return;
-                        if (isChild) openMaterialMenu(row);
+                        if (isChild) openMaterialMenu(row, { source: 'row' });
                         else openMaterialRowClick(row);
                       }}
                     >
-                      <td className="text-center text-zinc-500 text-2xs tabular-nums whitespace-nowrap">
-                        <span className="inline-flex items-center justify-center gap-1 min-w-[3rem]">
-                          {!isChild && isGroup ? (
+                      {canWarehouseColNumber && (
+                        <td className="text-center text-zinc-500 text-2xs tabular-nums whitespace-nowrap">
+                          <span className="inline-flex items-center justify-center gap-1 min-w-[3rem]">
+                            {!isChild && isGroup ? (
+                              <button
+                                type="button"
+                                onClick={(e) => toggleGroupExpand(e, m)}
+                                className="w-5 h-5 inline-flex items-center justify-center rounded hover:bg-white/10 text-zinc-400"
+                                title={shownExpanded ? 'Свернуть части' : 'Показать части'}
+                                aria-expanded={shownExpanded}
+                              >
+                                {shownExpanded ? '▼' : '▶'}
+                              </button>
+                            ) : (
+                              <span className="inline-block w-5" />
+                            )}
+                            <span>{isChild ? `${globalRowIndex + 1}.${childIndex}` : globalRowIndex + 1}</span>
+                          </span>
+                        </td>
+                      )}
+                      {canWarehouseColQr && (
+                        <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                          {row.code ? (
                             <button
                               type="button"
-                              onClick={(e) => toggleGroupExpand(e, m)}
-                              className="w-5 h-5 inline-flex items-center justify-center rounded hover:bg-white/10 text-zinc-400"
-                              title={shownExpanded ? 'Свернуть части' : 'Показать части'}
-                              aria-expanded={shownExpanded}
+                              onClick={() => setShowQrMaterial(row)}
+                              className="p-0.5 rounded hover:bg-white/10"
+                              title={materialQrHoverTitle(row)}
                             >
-                              {shownExpanded ? '▼' : '▶'}
+                              <QRCodeSVG value={row.code} size={22} level="M" className="rounded bg-white p-0.5" />
                             </button>
                           ) : (
-                            <span className="inline-block w-5" />
+                            <span className="text-zinc-600">—</span>
                           )}
-                          <span>{isChild ? `${globalRowIndex + 1}.${childIndex}` : globalRowIndex + 1}</span>
-                        </span>
-                      </td>
-                      <td className="text-center" onClick={(e) => e.stopPropagation()}>
-                        {row.code ? (
+                        </td>
+                      )}
+                      {canWarehouseColName && (
+                        <td
+                          className={`text-white max-w-[20rem] ${isChild ? 'pl-4' : ''}`}
+                          title={isChild ? `${partNames.name}${partNames.partLabel ? ` · ${partNames.partLabel}` : ''}` : materialDisplayName(row)}
+                        >
+                          {isChild ? (
+                            <div className="min-w-0">
+                              <div className="truncate text-white">{partNames.name}</div>
+                              {partNames.partLabel && (
+                                <div className="truncate text-2xs text-zinc-500">{partNames.partLabel}</div>
+                              )}
+                            </div>
+                          ) : (
+                            <>
+                              {row.name}
+                              {isGroup && (
+                                <span
+                                  className="ml-1.5 text-2xs text-brand-400/90 font-normal"
+                                  title={`${partsCount} частей, всего ${materialRowQuantity(m)} ${m.unit || ''}`}
+                                >
+                                  {partsCount} ч.
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </td>
+                      )}
+                      {canWarehouseColUnit && <td className="text-zinc-500">{row.unit || m.unit || '—'}</td>}
+                      {canWarehouseColQuantity && (
+                        <td className="text-right">
                           <button
                             type="button"
-                            onClick={() => setShowQrMaterial(row)}
-                            className="p-0.5 rounded hover:bg-white/10"
-                            title={materialQrHoverTitle(row)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHistoryMaterial(row);
+                            }}
+                            className="text-white font-medium tabular-nums hover:text-zinc-300"
+                            title={isChild
+                              ? `Количество части: ${rowQty} ${row.unit || m.unit || ''}`
+                              : 'История изменений'}
                           >
-                            <QRCodeSVG value={row.code} size={22} level="M" className="rounded bg-white p-0.5" />
+                            {rowQty}
+                            {isChild && (row.unit || m.unit) && (
+                              <span className="text-zinc-500 font-normal text-2xs ml-0.5">{row.unit || m.unit}</span>
+                            )}
                           </button>
-                        ) : (
-                          <span className="text-zinc-600">—</span>
-                        )}
-                      </td>
-                      <td
-                        className={`text-white max-w-[20rem] ${isChild ? 'pl-4' : ''}`}
-                        title={isChild ? `${partNames.name}${partNames.partLabel ? ` · ${partNames.partLabel}` : ''}` : materialDisplayName(row)}
-                      >
-                        {isChild ? (
-                          <div className="min-w-0">
-                            <div className="truncate text-white">{partNames.name}</div>
-                            {partNames.partLabel && (
-                              <div className="truncate text-2xs text-zinc-500">{partNames.partLabel}</div>
+                        </td>
+                      )}
+                      {canWarehouseColOnHands && (
+                        <td className="text-right tabular-nums">
+                          {rowOnHands > 0 ? (
+                            <>
+                              <span className="text-amber-300">{formatSumQty(rowOnHands)}</span>
+                              <span className="text-zinc-500 font-normal text-2xs ml-0.5">{row.unit || m.unit || ''}</span>
+                            </>
+                          ) : (
+                            <span className="text-zinc-600">—</span>
+                          )}
+                        </td>
+                      )}
+                      {canWarehouseColObject && (
+                        <td
+                          className="text-zinc-500 max-w-[10rem] truncate text-2xs"
+                          title={!isChild && isGroup ? groupObjectName : (row.object_name || '')}
+                        >
+                          {(!isChild && isGroup ? groupObjectName : (row.object_name || '—'))}
+                        </td>
+                      )}
+                      {canWarehouseColWarehouse && (
+                        <td
+                          className="text-zinc-500 max-w-[10rem] truncate text-2xs"
+                          title={!isChild && isGroup ? groupWarehouseName : (row.warehouse_name || '')}
+                        >
+                          {(!isChild && isGroup ? groupWarehouseName : (row.warehouse_name || '—'))}
+                        </td>
+                      )}
+                      {canWarehouseColRack && (
+                        <td
+                          className="text-zinc-500 max-w-[10rem] truncate text-2xs"
+                          title={!isChild && isGroup ? groupRackName : (row.rack_name || '')}
+                        >
+                          {(!isChild && isGroup ? groupRackName : (row.rack_name || '—'))}
+                        </td>
+                      )}
+                      {canWarehouseColSystem && (
+                        <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.system_name || ''}>
+                          {row.system_name || '—'}
+                        </td>
+                      )}
+                      {canWarehouseColOrganization && (
+                        <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.organization_name || ''}>
+                          {row.organization_name || '—'}
+                        </td>
+                      )}
+                      {canWarehouseColCategory && (
+                        <td className="text-zinc-500 truncate max-w-[5rem]" title={row.category_name || ''}>
+                          {row.category_name || '—'}
+                        </td>
+                      )}
+                      {canWarehouseColPrice && <td className="text-right text-zinc-400 tabular-nums">{rowUnitPrice.toFixed(2)}</td>}
+                      {canWarehouseColCostTotal && <td className="text-right text-white tabular-nums font-medium">{rowCost.toFixed(2)}</td>}
+                      {canWarehouseColSmrUnit && <td className="text-right text-zinc-400 tabular-nums">{rowUnitSmr.toFixed(2)}</td>}
+                      {canWarehouseColSmrTotal && <td className="text-right text-zinc-300 tabular-nums">{rowSmr.toFixed(2)}</td>}
+                      {canWarehouseColUpdatedAt && (
+                        <td className="text-zinc-500 text-2xs whitespace-nowrap" title={formatUpdatedAt(row.updated_at)}>
+                          {formatUpdatedAt(row.updated_at)}
+                        </td>
+                      )}
+                      {canWarehouseColDescription && (
+                        <td className="text-zinc-400 text-2xs max-w-[20rem] truncate" title={row.description || ''}>
+                          {row.description || '—'}
+                        </td>
+                      )}
+                      {(canOpenMaterialMenu || canWarehouseEdit || canWarehouseSplit) && (
+                        <td className="w-40" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-1 justify-end whitespace-nowrap">
+                            {!isChild && isGroup && canWarehouseSplit && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPartsModalStartAdd(true);
+                                  setPartsModalMaterial(row);
+                                }}
+                                className="btn-ghost px-1"
+                              >
+                                + В группу
+                              </button>
+                            )}
+                            {canWarehouseEdit && (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); openEdit(row); }}
+                                className="btn-ghost px-1"
+                              >
+                                Изм
+                              </button>
                             )}
                           </div>
-                        ) : (
-                          <>
-                            {row.name}
-                            {isGroup && (
-                              <span
-                                className="ml-1.5 text-2xs text-brand-400/90 font-normal"
-                                title={`${partsCount} частей, всего ${materialRowQuantity(m)} ${m.unit || ''}`}
-                              >
-                                {partsCount} ч.
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </td>
-                      <td className="text-zinc-500">{row.unit || m.unit || '—'}</td>
-                      <td className="text-right">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setHistoryMaterial(row);
-                          }}
-                          className="text-white font-medium tabular-nums hover:text-zinc-300"
-                          title={isChild
-                            ? `Количество части: ${rowQty} ${row.unit || m.unit || ''}`
-                            : 'История изменений'}
-                        >
-                          {rowQty}
-                          {isChild && (row.unit || m.unit) && (
-                            <span className="text-zinc-500 font-normal text-2xs ml-0.5">{row.unit || m.unit}</span>
-                          )}
-                        </button>
-                      </td>
-                      <td className="text-right tabular-nums">
-                        {rowOnHands > 0 ? (
-                          <>
-                            <span className="text-amber-300">{formatSumQty(rowOnHands)}</span>
-                            <span className="text-zinc-500 font-normal text-2xs ml-0.5">{row.unit || m.unit || ''}</span>
-                          </>
-                        ) : (
-                          <span className="text-zinc-600">—</span>
-                        )}
-                      </td>
-                      <td
-                        className="text-zinc-500 max-w-[10rem] truncate text-2xs"
-                        title={!isChild && isGroup ? groupObjectName : (row.object_name || '')}
-                      >
-                        {(!isChild && isGroup ? groupObjectName : (row.object_name || '—'))}
-                      </td>
-                      <td
-                        className="text-zinc-500 max-w-[10rem] truncate text-2xs"
-                        title={!isChild && isGroup ? groupWarehouseName : (row.warehouse_name || '')}
-                      >
-                        {(!isChild && isGroup ? groupWarehouseName : (row.warehouse_name || '—'))}
-                      </td>
-                      <td
-                        className="text-zinc-500 max-w-[10rem] truncate text-2xs"
-                        title={!isChild && isGroup ? groupRackName : (row.rack_name || '')}
-                      >
-                        {(!isChild && isGroup ? groupRackName : (row.rack_name || '—'))}
-                      </td>
-                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.system_name || ''}>
-                        {row.system_name || '—'}
-                      </td>
-                      <td className="text-zinc-500 max-w-[10rem] truncate text-2xs" title={row.organization_name || ''}>
-                        {row.organization_name || '—'}
-                      </td>
-                      <td className="text-zinc-500 truncate max-w-[5rem]" title={row.category_name || ''}>
-                        {row.category_name || '—'}
-                      </td>
-                      <td className="text-right text-zinc-400 tabular-nums">{rowUnitPrice.toFixed(2)}</td>
-                      <td className="text-right text-white tabular-nums font-medium">{rowCost.toFixed(2)}</td>
-                      <td className="text-right text-zinc-400 tabular-nums">{rowUnitSmr.toFixed(2)}</td>
-                      <td className="text-right text-zinc-300 tabular-nums">{rowSmr.toFixed(2)}</td>
-                      <td className="text-zinc-500 text-2xs whitespace-nowrap" title={formatUpdatedAt(row.updated_at)}>
-                        {formatUpdatedAt(row.updated_at)}
-                      </td>
-                      <td className="text-zinc-400 text-2xs max-w-[20rem] truncate" title={row.description || ''}>
-                        {row.description || '—'}
-                      </td>
-                      <td className="w-40" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-1 justify-end whitespace-nowrap">
-                          {!isChild && isGroup && canWarehouseSplit && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setPartsModalStartAdd(true);
-                                setPartsModalMaterial(row);
-                              }}
-                              className="btn-ghost px-1"
-                            >
-                              + В группу
-                            </button>
-                          )}
-                          {canWarehouseEdit && (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); openEdit(row); }}
-                              className="btn-ghost px-1"
-                            >
-                              Изм
-                            </button>
-                          )}
-                        </div>
-                      </td>
+                        </td>
+                      )}
                     </tr>
                   );
                 };
@@ -2187,7 +2308,7 @@ export default function Warehouse({ user }) {
                     {renderRow(m)}
                     {isGroup && shownExpanded && partsLoading && filteredChildParts.length === 0 && (
                       <tr className="bg-zinc-900/50">
-                        <td colSpan={19} className="text-2xs text-zinc-500 py-2 pl-4">
+                        <td colSpan={visibleTableColumnCount} className="text-2xs text-zinc-500 py-2 pl-4">
                           Загрузка частей…
                         </td>
                       </tr>
@@ -2231,7 +2352,7 @@ export default function Warehouse({ user }) {
           onOpenMenu={(m) => {
             setPartsModalMaterial(null);
             setPartsModalStartAdd(false);
-            openMaterialMenu(m);
+            openMaterialMenu(m, { source: 'row' });
           }}
         />
       )}
@@ -2702,7 +2823,7 @@ export default function Warehouse({ user }) {
                   Добавить
                 </button>
               )}
-              {canWarehouseIssue && (
+              {canIssueFromMaterialMenu && (
                 <button type="button" onClick={() => setActiveStep('issue')} className="btn-secondary w-full py-2.5">
                   Выдать
                 </button>

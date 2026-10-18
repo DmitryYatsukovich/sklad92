@@ -19,7 +19,7 @@ const emptyPerms = (permissionDefs = []) => Object.fromEntries(
   permissionDefs.map((p) => [p.key, false]),
 );
 
-const WAREHOUSE_SUBMENU_KEYS = [
+const WAREHOUSE_BASE_SUBMENU_KEYS = [
   'can_warehouse_view',
   'can_warehouse_edit',
   'can_warehouse_qr_scan',
@@ -27,6 +27,37 @@ const WAREHOUSE_SUBMENU_KEYS = [
   'can_warehouse_move',
   'can_warehouse_split',
   'can_warehouse_delete',
+  'can_warehouse_import',
+];
+
+const WAREHOUSE_ISSUE_SUBMENU_KEYS = [
+  'can_warehouse_issue_qr_only',
+];
+
+const WAREHOUSE_VIEW_SUBMENU_KEYS = [
+  'can_warehouse_filters',
+  'can_warehouse_export',
+];
+
+const WAREHOUSE_COLUMNS_SUBMENU_KEYS = [
+  'can_warehouse_col_number',
+  'can_warehouse_col_qr',
+  'can_warehouse_col_name',
+  'can_warehouse_col_unit',
+  'can_warehouse_col_quantity',
+  'can_warehouse_col_on_hands',
+  'can_warehouse_col_object',
+  'can_warehouse_col_warehouse',
+  'can_warehouse_col_rack',
+  'can_warehouse_col_system',
+  'can_warehouse_col_organization',
+  'can_warehouse_col_category',
+  'can_warehouse_col_price',
+  'can_warehouse_col_cost_total',
+  'can_warehouse_col_smr_unit',
+  'can_warehouse_col_smr_total',
+  'can_warehouse_col_updated_at',
+  'can_warehouse_col_description',
 ];
 
 const ISSUANCE_ACTION_SUBMENU_KEYS = [
@@ -36,8 +67,18 @@ const ISSUANCE_ACTION_SUBMENU_KEYS = [
 ];
 
 const HIDDEN_SUBMENU_KEYS = new Set([
-  ...WAREHOUSE_SUBMENU_KEYS,
+  ...WAREHOUSE_BASE_SUBMENU_KEYS,
+  ...WAREHOUSE_ISSUE_SUBMENU_KEYS,
+  ...WAREHOUSE_VIEW_SUBMENU_KEYS,
+  ...WAREHOUSE_COLUMNS_SUBMENU_KEYS,
   ...ISSUANCE_ACTION_SUBMENU_KEYS,
+]);
+
+const WAREHOUSE_DEPENDENCY_KEYS = new Set([
+  ...WAREHOUSE_BASE_SUBMENU_KEYS,
+  ...WAREHOUSE_ISSUE_SUBMENU_KEYS,
+  ...WAREHOUSE_VIEW_SUBMENU_KEYS,
+  ...WAREHOUSE_COLUMNS_SUBMENU_KEYS,
 ]);
 
 function roleToForm(row, permissionDefs) {
@@ -106,6 +147,28 @@ export default function RolesTab() {
       can_warehouse_move: true,
       can_warehouse_split: true,
       can_warehouse_delete: true,
+      can_warehouse_filters: true,
+      can_warehouse_issue_qr_only: false,
+      can_warehouse_import: true,
+      can_warehouse_export: true,
+      can_warehouse_col_number: true,
+      can_warehouse_col_qr: true,
+      can_warehouse_col_name: true,
+      can_warehouse_col_unit: true,
+      can_warehouse_col_quantity: true,
+      can_warehouse_col_on_hands: true,
+      can_warehouse_col_object: true,
+      can_warehouse_col_warehouse: true,
+      can_warehouse_col_rack: true,
+      can_warehouse_col_system: true,
+      can_warehouse_col_organization: true,
+      can_warehouse_col_category: true,
+      can_warehouse_col_price: true,
+      can_warehouse_col_cost_total: true,
+      can_warehouse_col_smr_unit: true,
+      can_warehouse_col_smr_total: true,
+      can_warehouse_col_updated_at: true,
+      can_warehouse_col_description: true,
       can_issuance: true,
       can_issuance_return: true,
       can_issuance_transfer: true,
@@ -141,21 +204,43 @@ export default function RolesTab() {
         next.can_tasks_all = false;
       }
       if (key === 'can_warehouse' && !value) {
-        next.can_warehouse_view = false;
-        next.can_warehouse_edit = false;
-        next.can_warehouse_qr_scan = false;
-        next.can_warehouse_issue = false;
-        next.can_warehouse_move = false;
-        next.can_warehouse_split = false;
-        next.can_warehouse_delete = false;
+        [
+          ...WAREHOUSE_BASE_SUBMENU_KEYS,
+          ...WAREHOUSE_ISSUE_SUBMENU_KEYS,
+          ...WAREHOUSE_VIEW_SUBMENU_KEYS,
+          ...WAREHOUSE_COLUMNS_SUBMENU_KEYS,
+        ].forEach((permKey) => {
+          next[permKey] = false;
+        });
       } else if (key === 'can_warehouse' && value) {
-        next.can_warehouse_view = true;
-        next.can_warehouse_edit = true;
-        next.can_warehouse_qr_scan = true;
-        next.can_warehouse_issue = true;
-        next.can_warehouse_move = true;
-        next.can_warehouse_split = true;
-        next.can_warehouse_delete = true;
+        WAREHOUSE_BASE_SUBMENU_KEYS.forEach((permKey) => {
+          next[permKey] = true;
+        });
+        WAREHOUSE_VIEW_SUBMENU_KEYS.forEach((permKey) => {
+          next[permKey] = true;
+        });
+        WAREHOUSE_COLUMNS_SUBMENU_KEYS.forEach((permKey) => {
+          next[permKey] = true;
+        });
+        next.can_warehouse_issue_qr_only = false;
+      }
+      if (key === 'can_warehouse_view' && !value) {
+        WAREHOUSE_VIEW_SUBMENU_KEYS.forEach((permKey) => {
+          next[permKey] = false;
+        });
+        WAREHOUSE_COLUMNS_SUBMENU_KEYS.forEach((permKey) => {
+          next[permKey] = false;
+        });
+      } else if (key === 'can_warehouse_view' && value && next.can_warehouse) {
+        WAREHOUSE_VIEW_SUBMENU_KEYS.forEach((permKey) => {
+          next[permKey] = true;
+        });
+        WAREHOUSE_COLUMNS_SUBMENU_KEYS.forEach((permKey) => {
+          next[permKey] = true;
+        });
+      }
+      if (key === 'can_warehouse_issue' && !value) {
+        next.can_warehouse_issue_qr_only = false;
       }
       if (key === 'can_issuance' && !value) {
         next.can_issuance_return = false;
@@ -422,7 +507,7 @@ export default function RolesTab() {
                           .map((p) => {
                             const requiresTasks = p.key === 'can_task_notifications';
                             const requiresTools = p.key === 'can_tools_delete';
-                            const requiresWarehouse = WAREHOUSE_SUBMENU_KEYS.includes(p.key);
+                            const requiresWarehouse = WAREHOUSE_DEPENDENCY_KEYS.has(p.key);
                             const disabledByDependencies = (
                               (requiresTasks && !(editing?.is_admin_role || form.can_tasks))
                               || (requiresTools && !(editing?.is_admin_role || form.can_tools))
@@ -450,7 +535,8 @@ export default function RolesTab() {
                               {p.key === 'can_warehouse' && (editing?.is_admin_role || form.can_warehouse) && (
                                 <div className="ml-9 mt-1 mb-2 space-y-1.5 pl-3 border-l border-white/10">
                                   <p className="text-slate-500 text-2xs">Доступ в разделе «Склад»</p>
-                                  {WAREHOUSE_SUBMENU_KEYS.map((subKey) => {
+                                  <p className="text-slate-600 text-2xs">Основные действия</p>
+                                  {WAREHOUSE_BASE_SUBMENU_KEYS.map((subKey) => {
                                     const subDef = permissionDefs.find((def) => def.key === subKey);
                                     if (!subDef) return null;
                                     return (
@@ -469,6 +555,86 @@ export default function RolesTab() {
                                       </label>
                                     );
                                   })}
+                                  {(editing?.is_admin_role || form.can_warehouse_issue) && (
+                                    <>
+                                      <p className="text-slate-600 text-2xs pt-1">Параметры выдачи</p>
+                                      {WAREHOUSE_ISSUE_SUBMENU_KEYS.map((subKey) => {
+                                        const subDef = permissionDefs.find((def) => def.key === subKey);
+                                        if (!subDef) return null;
+                                        const disabled = !!editing?.is_admin_role || !(editing?.is_admin_role || form.can_warehouse_issue);
+                                        return (
+                                          <label
+                                            key={subKey}
+                                            className={`flex items-start gap-2 text-sm text-slate-300 cursor-pointer ${disabled ? 'opacity-60' : ''}`}
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              checked={editing?.is_admin_role ? true : !!form[subKey]}
+                                              disabled={disabled}
+                                              onChange={(e) => setPerm(subKey, e.target.checked)}
+                                              className="mt-1 rounded border-slate-600 text-brand-600"
+                                            />
+                                            <span>
+                                              <span className="text-slate-200 text-sm block">{subDef.label}</span>
+                                              <span className="text-slate-500 text-2xs">{subDef.description}</span>
+                                            </span>
+                                          </label>
+                                        );
+                                      })}
+                                    </>
+                                  )}
+                                  {(editing?.is_admin_role || form.can_warehouse_view) && (
+                                    <>
+                                      <p className="text-slate-600 text-2xs pt-1">Отображение и выгрузка</p>
+                                      {WAREHOUSE_VIEW_SUBMENU_KEYS.map((subKey) => {
+                                        const subDef = permissionDefs.find((def) => def.key === subKey);
+                                        if (!subDef) return null;
+                                        const disabled = !!editing?.is_admin_role || !(editing?.is_admin_role || form.can_warehouse_view);
+                                        return (
+                                          <label
+                                            key={subKey}
+                                            className={`flex items-start gap-2 text-sm text-slate-300 cursor-pointer ${disabled ? 'opacity-60' : ''}`}
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              checked={editing?.is_admin_role ? true : !!form[subKey]}
+                                              disabled={disabled}
+                                              onChange={(e) => setPerm(subKey, e.target.checked)}
+                                              className="mt-1 rounded border-slate-600 text-brand-600"
+                                            />
+                                            <span>
+                                              <span className="text-slate-200 text-sm block">{subDef.label}</span>
+                                              <span className="text-slate-500 text-2xs">{subDef.description}</span>
+                                            </span>
+                                          </label>
+                                        );
+                                      })}
+                                      <p className="text-slate-600 text-2xs pt-1">Отображение столбцов таблицы</p>
+                                      {WAREHOUSE_COLUMNS_SUBMENU_KEYS.map((subKey) => {
+                                        const subDef = permissionDefs.find((def) => def.key === subKey);
+                                        if (!subDef) return null;
+                                        const disabled = !!editing?.is_admin_role || !(editing?.is_admin_role || form.can_warehouse_view);
+                                        return (
+                                          <label
+                                            key={subKey}
+                                            className={`flex items-start gap-2 text-sm text-slate-300 cursor-pointer ${disabled ? 'opacity-60' : ''}`}
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              checked={editing?.is_admin_role ? true : !!form[subKey]}
+                                              disabled={disabled}
+                                              onChange={(e) => setPerm(subKey, e.target.checked)}
+                                              className="mt-1 rounded border-slate-600 text-brand-600"
+                                            />
+                                            <span>
+                                              <span className="text-slate-200 text-sm block">{subDef.label}</span>
+                                              <span className="text-slate-500 text-2xs">{subDef.description}</span>
+                                            </span>
+                                          </label>
+                                        );
+                                      })}
+                                    </>
+                                  )}
                                 </div>
                               )}
                               {p.key === 'can_actions' && (editing?.is_admin_role || form.can_actions) && (

@@ -49,6 +49,138 @@ export const APP_PERMISSIONS = [
     group: 'Основные разделы',
   },
   {
+    key: 'can_warehouse_filters',
+    label: 'Склад: фильтры',
+    description: 'Доступ к фильтрам и строкам поиска на вкладке склада',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_issue_qr_only',
+    label: 'Склад: выдача только по QR',
+    description: 'Скрывает кнопку «Выдать» при открытии материала из списка; выдача доступна только после сканирования QR',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_import',
+    label: 'Склад: импорт',
+    description: 'Доступ к кнопке и API импорта материалов из Excel',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_export',
+    label: 'Склад: экспорт',
+    description: 'Доступ к кнопкам и API экспорта Excel/PDF',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_number',
+    label: 'Склад: столбец №',
+    description: 'Отображение столбца номера строки',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_qr',
+    label: 'Склад: столбец QR',
+    description: 'Отображение столбца QR',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_name',
+    label: 'Склад: столбец Наимен.',
+    description: 'Отображение столбца наименования материала',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_unit',
+    label: 'Склад: столбец Ед.',
+    description: 'Отображение столбца единицы измерения',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_quantity',
+    label: 'Склад: столбец Кол.',
+    description: 'Отображение столбца количества',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_on_hands',
+    label: 'Склад: столбец На руках',
+    description: 'Отображение столбца количества на руках',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_object',
+    label: 'Склад: столбец Объект',
+    description: 'Отображение столбца объекта',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_warehouse',
+    label: 'Склад: столбец Склад',
+    description: 'Отображение столбца склада',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_rack',
+    label: 'Склад: столбец Стеллаж',
+    description: 'Отображение столбца стеллажа',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_system',
+    label: 'Склад: столбец Система',
+    description: 'Отображение столбца системы',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_organization',
+    label: 'Склад: столбец Организация',
+    description: 'Отображение столбца организации',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_category',
+    label: 'Склад: столбец Кат.',
+    description: 'Отображение столбца категории',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_price',
+    label: 'Склад: столбец Стоимость за ед.',
+    description: 'Отображение столбца стоимости за единицу',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_cost_total',
+    label: 'Склад: столбец Стоимость',
+    description: 'Отображение столбца суммарной стоимости',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_smr_unit',
+    label: 'Склад: столбец СМР за ед.',
+    description: 'Отображение столбца СМР за единицу',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_smr_total',
+    label: 'Склад: столбец СМР',
+    description: 'Отображение столбца суммарной СМР',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_updated_at',
+    label: 'Склад: столбец Изменён',
+    description: 'Отображение столбца даты изменения',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_warehouse_col_description',
+    label: 'Склад: столбец Описание',
+    description: 'Отображение столбца описания',
+    group: 'Основные разделы',
+  },
+  {
     key: 'can_issuance',
     label: 'Выдача',
     description: 'Выдача материалов сотрудникам, возвраты, сканирование QR',
@@ -337,6 +469,53 @@ export function permissionsFromBody(body = {}) {
     perms.can_warehouse_move = false;
     perms.can_warehouse_split = false;
     perms.can_warehouse_delete = false;
+    perms.can_warehouse_filters = false;
+    perms.can_warehouse_issue_qr_only = false;
+    perms.can_warehouse_import = false;
+    perms.can_warehouse_export = false;
+    perms.can_warehouse_col_number = false;
+    perms.can_warehouse_col_qr = false;
+    perms.can_warehouse_col_name = false;
+    perms.can_warehouse_col_unit = false;
+    perms.can_warehouse_col_quantity = false;
+    perms.can_warehouse_col_on_hands = false;
+    perms.can_warehouse_col_object = false;
+    perms.can_warehouse_col_warehouse = false;
+    perms.can_warehouse_col_rack = false;
+    perms.can_warehouse_col_system = false;
+    perms.can_warehouse_col_organization = false;
+    perms.can_warehouse_col_category = false;
+    perms.can_warehouse_col_price = false;
+    perms.can_warehouse_col_cost_total = false;
+    perms.can_warehouse_col_smr_unit = false;
+    perms.can_warehouse_col_smr_total = false;
+    perms.can_warehouse_col_updated_at = false;
+    perms.can_warehouse_col_description = false;
+  }
+  if (!perms.can_warehouse_view) {
+    perms.can_warehouse_filters = false;
+    perms.can_warehouse_export = false;
+    perms.can_warehouse_col_number = false;
+    perms.can_warehouse_col_qr = false;
+    perms.can_warehouse_col_name = false;
+    perms.can_warehouse_col_unit = false;
+    perms.can_warehouse_col_quantity = false;
+    perms.can_warehouse_col_on_hands = false;
+    perms.can_warehouse_col_object = false;
+    perms.can_warehouse_col_warehouse = false;
+    perms.can_warehouse_col_rack = false;
+    perms.can_warehouse_col_system = false;
+    perms.can_warehouse_col_organization = false;
+    perms.can_warehouse_col_category = false;
+    perms.can_warehouse_col_price = false;
+    perms.can_warehouse_col_cost_total = false;
+    perms.can_warehouse_col_smr_unit = false;
+    perms.can_warehouse_col_smr_total = false;
+    perms.can_warehouse_col_updated_at = false;
+    perms.can_warehouse_col_description = false;
+  }
+  if (!perms.can_warehouse_issue) {
+    perms.can_warehouse_issue_qr_only = false;
   }
   if (!perms.can_attendance) {
     perms.can_attendance_all = false;

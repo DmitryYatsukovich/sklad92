@@ -1270,14 +1270,14 @@ router.get('/users-for-issuance', requireAnyPermission('can_issuance', 'can_ware
   res.json(r.rows);
 });
 
-router.get('/import-template', requireWarehouseFeature('can_warehouse_edit'), (_req, res) => {
+router.get('/import-template', requireWarehouseFeature('can_warehouse_import'), (_req, res) => {
   const buf = buildTemplateBuffer();
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="materials-template.xlsx"');
   res.send(buf);
 });
 
-router.post('/import/preview', requireWarehouseFeature('can_warehouse_edit'), upload.single('file'), async (req, res) => {
+router.post('/import/preview', requireWarehouseFeature('can_warehouse_import'), upload.single('file'), async (req, res) => {
   if (!req.file?.buffer) {
     return res.status(400).json({ error: 'Выберите файл Excel (.xlsx)' });
   }
@@ -1341,7 +1341,7 @@ router.post('/import/preview', requireWarehouseFeature('can_warehouse_edit'), up
   }
 });
 
-router.post('/import', requireWarehouseFeature('can_warehouse_edit'), upload.single('file'), async (req, res) => {
+router.post('/import', requireWarehouseFeature('can_warehouse_import'), upload.single('file'), async (req, res) => {
   if (!req.file?.buffer) {
     return res.status(400).json({ error: 'Выберите файл Excel (.xlsx)' });
   }
@@ -1454,7 +1454,7 @@ async function loadMaterialsForExport(client, ids) {
   return r.rows;
 }
 
-router.post('/export', requireWarehouseFeature('can_warehouse_view'), async (req, res) => {
+router.post('/export', requireWarehouseFeature('can_warehouse_export'), async (req, res) => {
   const { format, rows, ids } = req.body || {};
   const fmt = String(format || 'xlsx').toLowerCase();
   const client = await pool.connect();
