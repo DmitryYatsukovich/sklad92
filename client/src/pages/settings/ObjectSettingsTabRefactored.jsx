@@ -249,6 +249,7 @@ export default function ObjectSettingsTabRefactored() {
   const [cableEditBusy, setCableEditBusy] = useState(false);
   const entranceGridRefs = useRef(new Map());
   const [entranceCableOverlay, setEntranceCableOverlay] = useState({});
+  const [hoveredCableLine, setHoveredCableLine] = useState(null);
   const [entranceFloorHeights, setEntranceFloorHeights] = useState({});
   const mergeTransitCableLine = useCallback((prevLines, nextLine) => {
     const safePrev = Array.isArray(prevLines) ? prevLines : [];
@@ -293,6 +294,12 @@ export default function ObjectSettingsTabRefactored() {
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, []);
+
+  useEffect(() => {
+    if (activeCableTransitId || cableEditModalOpen) {
+      setHoveredCableLine(null);
+    }
+  }, [activeCableTransitId, cableEditModalOpen]);
 
   const sortedObjects = useMemo(() => [...data.objects].sort((a, b) => naturalCompare(a.name, b.name)), [data.objects]);
   const sortedEntrances = useMemo(() => [...data.entrances].sort((a, b) => (
@@ -2527,6 +2534,21 @@ export default function ObjectSettingsTabRefactored() {
             bottom: floorCenterY + 1,
           };
         };
+        const describeLineEndpoint = (slotIdValue) => {
+          const slotId = Number.parseInt(slotIdValue, 10);
+          if (!slotId) return 'Блок не выбран';
+          const placement = slotPlacementById.get(slotId);
+          if (!placement?.slot || !placement?.location) return `Блок #${slotId}`;
+          const { slot, location } = placement;
+          if (slot.location_kind === 'apartment') {
+            return `Кв. ${location.name} · эт. ${location.floor_name} · ${slot.system_name}${slot.category_name ? ` / ${slot.category_name}` : ''}`;
+          }
+          if (slot.location_kind === 'room') {
+            const apartmentName = location.apartment_name ? ` · кв. ${location.apartment_name}` : '';
+            return `Пом. ${location.name}${apartmentName} · эт. ${location.floor_name} · ${slot.system_name}${slot.category_name ? ` / ${slot.category_name}` : ''}`;
+          }
+          return `${getLocationKindTitle(slot.location_kind)} ${location.name || ''} · ${slot.system_name || 'Без системы'}`;
+        };
         const buildSegments = (points) => points.slice(0, -1).map((point, idx) => {
           const nextPoint = points[idx + 1];
           const horizontal = Math.abs(nextPoint.y - point.y) < 0.01;
@@ -2600,6 +2622,65 @@ export default function ObjectSettingsTabRefactored() {
           const hasTransitRoute = Boolean(arranged[0]?.transit);
           const globalRight = slotObstacles.length ? Math.max(...slotObstacles.map((rect) => rect.right)) : (gridRect.width - 2);
           const globalLeft = slotObstacles.length ? Math.min(...slotObstacles.map((rect) => rect.left)) : 2;
+          const branchGap = 1.4;
+          const buildBranchOffsetMap = (slotField, oppositeField) => {
+            const map = new Map();
+            const grouped = new Map();
+            arranged.forEach((item) => {
+              const key = item[slotField];
+              if (!key) return;
+              const list = grouped.get(key) || [];
+              list.push(item);
+              grouped.set(key, list);
+            });
+            grouped.forEach((list) => {
+              const sorted = [...list].sort((a, b) => (
+                (a[oppositeField]?.center?.y || 0) - (b[oppositeField]?.center?.y || 0)
+              ) || naturalCompare(a.key, b.key));
+              sorted.forEach((item, index) => {
+                const offset = (index - ((sorted.length - 1) / 2)) * branchGap;
+                map.set(item.key, offset);
+              });
+            });
+            return map;
+          };
+          const fromBranchOffset = buildBranchOffsetMap('fromSlotId', 'to');
+          const toBranchOffset = buildBranchOffsetMap('toSlotId', 'from');
+          const usedLaneXs = [];
+          const hasLaneNear = (xValue) => usedLaneXs.some((used) => Math.abs(used - xValue) < 1.1);
+          const reserveLaneX = ({
+            initialX,
+            y1,
+            y2,
+            preferredDirection,
+            excludeSlotIds,
+          }) => {
+            for (let attempt = 0; attempt < 18; attempt += 1) {
+              const ring = Math.floor(attempt / 2) + 1;
+              const sign = attempt === 0 ? 0 : (attempt % 2 === 1 ? 1 : -1);
+              const probeX = attempt === 0 ? initialX : (initialX + (sign * ring * 1.25));
+              const safeX = findSafeVerticalX({
+                initialX: probeX,
+                y1,
+                y2,
+                preferredDirection,
+                excludeSlotIds,
+              });
+              if (!hasLaneNear(safeX)) {
+                usedLaneXs.push(safeX);
+                return safeX;
+              }
+            }
+            const fallback = findSafeVerticalX({
+              initialX,
+              y1,
+              y2,
+              preferredDirection,
+              excludeSlotIds,
+            });
+            usedLaneXs.push(fallback);
+            return fallback;
+          };
           arranged.forEach((item, index) => {
             const fromEdge = choosePreferredEdge(item.from);
             const toEdge = choosePreferredEdge(item.to);
@@ -2608,25 +2689,27 @@ export default function ObjectSettingsTabRefactored() {
             const fromJunction = getJunctionPoint(fromTerminal, fromEdge);
             const toJunction = getJunctionPoint(toTerminal, toEdge);
             const excludeSlotIds = new Set([item.fromSlotId, item.toSlotId].filter(Boolean));
+            const fromSpread = fromBranchOffset.get(item.key) || 0;
+            const toSpread = toBranchOffset.get(item.key) || 0;
             const points = [];
             if (hasTransitRoute && item.transit) {
               const laneShift = (index - ((arranged.length - 1) / 2)) * 1.9;
               const laneBase = item.transit.right - 6;
               const fromY = findSafeHorizontalY({
-                initialY: fromJunction.y,
+                initialY: fromJunction.y + fromSpread,
                 x1: fromJunction.x,
                 x2: laneBase + laneShift,
                 preferredDirection: fromEdge === 'top' ? 'up' : 'down',
                 excludeSlotIds,
               });
               const toY = findSafeHorizontalY({
-                initialY: toJunction.y,
+                initialY: toJunction.y + toSpread,
                 x1: laneBase + laneShift,
                 x2: toJunction.x,
                 preferredDirection: toEdge === 'top' ? 'up' : 'down',
                 excludeSlotIds,
               });
-              const laneX = findSafeVerticalX({
+              const laneX = reserveLaneX({
                 initialX: laneBase + laneShift,
                 y1: fromY,
                 y2: toY,
@@ -2649,30 +2732,35 @@ export default function ObjectSettingsTabRefactored() {
               pushPoint(points, toTerminal);
             } else {
               const directionRight = item.to.center.x >= item.from.center.x;
-              const rightBase = globalRight + 10;
-              const leftBase = globalLeft - 10;
-              const preferredBase = directionRight ? rightBase : leftBase;
+              const freeRight = gridRect.width - globalRight;
+              const freeLeft = globalLeft;
+              let useRight = directionRight;
+              if (useRight && freeRight < 10 && freeLeft > freeRight) useRight = false;
+              if (!useRight && freeLeft < 10 && freeRight > freeLeft) useRight = true;
+              const rightBase = Math.min(gridRect.width - 6, globalRight + 8);
+              const leftBase = Math.max(6, globalLeft - 8);
+              const preferredBase = useRight ? rightBase : leftBase;
               const laneShift = (index - ((arranged.length - 1) / 2)) * 1.9;
               const laneBase = preferredBase + laneShift;
               const fromY = findSafeHorizontalY({
-                initialY: fromJunction.y,
+                initialY: fromJunction.y + fromSpread,
                 x1: fromJunction.x,
                 x2: laneBase,
                 preferredDirection: fromEdge === 'top' ? 'up' : 'down',
                 excludeSlotIds,
               });
               const toY = findSafeHorizontalY({
-                initialY: toJunction.y,
+                initialY: toJunction.y + toSpread,
                 x1: laneBase,
                 x2: toJunction.x,
                 preferredDirection: toEdge === 'top' ? 'up' : 'down',
                 excludeSlotIds,
               });
-              const corridorX = findSafeVerticalX({
+              const corridorX = reserveLaneX({
                 initialX: laneBase,
                 y1: fromY,
                 y2: toY,
-                preferredDirection: directionRight ? 'right' : 'left',
+                preferredDirection: useRight ? 'right' : 'left',
                 excludeSlotIds,
               });
               pushPoint(points, fromTerminal);
@@ -2700,6 +2788,10 @@ export default function ObjectSettingsTabRefactored() {
               color: '#F8FAFC',
               preview: Boolean(item.line.__overlay_preview || optimistic),
               segments,
+              name: String(item.line.name || '').trim() || 'Без названия',
+              lengthM: Number(item.line.length_m || 0),
+              fromLabel: describeLineEndpoint(item.fromSlotId),
+              toLabel: describeLineEndpoint(item.toSlotId),
             });
           });
         });
@@ -3705,26 +3797,65 @@ export default function ObjectSettingsTabRefactored() {
                                   preserveAspectRatio="none"
                                 >
                                   {entranceOverlay.paths.map((pathItem) => (
-                                    <path
-                                      key={pathItem.key}
-                                      d={pathItem.d}
-                                      fill="none"
-                                      stroke={pathItem.color}
-                                      strokeWidth={pathItem.preview ? 0.95 : 1.05}
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeDasharray={pathItem.preview ? '4 3' : undefined}
-                                      opacity={pathItem.preview ? 0.75 : 0.95}
-                                      className={pathItem.preview || activeCableTransitId ? '' : 'cursor-pointer'}
-                                      pointerEvents={pathItem.preview || activeCableTransitId ? 'none' : 'stroke'}
-                                      onClick={() => {
-                                        if (activeCableTransitId) return;
-                                        if (!pathItem.lineId) return;
-                                        const line = transitCableLineById.get(String(pathItem.lineId));
-                                        if (!line) return;
-                                        openCableEditModal(line);
-                                      }}
-                                    />
+                                    (() => {
+                                      const interactive = Boolean(pathItem.lineId) && !pathItem.preview && !activeCableTransitId;
+                                      const isHovered = hoveredCableLine?.pathKey === pathItem.key;
+                                      return (
+                                        <path
+                                          key={pathItem.key}
+                                          d={pathItem.d}
+                                          fill="none"
+                                          stroke={pathItem.color}
+                                          strokeWidth={pathItem.preview ? 0.95 : (isHovered ? 1.8 : 1.0)}
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          strokeDasharray={pathItem.preview ? '4 3' : undefined}
+                                          opacity={pathItem.preview ? 0.75 : (isHovered ? 1 : 0.96)}
+                                          className={interactive ? 'cursor-pointer' : ''}
+                                          pointerEvents={interactive ? 'stroke' : 'none'}
+                                          style={isHovered ? { filter: 'drop-shadow(0 0 4px rgba(248,250,252,0.55))' } : undefined}
+                                          onMouseEnter={(event) => {
+                                            if (!interactive) return;
+                                            const svg = event.currentTarget.ownerSVGElement;
+                                            if (!svg) return;
+                                            const rect = svg.getBoundingClientRect();
+                                            setHoveredCableLine({
+                                              entranceId: entrance.id,
+                                              pathKey: pathItem.key,
+                                              x: event.clientX - rect.left,
+                                              y: event.clientY - rect.top,
+                                              name: pathItem.name || 'Без названия',
+                                              lengthM: pathItem.lengthM,
+                                              fromLabel: pathItem.fromLabel,
+                                              toLabel: pathItem.toLabel,
+                                            });
+                                          }}
+                                          onMouseMove={(event) => {
+                                            if (!interactive) return;
+                                            const svg = event.currentTarget.ownerSVGElement;
+                                            if (!svg) return;
+                                            const rect = svg.getBoundingClientRect();
+                                            setHoveredCableLine((prev) => {
+                                              if (!prev || prev.pathKey !== pathItem.key) return prev;
+                                              return {
+                                                ...prev,
+                                                x: event.clientX - rect.left,
+                                                y: event.clientY - rect.top,
+                                              };
+                                            });
+                                          }}
+                                          onMouseLeave={() => {
+                                            setHoveredCableLine((prev) => (prev?.pathKey === pathItem.key ? null : prev));
+                                          }}
+                                          onClick={() => {
+                                            if (!interactive) return;
+                                            const line = transitCableLineById.get(String(pathItem.lineId));
+                                            if (!line) return;
+                                            openCableEditModal(line);
+                                          }}
+                                        />
+                                      );
+                                    })()
                                   ))}
                                   {(entranceOverlay.jumps || []).map((jump) => (
                                     <g key={`jump-${jump.key}`} pointerEvents="none">
@@ -3739,6 +3870,20 @@ export default function ObjectSettingsTabRefactored() {
                                     </g>
                                   ))}
                                 </svg>
+                              ) : null}
+                              {hoveredCableLine && hoveredCableLine.entranceId === entrance.id ? (
+                                <div
+                                  className="absolute z-30 pointer-events-none rounded-md border border-white/20 bg-zinc-950/95 px-2 py-1.5 shadow-[0_8px_20px_rgba(0,0,0,0.45)] max-w-[18rem]"
+                                  style={{
+                                    left: `${Math.max(8, Math.min((hoveredCableLine.x || 0) + 12, Math.max((entranceOverlay?.width || 0) - 288, 8)))}px`,
+                                    top: `${Math.max(8, Math.min((hoveredCableLine.y || 0) + 12, Math.max((entranceOverlay?.height || 0) - 108, 8)))}px`,
+                                  }}
+                                >
+                                  <p className="text-[10px] font-semibold text-white truncate">{hoveredCableLine.name || 'Без названия'}</p>
+                                  <p className="text-[9px] text-zinc-300">Длина: {formatQty(hoveredCableLine.lengthM || 0)} м</p>
+                                  <p className="text-[8px] text-zinc-400 mt-1 leading-tight">От: {hoveredCableLine.fromLabel || '—'}</p>
+                                  <p className="text-[8px] text-zinc-400 leading-tight">До: {hoveredCableLine.toLabel || '—'}</p>
+                                </div>
                               ) : null}
                             </div>
                           </div>
