@@ -2581,10 +2581,10 @@ export default function ObjectSettingsTabRefactored() {
           && y >= Math.min(segment.y1, segment.y2) - 0.01
           && y <= Math.max(segment.y1, segment.y2) + 0.01
         );
-        const farFromEndpoints = (segment, x, y) => {
+        const farFromEndpoints = (segment, x, y, minDistance = 1.1) => {
           const d1 = Math.hypot(x - segment.x1, y - segment.y1);
           const d2 = Math.hypot(x - segment.x2, y - segment.y2);
-          return d1 > 4 && d2 > 4;
+          return d1 > minDistance && d2 > minDistance;
         };
 
         const itemsByTransit = new Map();
@@ -2896,8 +2896,8 @@ export default function ObjectSettingsTabRefactored() {
                 const x = vertical.x1;
                 const y = horizontal.y1;
                 if (!segmentContains(horizontal, x, y) || !segmentContains(vertical, x, y)) return;
-                if (!farFromEndpoints(horizontal, x, y) || !farFromEndpoints(vertical, x, y)) return;
-                const key = `${horizontalPath.key}:${Math.round(x)}:${Math.round(y)}`;
+                if (!farFromEndpoints(horizontal, x, y, 1.1) || !farFromEndpoints(vertical, x, y, 1.1)) return;
+                const key = `${horizontalPath.key}:${x.toFixed(2)}:${y.toFixed(2)}`;
                 if (jumpSeen.has(key)) return;
                 jumpSeen.add(key);
                 jumps.push({
@@ -3997,17 +3997,17 @@ export default function ObjectSettingsTabRefactored() {
                                   {(entranceOverlay.jumps || []).map((jump) => (
                                     <g key={`jump-${jump.key}`} pointerEvents="none">
                                       <path
-                                        d={`M ${jump.x - 4} ${jump.y} L ${jump.x + 4} ${jump.y}`}
+                                        d={`M ${jump.x - 5.5} ${jump.y} L ${jump.x + 5.5} ${jump.y}`}
                                         fill="none"
                                         stroke="#0B1220"
-                                        strokeWidth="2.35"
+                                        strokeWidth="2.7"
                                         strokeLinecap="round"
                                       />
                                       <path
-                                        d={`M ${jump.x - 4} ${jump.y} Q ${jump.x} ${jump.y - 4.8} ${jump.x + 4} ${jump.y}`}
+                                        d={`M ${jump.x - 5.5} ${jump.y} Q ${jump.x} ${jump.y - 6.3} ${jump.x + 5.5} ${jump.y}`}
                                         fill="none"
                                         stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
-                                        strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '1.25' : '1.05'}
+                                        strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '1.35' : '1.15'}
                                         strokeLinecap="round"
                                       />
                                     </g>
