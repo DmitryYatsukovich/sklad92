@@ -3057,7 +3057,7 @@ export default function ObjectSettingsTabRefactored() {
                                     <div
                                       key={`${locationRow._kind}:${locationRow.id}`}
                                       data-transit-id={locationRow._kind === 'transit' ? locationRow.id : undefined}
-                                      className={`rounded-lg border px-1 py-1 shadow-[0_6px_14px_rgba(0,0,0,0.2)] h-full min-h-0 overflow-hidden flex flex-col ${
+                                      className={`relative rounded-lg border shadow-[0_6px_14px_rgba(0,0,0,0.2)] h-full min-h-0 overflow-hidden ${
                                         locationHasBlocks
                                           ? 'border-cyan-400/25 bg-gradient-to-b from-cyan-950/25 to-zinc-950/60'
                                           : 'border-rose-500/45 bg-rose-950/15'
@@ -3067,9 +3067,9 @@ export default function ObjectSettingsTabRefactored() {
                                         gridRow: `${locationRow.startRow} / ${locationRow.endRow}`,
                                       }}
                                     >
-                                      <p className="text-zinc-100 text-[9px] font-semibold leading-tight break-words uppercase tracking-wide">{locationTitle}</p>
-                                      <p className="text-zinc-400 text-[8px] leading-tight">{locationRange}</p>
-                                      <div className="space-y-1 overflow-auto min-h-0 pr-0.5">
+                                      <div className="absolute inset-0 p-1 space-y-1 overflow-auto min-h-0 pr-0.5">
+                                        <p className="text-zinc-100 text-[9px] font-semibold leading-tight break-words uppercase tracking-wide">{locationTitle}</p>
+                                        <p className="text-zinc-400 text-[8px] leading-tight">{locationRange}</p>
                                         {renderLinearLocationSegments(locationRow, locationTitle, entrance.id)}
                                         {!isLinearColumn ? renderLocationActions(locationRow._kind, locationRow.id, locationTitle) : null}
                                         {locationRow._kind === 'transit' ? renderTransitCablePanel(locationRow) : null}
