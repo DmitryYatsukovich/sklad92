@@ -29,6 +29,7 @@ import {
   MATERIAL_GROUP_JOINS,
   resolveGroupParentId,
 } from '../lib/material-parts.js';
+import { recognizeInvoiceFiles } from '../lib/invoice-recognition.js';
 
 const router = Router();
 
@@ -40,6 +41,21 @@ const upload = multer({
       || (file.mimetype || '').includes('spreadsheet')
       || file.mimetype === 'application/vnd.ms-excel';
     cb(null, ok);
+  },
+});
+
+const invoiceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 15 * 1024 * 1024,
+    files: 20,
+  },
+  fileFilter: (_req, file, cb) => {
+    const name = String(file.originalname || '').toLowerCase();
+    const mime = String(file.mimetype || '').toLowerCase();
+    const isPdf = mime === 'application/pdf' || name.endsWith('.pdf');
+    const isImage = mime.startsWith('image/');
+    cb(null, isPdf || isImage);
   },
 });
 
@@ -151,6 +167,25 @@ async function uniqueCode(client) {
     code = generateCode();
   }
   return code;
+}
+
+function parsePositiveNumber(value, fallback = 0) {
+  const parsed = Number.parseFloat(String(value ?? '').replace(',', '.'));
+  if (!Number.isFinite(parsed)) return fallback;
+  return parsed > 0 ? parsed : fallback;
+}
+
+function normalizeInvoiceItems(itemsRaw) {
+  if (!Array.isArray(itemsRaw)) return [];
+  return itemsRaw
+    .map((row) => ({
+      name: String(row?.name || '').trim(),
+      unit: String(row?.unit || 'шт').trim() || 'шт',
+      quantity: parsePositiveNumber(row?.quantity, 0),
+      price: parsePositiveNumber(row?.price, 0),
+      description: String(row?.description || '').trim() || null,
+    }))
+    .filter((row) => row.name && row.quantity > 0);
 }
 
 async function fetchMaterialRow(client, id) {
@@ -1268,6 +1303,102 @@ router.get('/users-for-issuance', requireAnyPermission('can_issuance', 'can_ware
      ORDER BY COALESCE(NULLIF(TRIM(display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', last_name, first_name)), ''), login)`
   );
   res.json(r.rows);
+});
+
+router.post('/invoice/recognize', requireWarehouseFeature('can_warehouse_invoice_import'), (req, res) => {
+  invoiceUpload.array('files', 20)(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message || 'Не удалось обработать файлы' });
+    }
+    const files = Array.isArray(req.files) ? req.files : [];
+    if (!files.length) {
+      return res.status(400).json({ error: 'Добавьте хотя бы один файл (фото или PDF)' });
+    }
+
+    try {
+      const result = await recognizeInvoiceFiles(files);
+      return res.json({
+        pages: result.pages,
+        items: result.items,
+        warnings: result.warnings,
+      });
+    } catch (recognizeError) {
+      console.error('invoice recognize error:', recognizeError);
+      return res.status(500).json({ error: 'Ошибка распознавания накладной' });
+    }
+  });
+});
+
+router.post('/invoice/import', requireWarehouseFeature('can_warehouse_invoice_import'), async (req, res) => {
+  const {
+    items: itemsRaw,
+    object_id,
+    warehouse_id,
+    rack_id,
+    category_id,
+    system_id,
+    organization_id,
+  } = req.body || {};
+  const items = normalizeInvoiceItems(itemsRaw);
+  if (!items.length) {
+    return res.status(400).json({ error: 'Нет позиций для добавления на склад' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const loc = await validateLocation(client, { object_id, warehouse_id, rack_id });
+    if (loc.error) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: loc.error });
+    }
+    const refs = await validateMaterialRefs(client, { category_id, system_id, organization_id });
+    if (refs.error) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: refs.error });
+    }
+
+    const created = [];
+    for (const item of items) {
+      const code = await uniqueCode(client);
+      const createdId = await insertMaterial(client, {
+        code,
+        name: item.name,
+        description: item.description,
+        unit: item.unit,
+        price: item.price,
+        production_price: 0,
+        quantity: item.quantity,
+        object_id: loc.object_id,
+        warehouse_id: loc.warehouse_id,
+        rack_id: loc.rack_id,
+        category_id: refs.categoryId,
+        system_id: refs.systemId,
+        organization_id: refs.organizationId,
+      });
+      await logQuantityChange(client, {
+        materialId: createdId,
+        userId: req.session.userId,
+        delta: item.quantity,
+        quantityAfter: item.quantity,
+        kind: 'create',
+        note: 'Добавлено по накладной',
+      });
+      created.push(await fetchMaterialRow(client, createdId));
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({
+      created_count: created.length,
+      items: created,
+    });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('invoice import error:', e);
+    res.status(500).json({ error: 'Не удалось добавить позиции по накладной' });
+  } finally {
+    client.release();
+  }
 });
 
 router.get('/import-template', requireWarehouseFeature('can_warehouse_import'), (_req, res) => {

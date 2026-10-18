@@ -352,6 +352,21 @@ export const materials = {
     if (!res.ok) throw new Error(data.error || res.statusText || 'Ошибка импорта');
     return data;
   },
+  recognizeInvoice: async (files) => {
+    const form = new FormData();
+    for (const file of files || []) {
+      form.append('files', file);
+    }
+    const res = await fetchWithTimeout(`${base}/api/materials/invoice/recognize`, {
+      method: 'POST',
+      body: form,
+      credentials: 'include',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || res.statusText || 'Ошибка распознавания накладной');
+    return data;
+  },
+  importInvoice: (body) => request('/api/materials/invoice/import', { method: 'POST', body: JSON.stringify(body) }),
   exportExcel: (rows) => exportMaterialsFile('xlsx', rows),
   exportPdf: (rows) => exportMaterialsFile('pdf', rows),
   downloadQrPdf: (payload) => {

@@ -558,6 +558,8 @@ const statements = [
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_warehouse_issue_qr_only BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_warehouse_import BOOLEAN DEFAULT false`,
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_warehouse_import BOOLEAN DEFAULT false`,
+  `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_warehouse_invoice_import BOOLEAN DEFAULT false`,
+  `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_warehouse_invoice_import BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_warehouse_export BOOLEAN DEFAULT false`,
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_warehouse_export BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_warehouse_col_number BOOLEAN DEFAULT false`,
@@ -635,6 +637,7 @@ const statements = [
   `UPDATE roles
    SET can_warehouse_filters = true,
        can_warehouse_import = true,
+       can_warehouse_invoice_import = true,
        can_warehouse_export = true,
        can_warehouse_col_number = true,
        can_warehouse_col_qr = true,
@@ -659,6 +662,7 @@ const statements = [
   `UPDATE user_permissions
    SET can_warehouse_filters = true,
        can_warehouse_import = true,
+       can_warehouse_invoice_import = true,
        can_warehouse_export = true,
        can_warehouse_col_number = true,
        can_warehouse_col_qr = true,
@@ -680,6 +684,14 @@ const statements = [
        can_warehouse_col_description = true
    WHERE COALESCE(can_warehouse_view, false) = true
      AND COALESCE(can_warehouse_col_name, false) = false`,
+  `UPDATE roles
+   SET can_warehouse_invoice_import = true
+   WHERE COALESCE(can_warehouse_import, false) = true
+     AND COALESCE(can_warehouse_invoice_import, false) = false`,
+  `UPDATE user_permissions
+   SET can_warehouse_invoice_import = true
+   WHERE COALESCE(can_warehouse_import, false) = true
+     AND COALESCE(can_warehouse_invoice_import, false) = false`,
   `UPDATE roles
    SET can_issuance_return = true, can_issuance_transfer = true, can_issuance_production = true
    WHERE COALESCE(can_issuance, false) = true

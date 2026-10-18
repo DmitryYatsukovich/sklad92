@@ -67,6 +67,12 @@ export const APP_PERMISSIONS = [
     group: 'Основные разделы',
   },
   {
+    key: 'can_warehouse_invoice_import',
+    label: 'Склад: добавить по накладной',
+    description: 'Распознавание фото/PDF накладной и массовое добавление материалов на склад',
+    group: 'Основные разделы',
+  },
+  {
     key: 'can_warehouse_export',
     label: 'Склад: экспорт',
     description: 'Доступ к кнопкам и API экспорта Excel/PDF',
@@ -472,6 +478,7 @@ export function permissionsFromBody(body = {}) {
     perms.can_warehouse_filters = false;
     perms.can_warehouse_issue_qr_only = false;
     perms.can_warehouse_import = false;
+    perms.can_warehouse_invoice_import = false;
     perms.can_warehouse_export = false;
     perms.can_warehouse_col_number = false;
     perms.can_warehouse_col_qr = false;
@@ -513,6 +520,9 @@ export function permissionsFromBody(body = {}) {
     perms.can_warehouse_col_smr_total = false;
     perms.can_warehouse_col_updated_at = false;
     perms.can_warehouse_col_description = false;
+  }
+  if (!perms.can_warehouse_import) {
+    perms.can_warehouse_invoice_import = false;
   }
   if (!perms.can_warehouse_issue) {
     perms.can_warehouse_issue_qr_only = false;

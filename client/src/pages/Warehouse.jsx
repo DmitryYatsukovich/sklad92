@@ -7,6 +7,7 @@ import MaterialLocationFields from '../components/MaterialLocationFields';
 import MaterialQuantityHistory from '../components/MaterialQuantityHistory';
 import MaterialQrModal from '../components/MaterialQrModal';
 import MaterialStockSummary from '../components/MaterialStockSummary';
+import InvoiceImportModal from '../components/InvoiceImportModal';
 import {
   UNITS,
   emptyMaterialForm,
@@ -192,6 +193,7 @@ export default function Warehouse({ user }) {
   const [issueUserHighlightIndex, setIssueUserHighlightIndex] = useState(-1);
   const [users, setUsers] = useState([]);
   const [showQrMaterial, setShowQrMaterial] = useState(null);
+  const [invoiceImportOpen, setInvoiceImportOpen] = useState(false);
   const [filters, setFilters] = useState(() => createEmptyFilters());
   const [nameSearch, setNameSearch] = useState('');
   const [descriptionSearch, setDescriptionSearch] = useState('');
@@ -235,6 +237,7 @@ export default function Warehouse({ user }) {
   const canWarehouseFilters = isAdmin || !!user?.can_warehouse_filters;
   const canWarehouseIssueQrOnly = isAdmin || !!user?.can_warehouse_issue_qr_only;
   const canWarehouseImport = isAdmin || !!user?.can_warehouse_import;
+  const canWarehouseInvoiceImport = isAdmin || !!user?.can_warehouse_invoice_import;
   const canWarehouseExport = isAdmin || !!user?.can_warehouse_export;
   const canWarehouseColNumber = isAdmin || !!user?.can_warehouse_col_number;
   const canWarehouseColQr = isAdmin || !!user?.can_warehouse_col_qr;
@@ -1524,6 +1527,16 @@ export default function Warehouse({ user }) {
               Сброс
             </button>
           )}
+          {canWarehouseInvoiceImport && (
+            <button
+              type="button"
+              onClick={() => { setError(''); setInfo(''); setInvoiceImportOpen(true); }}
+              className="btn-ghost"
+              title="Распознать накладную и добавить позиции"
+            >
+              Добавить по накладной
+            </button>
+          )}
           {canWarehouseImport && (
             <button
               type="button"
@@ -2335,6 +2348,18 @@ export default function Warehouse({ user }) {
           material={showQrMaterial}
           groupInfo={materialGroupSummary(showQrMaterial)}
           onClose={() => setShowQrMaterial(null)}
+        />
+      )}
+
+      {canWarehouseInvoiceImport && invoiceImportOpen && (
+        <InvoiceImportModal
+          catalog={catalog}
+          onClose={() => setInvoiceImportOpen(false)}
+          onImported={(result) => {
+            const created = Number(result?.created_count || 0);
+            setInfo(created > 0 ? `Добавлено позиций по накладной: ${created}` : 'Накладная обработана');
+            load({ silent: true });
+          }}
         />
       )}
 

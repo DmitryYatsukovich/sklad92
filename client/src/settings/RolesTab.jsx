@@ -28,6 +28,7 @@ const WAREHOUSE_BASE_SUBMENU_KEYS = [
   'can_warehouse_split',
   'can_warehouse_delete',
   'can_warehouse_import',
+  'can_warehouse_invoice_import',
 ];
 
 const WAREHOUSE_ISSUE_SUBMENU_KEYS = [
@@ -150,6 +151,7 @@ export default function RolesTab() {
       can_warehouse_filters: true,
       can_warehouse_issue_qr_only: false,
       can_warehouse_import: true,
+      can_warehouse_invoice_import: true,
       can_warehouse_export: true,
       can_warehouse_col_number: true,
       can_warehouse_col_qr: true,
@@ -241,6 +243,9 @@ export default function RolesTab() {
       }
       if (key === 'can_warehouse_issue' && !value) {
         next.can_warehouse_issue_qr_only = false;
+      }
+      if (key === 'can_warehouse_import' && !value) {
+        next.can_warehouse_invoice_import = false;
       }
       if (key === 'can_issuance' && !value) {
         next.can_issuance_return = false;
@@ -539,12 +544,17 @@ export default function RolesTab() {
                                   {WAREHOUSE_BASE_SUBMENU_KEYS.map((subKey) => {
                                     const subDef = permissionDefs.find((def) => def.key === subKey);
                                     if (!subDef) return null;
+                                    const disabled = !!editing?.is_admin_role
+                                      || (subKey === 'can_warehouse_invoice_import' && !(editing?.is_admin_role || form.can_warehouse_import));
                                     return (
-                                      <label key={subKey} className="flex items-start gap-2 text-sm text-slate-300 cursor-pointer">
+                                      <label
+                                        key={subKey}
+                                        className={`flex items-start gap-2 text-sm text-slate-300 cursor-pointer ${disabled ? 'opacity-60' : ''}`}
+                                      >
                                         <input
                                           type="checkbox"
                                           checked={editing?.is_admin_role ? true : !!form[subKey]}
-                                          disabled={!!editing?.is_admin_role}
+                                          disabled={disabled}
                                           onChange={(e) => setPerm(subKey, e.target.checked)}
                                           className="mt-1 rounded border-slate-600 text-brand-600"
                                         />
