@@ -2444,16 +2444,41 @@ export default function ObjectSettingsTabRefactored() {
         });
         const clampX = (value) => Math.max(2, Math.min(gridRect.width - 2, value));
         const clampY = (value) => Math.max(2, Math.min(gridRect.height - 2, value));
-        const choosePreferredEdge = (anchor) => (anchor.center.y <= (gridRect.height / 2) ? 'top' : 'bottom');
-        const getTerminalPoint = (anchor, edge) => (
-          edge === 'top'
-            ? { x: anchor.center.x, y: anchor.top }
-            : { x: anchor.center.x, y: anchor.bottom }
-        );
-        const getJunctionPoint = (terminalPoint, edge) => ({
-          x: terminalPoint.x,
-          y: terminalPoint.y + (edge === 'top' ? -2 : 2),
-        });
+        const getTerminalPoint = (anchor, edge) => {
+          if (edge === 'top') return { x: anchor.center.x, y: anchor.top };
+          if (edge === 'bottom') return { x: anchor.center.x, y: anchor.bottom };
+          if (edge === 'left') return { x: anchor.left, y: anchor.center.y };
+          return { x: anchor.right, y: anchor.center.y };
+        };
+        const getJunctionPoint = (terminalPoint, edge) => {
+          if (edge === 'top') return { x: terminalPoint.x, y: terminalPoint.y - 2 };
+          if (edge === 'bottom') return { x: terminalPoint.x, y: terminalPoint.y + 2 };
+          if (edge === 'left') return { x: terminalPoint.x - 2, y: terminalPoint.y };
+          return { x: terminalPoint.x + 2, y: terminalPoint.y };
+        };
+        const getVerticalPreference = (edge, fromAnchor, toAnchor) => {
+          if (edge === 'top') return 'up';
+          if (edge === 'bottom') return 'down';
+          return toAnchor.center.y >= fromAnchor.center.y ? 'down' : 'up';
+        };
+        const chooseAdaptiveEdge = ({
+          anchor,
+          otherAnchor,
+          laneXHint,
+          fallbackToVertical = false,
+        }) => {
+          const dxOther = otherAnchor.center.x - anchor.center.x;
+          const dyOther = otherAnchor.center.y - anchor.center.y;
+          const horizontalTowardOther = dxOther >= 0 ? 'right' : 'left';
+          const verticalTowardOther = dyOther >= 0 ? 'bottom' : 'top';
+          const laneSide = laneXHint >= anchor.center.x ? 'right' : 'left';
+          const dxLane = Math.abs(laneXHint - anchor.center.x);
+          const dyOtherAbs = Math.abs(dyOther);
+          if (dxLane > (dyOtherAbs * 0.8)) return laneSide;
+          if (Math.abs(dxOther) > (Math.abs(dyOther) * 1.1)) return horizontalTowardOther;
+          if (fallbackToVertical) return verticalTowardOther;
+          return anchor.center.y <= (gridRect.height / 2) ? 'top' : 'bottom';
+        };
         const slotObstacles = Array.from(gridEl.querySelectorAll('[data-slot-id]'))
           .map((node) => {
             if (!(node instanceof HTMLElement)) return null;
@@ -2635,8 +2660,8 @@ export default function ObjectSettingsTabRefactored() {
 
         const paths = [];
         const committedSegments = [];
-        const laneSpacing = 2.35;
-        const minLaneGap = 1.65;
+        const laneSpacing = 2.8;
+        const minLaneGap = 2.05;
         const usedVerticalLanes = [];
         const usedHorizontalLanes = [];
         const rangesOverlap = (a1, a2, b1, b2) => (
@@ -2841,37 +2866,50 @@ export default function ObjectSettingsTabRefactored() {
             return score;
           };
           const buildCandidateSegments = (item, laneRank) => {
-            const fromEdge = choosePreferredEdge(item.from);
-            const toEdge = choosePreferredEdge(item.to);
-            const fromTerminal = getTerminalPoint(item.from, fromEdge);
-            const toTerminal = getTerminalPoint(item.to, toEdge);
-            const fromJunction = getJunctionPoint(fromTerminal, fromEdge);
-            const toJunction = getJunctionPoint(toTerminal, toEdge);
             const excludeSlotIds = new Set([item.fromSlotId, item.toSlotId].filter(Boolean));
             const duplicateOffset = duplicateOffsetByKey.get(item.key) || 0;
             const laneShift = (laneRank - ((arranged.length - 1) / 2)) * laneSpacing;
             const points = [];
             if (hasTransitRoute && item.transit) {
-              const laneBase = item.transit.right - 6;
+              const averageX = (item.from.center.x + item.to.center.x) / 2;
+              const useRightTransitSide = averageX >= item.transit.center.x;
+              const laneBase = useRightTransitSide ? (item.transit.right - 6) : (item.transit.left + 6);
+              const laneXHint = laneBase + laneShift;
+              const fromEdge = chooseAdaptiveEdge({
+                anchor: item.from,
+                otherAnchor: item.to,
+                laneXHint,
+                fallbackToVertical: true,
+              });
+              const toEdge = chooseAdaptiveEdge({
+                anchor: item.to,
+                otherAnchor: item.from,
+                laneXHint,
+                fallbackToVertical: true,
+              });
+              const fromTerminal = getTerminalPoint(item.from, fromEdge);
+              const toTerminal = getTerminalPoint(item.to, toEdge);
+              const fromJunction = getJunctionPoint(fromTerminal, fromEdge);
+              const toJunction = getJunctionPoint(toTerminal, toEdge);
               const fromY = findSafeHorizontalY({
                 initialY: fromJunction.y + duplicateOffset,
                 x1: fromJunction.x,
-                x2: laneBase + laneShift,
-                preferredDirection: fromEdge === 'top' ? 'up' : 'down',
+                x2: laneXHint,
+                preferredDirection: getVerticalPreference(fromEdge, item.from, item.to),
                 excludeSlotIds,
               });
               const toY = findSafeHorizontalY({
                 initialY: toJunction.y + duplicateOffset,
-                x1: laneBase + laneShift,
+                x1: laneXHint,
                 x2: toJunction.x,
-                preferredDirection: toEdge === 'top' ? 'up' : 'down',
+                preferredDirection: getVerticalPreference(toEdge, item.to, item.from),
                 excludeSlotIds,
               });
               const laneX = findSafeVerticalX({
-                initialX: laneBase + laneShift,
+                initialX: laneXHint,
                 y1: fromY,
                 y2: toY,
-                preferredDirection: laneShift <= 0 ? 'left' : 'right',
+                preferredDirection: useRightTransitSide ? 'right' : 'left',
                 excludeSlotIds,
               });
               pushPoint(points, fromTerminal);
@@ -2892,18 +2930,34 @@ export default function ObjectSettingsTabRefactored() {
               const rightBase = Math.min(gridRect.width - 6, globalRight + 8);
               const leftBase = Math.max(6, globalLeft - 8);
               const laneBase = (useRight ? rightBase : leftBase) + laneShift;
+              const fromEdge = chooseAdaptiveEdge({
+                anchor: item.from,
+                otherAnchor: item.to,
+                laneXHint: laneBase,
+                fallbackToVertical: false,
+              });
+              const toEdge = chooseAdaptiveEdge({
+                anchor: item.to,
+                otherAnchor: item.from,
+                laneXHint: laneBase,
+                fallbackToVertical: false,
+              });
+              const fromTerminal = getTerminalPoint(item.from, fromEdge);
+              const toTerminal = getTerminalPoint(item.to, toEdge);
+              const fromJunction = getJunctionPoint(fromTerminal, fromEdge);
+              const toJunction = getJunctionPoint(toTerminal, toEdge);
               const fromY = findSafeHorizontalY({
                 initialY: fromJunction.y + duplicateOffset,
                 x1: fromJunction.x,
                 x2: laneBase,
-                preferredDirection: fromEdge === 'top' ? 'up' : 'down',
+                preferredDirection: getVerticalPreference(fromEdge, item.from, item.to),
                 excludeSlotIds,
               });
               const toY = findSafeHorizontalY({
                 initialY: toJunction.y + duplicateOffset,
                 x1: laneBase,
                 x2: toJunction.x,
-                preferredDirection: toEdge === 'top' ? 'up' : 'down',
+                preferredDirection: getVerticalPreference(toEdge, item.to, item.from),
                 excludeSlotIds,
               });
               const laneX = findSafeVerticalX({
@@ -2950,60 +3004,111 @@ export default function ObjectSettingsTabRefactored() {
             availableLaneRanks.delete(bestRank);
             if (bestSegments?.length) groupPreviewSegments.push(...bestSegments);
           });
+          const evaluateLaneMapScore = (rankMap) => {
+            const itemSegments = arranged.map((item, idx) => (
+              buildCandidateSegments(item, rankMap.get(item.key) ?? idx)
+            ));
+            let score = 0;
+            for (let i = 0; i < itemSegments.length; i += 1) {
+              score += scoreSegmentsAgainst(itemSegments[i], committedSegments);
+              for (let j = i + 1; j < itemSegments.length; j += 1) {
+                score += scoreSegmentsAgainst(itemSegments[i], itemSegments[j]);
+              }
+            }
+            return score;
+          };
+          let laneScore = evaluateLaneMapScore(laneRankByKey);
+          for (let pass = 0; pass < Math.min(8, arranged.length + 1); pass += 1) {
+            let improved = false;
+            const rankedItems = [...arranged].sort((a, b) => (
+              (laneRankByKey.get(a.key) ?? 0) - (laneRankByKey.get(b.key) ?? 0)
+            ));
+            for (let i = 0; i < rankedItems.length - 1; i += 1) {
+              const left = rankedItems[i];
+              const right = rankedItems[i + 1];
+              const leftRank = laneRankByKey.get(left.key);
+              const rightRank = laneRankByKey.get(right.key);
+              if (leftRank == null || rightRank == null) continue;
+              const candidateMap = new Map(laneRankByKey);
+              candidateMap.set(left.key, rightRank);
+              candidateMap.set(right.key, leftRank);
+              const candidateScore = evaluateLaneMapScore(candidateMap);
+              if (candidateScore + 0.001 < laneScore) {
+                laneRankByKey.set(left.key, rightRank);
+                laneRankByKey.set(right.key, leftRank);
+                laneScore = candidateScore;
+                improved = true;
+              }
+            }
+            if (!improved) break;
+          }
           arranged.forEach((item, index) => {
             const laneRank = laneRankByKey.get(item.key) ?? index;
-            const fromEdge = choosePreferredEdge(item.from);
-            const toEdge = choosePreferredEdge(item.to);
-            const fromTerminal = getTerminalPoint(item.from, fromEdge);
-            const toTerminal = getTerminalPoint(item.to, toEdge);
-            const fromJunction = getJunctionPoint(fromTerminal, fromEdge);
-            const toJunction = getJunctionPoint(toTerminal, toEdge);
             const excludeSlotIds = new Set([item.fromSlotId, item.toSlotId].filter(Boolean));
             const duplicateOffset = duplicateOffsetByKey.get(item.key) || 0;
             const points = [];
             if (hasTransitRoute && item.transit) {
               const laneShift = (laneRank - ((arranged.length - 1) / 2)) * laneSpacing;
-              const laneBase = item.transit.right - 6;
+              const averageX = (item.from.center.x + item.to.center.x) / 2;
+              const useRightTransitSide = averageX >= item.transit.center.x;
+              const laneBase = useRightTransitSide ? (item.transit.right - 6) : (item.transit.left + 6);
+              const laneXHint = laneBase + laneShift;
+              const fromEdge = chooseAdaptiveEdge({
+                anchor: item.from,
+                otherAnchor: item.to,
+                laneXHint,
+                fallbackToVertical: true,
+              });
+              const toEdge = chooseAdaptiveEdge({
+                anchor: item.to,
+                otherAnchor: item.from,
+                laneXHint,
+                fallbackToVertical: true,
+              });
+              const fromTerminal = getTerminalPoint(item.from, fromEdge);
+              const toTerminal = getTerminalPoint(item.to, toEdge);
+              const fromJunction = getJunctionPoint(fromTerminal, fromEdge);
+              const toJunction = getJunctionPoint(toTerminal, toEdge);
               const fromYBase = findSafeHorizontalY({
                 initialY: fromJunction.y + duplicateOffset,
                 x1: fromJunction.x,
-                x2: laneBase + laneShift,
-                preferredDirection: fromEdge === 'top' ? 'up' : 'down',
+                x2: laneXHint,
+                preferredDirection: getVerticalPreference(fromEdge, item.from, item.to),
                 excludeSlotIds,
               });
               const toYBase = findSafeHorizontalY({
                 initialY: toJunction.y + duplicateOffset,
-                x1: laneBase + laneShift,
+                x1: laneXHint,
                 x2: toJunction.x,
-                preferredDirection: toEdge === 'top' ? 'up' : 'down',
+                preferredDirection: getVerticalPreference(toEdge, item.to, item.from),
                 excludeSlotIds,
               });
               const laneXProbe = findSafeVerticalX({
-                initialX: laneBase + laneShift,
+                initialX: laneXHint,
                 y1: fromYBase,
                 y2: toYBase,
-                preferredDirection: laneShift <= 0 ? 'left' : 'right',
+                preferredDirection: useRightTransitSide ? 'right' : 'left',
                 excludeSlotIds,
               });
               const fromY = reserveHorizontalY({
                 initialY: fromYBase,
                 x1: fromJunction.x,
                 x2: laneXProbe,
-                preferredDirection: fromEdge === 'top' ? 'up' : 'down',
+                preferredDirection: getVerticalPreference(fromEdge, item.from, item.to),
                 excludeSlotIds,
               });
               const toY = reserveHorizontalY({
                 initialY: toYBase,
                 x1: laneXProbe,
                 x2: toJunction.x,
-                preferredDirection: toEdge === 'top' ? 'up' : 'down',
+                preferredDirection: getVerticalPreference(toEdge, item.to, item.from),
                 excludeSlotIds,
               });
               const laneX = reserveLaneX({
                 initialX: laneXProbe,
                 y1: fromY,
                 y2: toY,
-                preferredDirection: laneShift <= 0 ? 'left' : 'right',
+                preferredDirection: useRightTransitSide ? 'right' : 'left',
                 excludeSlotIds,
               });
               pushPoint(points, fromTerminal);
@@ -3032,18 +3137,34 @@ export default function ObjectSettingsTabRefactored() {
               const preferredBase = useRight ? rightBase : leftBase;
               const laneShift = (laneRank - ((arranged.length - 1) / 2)) * laneSpacing;
               const laneBase = preferredBase + laneShift;
+              const fromEdge = chooseAdaptiveEdge({
+                anchor: item.from,
+                otherAnchor: item.to,
+                laneXHint: laneBase,
+                fallbackToVertical: false,
+              });
+              const toEdge = chooseAdaptiveEdge({
+                anchor: item.to,
+                otherAnchor: item.from,
+                laneXHint: laneBase,
+                fallbackToVertical: false,
+              });
+              const fromTerminal = getTerminalPoint(item.from, fromEdge);
+              const toTerminal = getTerminalPoint(item.to, toEdge);
+              const fromJunction = getJunctionPoint(fromTerminal, fromEdge);
+              const toJunction = getJunctionPoint(toTerminal, toEdge);
               const fromYBase = findSafeHorizontalY({
                 initialY: fromJunction.y + duplicateOffset,
                 x1: fromJunction.x,
                 x2: laneBase,
-                preferredDirection: fromEdge === 'top' ? 'up' : 'down',
+                preferredDirection: getVerticalPreference(fromEdge, item.from, item.to),
                 excludeSlotIds,
               });
               const toYBase = findSafeHorizontalY({
                 initialY: toJunction.y + duplicateOffset,
                 x1: laneBase,
                 x2: toJunction.x,
-                preferredDirection: toEdge === 'top' ? 'up' : 'down',
+                preferredDirection: getVerticalPreference(toEdge, item.to, item.from),
                 excludeSlotIds,
               });
               const corridorXProbe = findSafeVerticalX({
@@ -3057,14 +3178,14 @@ export default function ObjectSettingsTabRefactored() {
                 initialY: fromYBase,
                 x1: fromJunction.x,
                 x2: corridorXProbe,
-                preferredDirection: fromEdge === 'top' ? 'up' : 'down',
+                preferredDirection: getVerticalPreference(fromEdge, item.from, item.to),
                 excludeSlotIds,
               });
               const toY = reserveHorizontalY({
                 initialY: toYBase,
                 x1: corridorXProbe,
                 x2: toJunction.x,
-                preferredDirection: toEdge === 'top' ? 'up' : 'down',
+                preferredDirection: getVerticalPreference(toEdge, item.to, item.from),
                 excludeSlotIds,
               });
               const corridorX = reserveLaneX({
@@ -4195,7 +4316,7 @@ export default function ObjectSettingsTabRefactored() {
                                           d={pathItem.d}
                                           fill="none"
                                           stroke={pathItem.color}
-                                          strokeWidth={pathItem.preview ? 0.78 : (isHovered ? 1.25 : 0.78)}
+                                          strokeWidth={pathItem.preview ? 0.62 : (isHovered ? 0.98 : 0.62)}
                                           strokeLinecap="round"
                                           strokeLinejoin="round"
                                           strokeDasharray={pathItem.preview ? '4 3' : undefined}
@@ -4249,39 +4370,21 @@ export default function ObjectSettingsTabRefactored() {
                                   {(entranceOverlay.jumps || []).map((jump) => (
                                     <g key={`jump-${jump.key}`} pointerEvents="none">
                                       {jump.orientation === 'vertical' ? (
-                                        <>
-                                          <path
-                                            d={`M ${jump.x} ${jump.y - 2.8} L ${jump.x} ${jump.y + 2.8}`}
-                                            fill="none"
-                                            stroke="#0B1220"
-                                            strokeWidth="1.75"
-                                            strokeLinecap="round"
-                                          />
-                                          <path
-                                            d={`M ${jump.x} ${jump.y - 2.8} Q ${jump.x + 3.1} ${jump.y} ${jump.x} ${jump.y + 2.8}`}
-                                            fill="none"
-                                            stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
-                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '0.95' : '0.82'}
-                                            strokeLinecap="round"
-                                          />
-                                        </>
+                                        <path
+                                          d={`M ${jump.x} ${jump.y - 2.45} Q ${jump.x + 2.55} ${jump.y} ${jump.x} ${jump.y + 2.45}`}
+                                          fill="none"
+                                          stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
+                                          strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '0.86' : '0.72'}
+                                          strokeLinecap="round"
+                                        />
                                       ) : (
-                                        <>
-                                          <path
-                                            d={`M ${jump.x - 2.8} ${jump.y} L ${jump.x + 2.8} ${jump.y}`}
-                                            fill="none"
-                                            stroke="#0B1220"
-                                            strokeWidth="1.75"
-                                            strokeLinecap="round"
-                                          />
-                                          <path
-                                            d={`M ${jump.x - 2.8} ${jump.y} Q ${jump.x} ${jump.y - 3.1} ${jump.x + 2.8} ${jump.y}`}
-                                            fill="none"
-                                            stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
-                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '0.95' : '0.82'}
-                                            strokeLinecap="round"
-                                          />
-                                        </>
+                                        <path
+                                          d={`M ${jump.x - 2.45} ${jump.y} Q ${jump.x} ${jump.y - 2.55} ${jump.x + 2.45} ${jump.y}`}
+                                          fill="none"
+                                          stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
+                                          strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '0.86' : '0.72'}
+                                          strokeLinecap="round"
+                                        />
                                       )}
                                     </g>
                                   ))}
