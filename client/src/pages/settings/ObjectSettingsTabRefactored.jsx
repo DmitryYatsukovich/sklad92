@@ -2635,6 +2635,8 @@ export default function ObjectSettingsTabRefactored() {
 
         const paths = [];
         const committedSegments = [];
+        const laneSpacing = 2.35;
+        const minLaneGap = 1.65;
         const usedVerticalLanes = [];
         const usedHorizontalLanes = [];
         const rangesOverlap = (a1, a2, b1, b2) => (
@@ -2642,11 +2644,11 @@ export default function ObjectSettingsTabRefactored() {
           <= (Math.min(Math.max(a1, a2), Math.max(b1, b2)) + 0.01)
         );
         const hasVerticalLaneNear = (xValue, y1, y2) => usedVerticalLanes.some((used) => (
-          Math.abs(used.x - xValue) < 1.1
+          Math.abs(used.x - xValue) < minLaneGap
           && rangesOverlap(used.y1, used.y2, y1, y2)
         ));
         const hasHorizontalLaneNear = (yValue, x1, x2) => usedHorizontalLanes.some((used) => (
-          Math.abs(used.y - yValue) < 1.1
+          Math.abs(used.y - yValue) < minLaneGap
           && rangesOverlap(used.x1, used.x2, x1, x2)
         ));
         const reserveLaneX = ({
@@ -2659,7 +2661,7 @@ export default function ObjectSettingsTabRefactored() {
           for (let attempt = 0; attempt < 18; attempt += 1) {
             const ring = Math.floor(attempt / 2) + 1;
             const sign = attempt === 0 ? 0 : (attempt % 2 === 1 ? 1 : -1);
-            const probeX = attempt === 0 ? initialX : (initialX + (sign * ring * 1.25));
+            const probeX = attempt === 0 ? initialX : (initialX + (sign * ring * minLaneGap));
             const safeX = findSafeVerticalX({
               initialX: probeX,
               y1,
@@ -2692,7 +2694,7 @@ export default function ObjectSettingsTabRefactored() {
           for (let attempt = 0; attempt < 18; attempt += 1) {
             const ring = Math.floor(attempt / 2) + 1;
             const sign = attempt === 0 ? 0 : (attempt % 2 === 1 ? 1 : -1);
-            const baseY = attempt === 0 ? initialY : (initialY + (sign * ring * 1.25));
+            const baseY = attempt === 0 ? initialY : (initialY + (sign * ring * minLaneGap));
             const safeY = findSafeHorizontalY({
               initialY: baseY,
               x1,
@@ -2847,7 +2849,7 @@ export default function ObjectSettingsTabRefactored() {
             const toJunction = getJunctionPoint(toTerminal, toEdge);
             const excludeSlotIds = new Set([item.fromSlotId, item.toSlotId].filter(Boolean));
             const duplicateOffset = duplicateOffsetByKey.get(item.key) || 0;
-            const laneShift = (laneRank - ((arranged.length - 1) / 2)) * 1.9;
+            const laneShift = (laneRank - ((arranged.length - 1) / 2)) * laneSpacing;
             const points = [];
             if (hasTransitRoute && item.transit) {
               const laneBase = item.transit.right - 6;
@@ -2960,7 +2962,7 @@ export default function ObjectSettingsTabRefactored() {
             const duplicateOffset = duplicateOffsetByKey.get(item.key) || 0;
             const points = [];
             if (hasTransitRoute && item.transit) {
-              const laneShift = (laneRank - ((arranged.length - 1) / 2)) * 1.9;
+              const laneShift = (laneRank - ((arranged.length - 1) / 2)) * laneSpacing;
               const laneBase = item.transit.right - 6;
               const fromYBase = findSafeHorizontalY({
                 initialY: fromJunction.y + duplicateOffset,
@@ -3028,7 +3030,7 @@ export default function ObjectSettingsTabRefactored() {
               const rightBase = Math.min(gridRect.width - 6, globalRight + 8);
               const leftBase = Math.max(6, globalLeft - 8);
               const preferredBase = useRight ? rightBase : leftBase;
-              const laneShift = (laneRank - ((arranged.length - 1) / 2)) * 1.9;
+              const laneShift = (laneRank - ((arranged.length - 1) / 2)) * laneSpacing;
               const laneBase = preferredBase + laneShift;
               const fromYBase = findSafeHorizontalY({
                 initialY: fromJunction.y + duplicateOffset,
