@@ -13,6 +13,7 @@ import {
   getCachedUser,
   hasValidOfflineSession,
   clearOfflineSession,
+  clearOfflineCache,
   setOfflineSession,
   refreshOfflineCacheIfNeeded,
   initOfflineCacheAutoSync,
@@ -93,6 +94,7 @@ export default function App() {
   useEffect(() => {
     setQuickDeviceEnabled(false);
     clearOfflineSession().catch(() => {});
+    clearOfflineCache().catch(() => {});
   }, []);
 
   const markActiveSession = useCallback((active) => {

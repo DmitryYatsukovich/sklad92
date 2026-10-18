@@ -1,6 +1,17 @@
-/** Регистрация SW только в production (собранный фронт на Timeweb). */
+/** Офлайн-режим удалён: отключаем и очищаем service worker/кэши прошлых версий. */
 export function registerServiceWorker() {
-  if (!import.meta.env.PROD) return;
   if (!('serviceWorker' in navigator)) return;
-  navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+  const clear = async () => {
+    const regs = await navigator.serviceWorker.getRegistrations().catch(() => []);
+    await Promise.allSettled((regs || []).map((reg) => reg.unregister()));
+    if ('caches' in window) {
+      const keys = await caches.keys().catch(() => []);
+      await Promise.allSettled(
+        (keys || [])
+          .filter((key) => String(key).startsWith('warehouse-'))
+          .map((key) => caches.delete(key)),
+      );
+    }
+  };
+  clear().catch(() => {});
 }

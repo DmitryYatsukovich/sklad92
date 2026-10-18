@@ -189,7 +189,13 @@ export const auth = {
       throw new Error('Нет сети. Войдите онлайн или используйте сохранённую сессию.');
     }
     try {
-      const data = await request('/api/auth/me');
+      const data = await request(`/api/auth/me?_=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          Pragma: 'no-cache',
+          'Cache-Control': 'no-cache',
+        },
+      });
       if (data?.user && isQuickDeviceEnabled()) {
         await setCachedUser(data.user);
         await setOfflineSession(data.user);
