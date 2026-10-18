@@ -2403,6 +2403,16 @@ export default function ObjectSettingsTabRefactored() {
           bottom: rect.bottom - gridRect.top,
         });
         const pointFromRectCenter = (rect) => rectToAnchor(rect).center;
+        const choosePreferredEdge = (anchor) => (anchor.center.y <= (gridRect.height / 2) ? 'top' : 'bottom');
+        const getTerminalPoint = (anchor, edge) => (
+          edge === 'top'
+            ? { x: anchor.center.x, y: anchor.top }
+            : { x: anchor.center.x, y: anchor.bottom }
+        );
+        const getJunctionPoint = (terminalPoint, edge) => ({
+          x: terminalPoint.x,
+          y: terminalPoint.y + (edge === 'top' ? -6 : 6),
+        });
         const resolveSlotAnchor = (slotIdValue, transitPoint) => {
           const slotId = Number.parseInt(slotIdValue, 10);
           if (!slotId) return null;
@@ -2495,42 +2505,44 @@ export default function ObjectSettingsTabRefactored() {
             return (
               (((aFrom + aTo) / 2) - ((bFrom + bTo) / 2))
               || (Math.abs(aFrom - aTo) - Math.abs(bFrom - bTo))
-              || (a.from.y - b.from.y)
+              || (a.from.center.y - b.from.center.y)
             );
           });
 
           const hasTransitRoute = Boolean(arranged[0]?.transit);
           arranged.forEach((item, index) => {
+            const fromEdge = choosePreferredEdge(item.from);
+            const toEdge = choosePreferredEdge(item.to);
+            const fromTerminal = getTerminalPoint(item.from, fromEdge);
+            const toTerminal = getTerminalPoint(item.to, toEdge);
+            const fromJunction = getJunctionPoint(fromTerminal, fromEdge);
+            const toJunction = getJunctionPoint(toTerminal, toEdge);
             const points = [];
             if (hasTransitRoute && item.transit) {
-              const laneShift = (index - ((arranged.length - 1) / 2)) * 6;
+              const laneShift = (index - ((arranged.length - 1) / 2)) * 3.2;
               const laneX = item.transit.x + laneShift;
-              const fromY = item.from.center.y;
-              const toY = item.to.center.y;
-              const fromEdgeX = laneX >= item.from.center.x ? item.from.right : item.from.left;
-              const toEdgeX = laneX <= item.to.center.x ? item.to.left : item.to.right;
               points.push(
-                { x: fromEdgeX, y: fromY },
-                { x: laneX, y: fromY },
-                { x: laneX, y: toY },
-                { x: toEdgeX, y: toY },
+                fromTerminal,
+                fromJunction,
+                { x: laneX, y: fromJunction.y },
+                { x: laneX, y: toJunction.y },
+                { x: toJunction.x, y: toJunction.y },
+                toTerminal,
               );
             } else {
               const directionRight = item.to.center.x >= item.from.center.x;
-              const fromY = item.from.center.y;
-              const toY = item.to.center.y;
-              const fromEdgeX = directionRight ? item.from.right : item.from.left;
-              const toEdgeX = directionRight ? item.to.left : item.to.right;
               const corridorBase = directionRight
-                ? Math.max(item.from.right, item.to.right) + 10
-                : Math.min(item.from.left, item.to.left) - 10;
-              const laneShift = (index - ((arranged.length - 1) / 2)) * 7;
+                ? Math.max(item.from.right, item.to.right) + 8
+                : Math.min(item.from.left, item.to.left) - 8;
+              const laneShift = (index - ((arranged.length - 1) / 2)) * 3.2;
               const corridorX = corridorBase + laneShift;
               points.push(
-                { x: fromEdgeX, y: fromY },
-                { x: corridorX, y: fromY },
-                { x: corridorX, y: toY },
-                { x: toEdgeX, y: toY },
+                fromTerminal,
+                fromJunction,
+                { x: corridorX, y: fromJunction.y },
+                { x: corridorX, y: toJunction.y },
+                { x: toJunction.x, y: toJunction.y },
+                toTerminal,
               );
             }
             const d = points.map((point, idx) => `${idx === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
@@ -3313,12 +3325,12 @@ export default function ObjectSettingsTabRefactored() {
                     const linearColumnsTemplate = entranceLinearLayoutRows.map((row) => {
                       if (row._kind === 'transit') {
                         const lineCount = transitLaneDemandById.get(Number(row.id)) || 0;
-                        const extra = Math.min(Math.max(lineCount - 1, 0), 16) * 0.24;
-                        const minRem = (4.25 + extra).toFixed(2);
-                        const maxRem = (5.1 + (extra * 1.4)).toFixed(2);
+                        const extra = Math.min(Math.max(lineCount - 1, 0), 24) * 0.09;
+                        const minRem = (3.55 + extra).toFixed(2);
+                        const maxRem = (4.25 + (extra * 1.1)).toFixed(2);
                         return `minmax(${minRem}rem, ${maxRem}rem)`;
                       }
-                      return 'minmax(3.8rem, 4.4rem)';
+                      return 'minmax(3.25rem, 3.85rem)';
                     }).join(' ');
                     return (
                       <section key={entrance.id} className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-2.5 space-y-2 shadow-[0_8px_20px_rgba(0,0,0,0.22)]">
@@ -3553,7 +3565,7 @@ export default function ObjectSettingsTabRefactored() {
                                       d={pathItem.d}
                                       fill="none"
                                       stroke={pathItem.color}
-                                      strokeWidth={pathItem.preview ? 1.6 : 1.8}
+                                      strokeWidth={pathItem.preview ? 0.95 : 1.05}
                                       strokeLinecap="round"
                                       strokeLinejoin="round"
                                       strokeDasharray={pathItem.preview ? '4 3' : undefined}
@@ -3576,7 +3588,7 @@ export default function ObjectSettingsTabRefactored() {
                                         d={`M ${jump.x - 3} ${jump.y} Q ${jump.x} ${jump.y - 4} ${jump.x + 3} ${jump.y}`}
                                         fill="none"
                                         stroke="#F8FAFC"
-                                        strokeWidth="1.3"
+                                        strokeWidth="0.95"
                                         strokeLinecap="round"
                                       />
                                     </g>
