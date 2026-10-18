@@ -482,6 +482,13 @@ export default function ObjectSettingsTabRefactored() {
     }
     return true;
   }, [selectedSystemIds, selectedCategoryIds, selectedApartmentScopes, selectedRoomNames, roomNameById]);
+
+  const slotById = useMemo(() => {
+    const map = new Map();
+    data.locationSystems.forEach((slot) => map.set(slot.id, slot));
+    return map;
+  }, [data.locationSystems]);
+
   const slotMatchesLocationScope = useCallback((slot) => {
     if (!slot) return false;
     const apartmentsSelected = selectedApartmentScopes.includes('all');
@@ -566,12 +573,6 @@ export default function ObjectSettingsTabRefactored() {
     map.forEach((list, key) => map.set(key, [...list].sort((a, b) => naturalCompare(a.name, b.name))));
     return map;
   }, [data.locationSystemWorks]);
-
-  const slotById = useMemo(() => {
-    const map = new Map();
-    data.locationSystems.forEach((slot) => map.set(slot.id, slot));
-    return map;
-  }, [data.locationSystems]);
 
   const apartmentById = useMemo(() => {
     const map = new Map();
