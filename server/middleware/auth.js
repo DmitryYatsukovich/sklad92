@@ -14,6 +14,7 @@ const WAREHOUSE_GRANULAR_KEYS = [
 function applyLegacyWarehousePermissions(user) {
   if (!user || user.role === 'admin') return user;
   if (!user.can_warehouse) return user;
+  if (user.warehouse_permissions_customized) return user;
   const hasGranularWarehouseAccess = WAREHOUSE_GRANULAR_KEYS.some((key) => !!user[key]);
   if (hasGranularWarehouseAccess) return user;
   // Обратная совместимость: старые роли имели только can_warehouse.
@@ -39,6 +40,11 @@ export async function loadUser(req, res, next) {
             COALESCE(o.name, NULLIF(TRIM(u.employment_org), '')) AS organization_name,
             COALESCE(u.profile_active, true) AS profile_active,
             COALESCE(u.employment_status, 'working') AS employment_status,
+            CASE
+              WHEN u.role = 'admin' THEN true
+              WHEN u.role_id IS NOT NULL THEN COALESCE(r.warehouse_permissions_customized, false)
+              ELSE COALESCE(p.warehouse_permissions_customized, false)
+            END AS warehouse_permissions_customized,
             ${PERMISSIONS_SELECT}
      FROM users u
      LEFT JOIN user_permissions p ON p.user_id = u.id

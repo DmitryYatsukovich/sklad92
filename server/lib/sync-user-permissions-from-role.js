@@ -30,12 +30,15 @@ export async function resolveUserPermissionsForSave(client, { systemRole, role_i
 export async function upsertUserPermissions(client, userId, perms) {
   const cols = PERMISSION_KEYS.join(', ');
   const placeholders = PERMISSION_KEYS.map((_, i) => `$${i + 2}`).join(', ');
-  const updates = PERMISSION_KEYS.map((k, i) => `${k} = $${i + 2}`).join(', ');
+  const updates = [
+    ...PERMISSION_KEYS.map((k, i) => `${k} = $${i + 2}`),
+    `warehouse_permissions_customized = $${PERMISSION_KEYS.length + 2}`,
+  ].join(', ');
   await client.query(
-    `INSERT INTO user_permissions (user_id, ${cols})
-     VALUES ($1, ${placeholders})
+    `INSERT INTO user_permissions (user_id, ${cols}, warehouse_permissions_customized)
+     VALUES ($1, ${placeholders}, $${PERMISSION_KEYS.length + 2})
      ON CONFLICT (user_id) DO UPDATE SET ${updates}`,
-    [userId, ...PERMISSION_KEYS.map((k) => perms[k])],
+    [userId, ...PERMISSION_KEYS.map((k) => perms[k]), true],
   );
 }
 

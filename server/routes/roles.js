@@ -20,7 +20,7 @@ router.use(requirePermission('can_roles'));
 async function ensureAdminRoleFullAccess(client) {
   const sets = PERMISSION_KEYS.map((k) => `${k} = true`).join(', ');
   await client.query(
-    `UPDATE roles SET ${sets} WHERE LOWER(TRIM(name)) = LOWER($1)`,
+    `UPDATE roles SET ${sets}, warehouse_permissions_customized = true WHERE LOWER(TRIM(name)) = LOWER($1)`,
     [ADMIN_ROLE_NAME],
   );
 }
@@ -52,8 +52,8 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'Роль «Администратор» создаётся системой' });
   }
   const perms = permissionsFromBody(rest);
-  const cols = ['name', ...PERMISSION_KEYS];
-  const vals = [name.trim(), ...PERMISSION_KEYS.map((k) => perms[k])];
+  const cols = ['name', ...PERMISSION_KEYS, 'warehouse_permissions_customized'];
+  const vals = [name.trim(), ...PERMISSION_KEYS.map((k) => perms[k]), true];
   const placeholders = vals.map((_, i) => `$${i + 1}`).join(', ');
   try {
     const r = await pool.query(
@@ -80,8 +80,12 @@ router.put('/:id', async (req, res) => {
   const perms = adminRole ? fullPermissionFlags(true) : permissionsFromBody(rest);
   const roleName = adminRole ? ADMIN_ROLE_NAME : (name?.trim() || cur.name);
 
-  const sets = ['name = $1', ...PERMISSION_KEYS.map((k, i) => `${k} = $${i + 2}`)];
-  const vals = [roleName, ...PERMISSION_KEYS.map((k) => perms[k]), id];
+  const sets = [
+    'name = $1',
+    ...PERMISSION_KEYS.map((k, i) => `${k} = $${i + 2}`),
+    `warehouse_permissions_customized = $${PERMISSION_KEYS.length + 2}`,
+  ];
+  const vals = [roleName, ...PERMISSION_KEYS.map((k) => perms[k]), true, id];
 
   const client = await pool.connect();
   try {
