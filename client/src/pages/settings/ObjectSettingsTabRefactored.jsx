@@ -2634,6 +2634,7 @@ export default function ObjectSettingsTabRefactored() {
         });
 
         const paths = [];
+        const committedSegments = [];
         const usedVerticalLanes = [];
         const usedHorizontalLanes = [];
         const rangesOverlap = (a1, a2, b1, b2) => (
@@ -2797,7 +2798,158 @@ export default function ObjectSettingsTabRefactored() {
           const hasTransitRoute = Boolean(arranged[0]?.transit);
           const globalRight = slotObstacles.length ? Math.max(...slotObstacles.map((rect) => rect.right)) : (gridRect.width - 2);
           const globalLeft = slotObstacles.length ? Math.min(...slotObstacles.map((rect) => rect.left)) : 2;
+          const preferredRankByKey = new Map(arranged.map((item, index) => [item.key, index]));
+          const scoreSegmentsAgainst = (segments, againstSegments) => {
+            let score = 0;
+            segments.forEach((segmentA) => {
+              againstSegments.forEach((segmentB) => {
+                if (segmentA.horizontal === segmentB.horizontal) {
+                  if (segmentA.horizontal) {
+                    if (Math.abs(segmentA.y1 - segmentB.y1) > 0.8) return;
+                    const overlap = Math.min(
+                      Math.max(segmentA.x1, segmentA.x2),
+                      Math.max(segmentB.x1, segmentB.x2),
+                    ) - Math.max(
+                      Math.min(segmentA.x1, segmentA.x2),
+                      Math.min(segmentB.x1, segmentB.x2),
+                    );
+                    if (overlap > 0.2) score += (0.8 + (overlap * 0.18));
+                  } else {
+                    if (Math.abs(segmentA.x1 - segmentB.x1) > 0.8) return;
+                    const overlap = Math.min(
+                      Math.max(segmentA.y1, segmentA.y2),
+                      Math.max(segmentB.y1, segmentB.y2),
+                    ) - Math.max(
+                      Math.min(segmentA.y1, segmentA.y2),
+                      Math.min(segmentB.y1, segmentB.y2),
+                    );
+                    if (overlap > 0.2) score += (0.8 + (overlap * 0.18));
+                  }
+                  return;
+                }
+                const horizontal = segmentA.horizontal ? segmentA : segmentB;
+                const vertical = segmentA.horizontal ? segmentB : segmentA;
+                const x = vertical.x1;
+                const y = horizontal.y1;
+                if (!segmentContains(horizontal, x, y) || !segmentContains(vertical, x, y)) return;
+                if (!farFromEndpoints(horizontal, x, y, 2.2) || !farFromEndpoints(vertical, x, y, 2.2)) return;
+                score += 1.6;
+              });
+            });
+            return score;
+          };
+          const buildCandidateSegments = (item, laneRank) => {
+            const fromEdge = choosePreferredEdge(item.from);
+            const toEdge = choosePreferredEdge(item.to);
+            const fromTerminal = getTerminalPoint(item.from, fromEdge);
+            const toTerminal = getTerminalPoint(item.to, toEdge);
+            const fromJunction = getJunctionPoint(fromTerminal, fromEdge);
+            const toJunction = getJunctionPoint(toTerminal, toEdge);
+            const excludeSlotIds = new Set([item.fromSlotId, item.toSlotId].filter(Boolean));
+            const duplicateOffset = duplicateOffsetByKey.get(item.key) || 0;
+            const laneShift = (laneRank - ((arranged.length - 1) / 2)) * 1.9;
+            const points = [];
+            if (hasTransitRoute && item.transit) {
+              const laneBase = item.transit.right - 6;
+              const fromY = findSafeHorizontalY({
+                initialY: fromJunction.y + duplicateOffset,
+                x1: fromJunction.x,
+                x2: laneBase + laneShift,
+                preferredDirection: fromEdge === 'top' ? 'up' : 'down',
+                excludeSlotIds,
+              });
+              const toY = findSafeHorizontalY({
+                initialY: toJunction.y + duplicateOffset,
+                x1: laneBase + laneShift,
+                x2: toJunction.x,
+                preferredDirection: toEdge === 'top' ? 'up' : 'down',
+                excludeSlotIds,
+              });
+              const laneX = findSafeVerticalX({
+                initialX: laneBase + laneShift,
+                y1: fromY,
+                y2: toY,
+                preferredDirection: laneShift <= 0 ? 'left' : 'right',
+                excludeSlotIds,
+              });
+              pushPoint(points, fromTerminal);
+              pushPoint(points, fromJunction);
+              if (Math.abs(fromY - fromJunction.y) > 0.5) pushPoint(points, { x: fromJunction.x, y: fromY });
+              pushPoint(points, { x: laneX, y: fromY });
+              if (Math.abs(toY - fromY) > 0.5) pushPoint(points, { x: laneX, y: toY });
+              pushPoint(points, { x: toJunction.x, y: toY });
+              if (Math.abs(toY - toJunction.y) > 0.5) pushPoint(points, { x: toJunction.x, y: toJunction.y });
+              pushPoint(points, toTerminal);
+            } else {
+              const directionRight = item.to.center.x >= item.from.center.x;
+              const freeRight = gridRect.width - globalRight;
+              const freeLeft = globalLeft;
+              let useRight = directionRight;
+              if (useRight && freeRight < 10 && freeLeft > freeRight) useRight = false;
+              if (!useRight && freeLeft < 10 && freeRight > freeLeft) useRight = true;
+              const rightBase = Math.min(gridRect.width - 6, globalRight + 8);
+              const leftBase = Math.max(6, globalLeft - 8);
+              const laneBase = (useRight ? rightBase : leftBase) + laneShift;
+              const fromY = findSafeHorizontalY({
+                initialY: fromJunction.y + duplicateOffset,
+                x1: fromJunction.x,
+                x2: laneBase,
+                preferredDirection: fromEdge === 'top' ? 'up' : 'down',
+                excludeSlotIds,
+              });
+              const toY = findSafeHorizontalY({
+                initialY: toJunction.y + duplicateOffset,
+                x1: laneBase,
+                x2: toJunction.x,
+                preferredDirection: toEdge === 'top' ? 'up' : 'down',
+                excludeSlotIds,
+              });
+              const laneX = findSafeVerticalX({
+                initialX: laneBase,
+                y1: fromY,
+                y2: toY,
+                preferredDirection: useRight ? 'right' : 'left',
+                excludeSlotIds,
+              });
+              pushPoint(points, fromTerminal);
+              pushPoint(points, fromJunction);
+              if (Math.abs(fromY - fromJunction.y) > 0.5) pushPoint(points, { x: fromJunction.x, y: fromY });
+              pushPoint(points, { x: laneX, y: fromY });
+              if (Math.abs(toY - fromY) > 0.5) pushPoint(points, { x: laneX, y: toY });
+              pushPoint(points, { x: toJunction.x, y: toY });
+              if (Math.abs(toY - toJunction.y) > 0.5) pushPoint(points, { x: toJunction.x, y: toJunction.y });
+              pushPoint(points, toTerminal);
+            }
+            return buildSegments(points);
+          };
+          const laneRankByKey = new Map();
+          const availableLaneRanks = new Set(arranged.map((_, index) => index));
+          const groupPreviewSegments = [];
+          const lanePickOrder = [...arranged].sort((a, b) => (
+            Math.abs(b.from.center.y - b.to.center.y) - Math.abs(a.from.center.y - a.to.center.y)
+          ) || naturalCompare(a.key, b.key));
+          lanePickOrder.forEach((item) => {
+            let bestRank = null;
+            let bestScore = Number.POSITIVE_INFINITY;
+            let bestSegments = null;
+            availableLaneRanks.forEach((laneRank) => {
+              const candidateSegments = buildCandidateSegments(item, laneRank);
+              const crossingScore = scoreSegmentsAgainst(candidateSegments, [...committedSegments, ...groupPreviewSegments]);
+              const distancePenalty = Math.abs((preferredRankByKey.get(item.key) ?? laneRank) - laneRank) * 0.09;
+              const score = crossingScore + distancePenalty;
+              if (score + 0.0001 < bestScore) {
+                bestScore = score;
+                bestRank = laneRank;
+                bestSegments = candidateSegments;
+              }
+            });
+            if (bestRank == null) return;
+            laneRankByKey.set(item.key, bestRank);
+            availableLaneRanks.delete(bestRank);
+            if (bestSegments?.length) groupPreviewSegments.push(...bestSegments);
+          });
           arranged.forEach((item, index) => {
+            const laneRank = laneRankByKey.get(item.key) ?? index;
             const fromEdge = choosePreferredEdge(item.from);
             const toEdge = choosePreferredEdge(item.to);
             const fromTerminal = getTerminalPoint(item.from, fromEdge);
@@ -2808,7 +2960,7 @@ export default function ObjectSettingsTabRefactored() {
             const duplicateOffset = duplicateOffsetByKey.get(item.key) || 0;
             const points = [];
             if (hasTransitRoute && item.transit) {
-              const laneShift = (index - ((arranged.length - 1) / 2)) * 1.9;
+              const laneShift = (laneRank - ((arranged.length - 1) / 2)) * 1.9;
               const laneBase = item.transit.right - 6;
               const fromYBase = findSafeHorizontalY({
                 initialY: fromJunction.y + duplicateOffset,
@@ -2876,7 +3028,7 @@ export default function ObjectSettingsTabRefactored() {
               const rightBase = Math.min(gridRect.width - 6, globalRight + 8);
               const leftBase = Math.max(6, globalLeft - 8);
               const preferredBase = useRight ? rightBase : leftBase;
-              const laneShift = (index - ((arranged.length - 1) / 2)) * 1.9;
+              const laneShift = (laneRank - ((arranged.length - 1) / 2)) * 1.9;
               const laneBase = preferredBase + laneShift;
               const fromYBase = findSafeHorizontalY({
                 initialY: fromJunction.y + duplicateOffset,
@@ -2937,6 +3089,7 @@ export default function ObjectSettingsTabRefactored() {
             }
             const d = points.map((point, idx) => `${idx === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
             const segments = buildSegments(points);
+            if (segments.length) committedSegments.push(...segments);
             const optimistic = Boolean(item.line.__optimistic);
             const createdAtMs = Number(new Date(item.line.created_at || 0).getTime() || 0);
             const numericLineId = Number.parseInt(String(item.line.id || ''), 10);
