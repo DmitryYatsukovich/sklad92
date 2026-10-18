@@ -1,5 +1,6 @@
 import pool from '../db/pool.js';
 import { PERMISSIONS_SELECT } from '../lib/permissions-sql.js';
+import { PERMISSION_KEYS } from '../lib/app-permissions.js';
 import { userAccessBlockReason } from '../lib/user-access.js';
 import { ADMIN_PERMISSION_BYPASS_SQL, hasAdminPermissionBypass } from '../lib/admin-bypass.js';
 
@@ -11,6 +12,10 @@ const WAREHOUSE_GRANULAR_KEYS = [
   'can_warehouse_move',
   'can_warehouse_split',
 ];
+
+const ROLE_PERMISSION_SELECT = PERMISSION_KEYS
+  .map((key) => `COALESCE(r.${key}, false) AS role_${key}`)
+  .join(',\n            ');
 
 function applyLegacyWarehousePermissions(user) {
   if (!user || hasAdminPermissionBypass(user)) return user;
@@ -46,7 +51,8 @@ export async function loadUser(req, res, next) {
               WHEN ${ADMIN_PERMISSION_BYPASS_SQL} THEN true
               ELSE COALESCE(r.warehouse_permissions_customized, false)
             END AS warehouse_permissions_customized,
-            ${PERMISSIONS_SELECT}
+            ${PERMISSIONS_SELECT},
+            ${ROLE_PERMISSION_SELECT}
      FROM users u
      LEFT JOIN roles r ON r.id = u.role_id
      LEFT JOIN organizations o ON o.id = u.organization_id
@@ -61,6 +67,12 @@ export async function loadUser(req, res, next) {
     return next();
   }
   if (row) {
+    if (!row.admin_permission_bypass) {
+      // Жёстко приводим effective-права к выбранной роли и игнорируем исторические user_permissions.
+      for (const key of PERMISSION_KEYS) {
+        row[key] = !!row[`role_${key}`];
+      }
+    }
     row.can_objects = !!(row.can_objects || row.can_settings_work);
     applyLegacyWarehousePermissions(row);
   }

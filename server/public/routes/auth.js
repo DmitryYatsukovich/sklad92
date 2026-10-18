@@ -2,15 +2,29 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import pool from '../db/pool.js';
 import { loadUser } from '../middleware/auth.js';
-import { PERMISSIONS_SELECT } from '../lib/permissions-sql.js';
 import { PERMISSION_KEYS } from '../lib/app-permissions.js';
 import { userAccessBlockReason } from '../lib/user-access.js';
+import { ADMIN_PERMISSION_BYPASS_SQL } from '../lib/admin-bypass.js';
 import {
   resolveUserPermissionsForSave,
   upsertUserPermissions,
 } from '../lib/sync-user-permissions-from-role.js';
 
 const router = Router();
+const ROLE_PERMISSIONS_SELECT = PERMISSION_KEYS
+  .map((k) => `COALESCE(r.${k}, false) AS role_${k}`)
+  .join(',\n            ');
+
+function effectivePermissionsFromRoleRow(row = {}) {
+  const isAdminBypass = !!row.admin_permission_bypass;
+  const perms = {};
+  for (const key of PERMISSION_KEYS) {
+    perms[key] = isAdminBypass ? true : !!row[`role_${key}`];
+  }
+  perms.can_objects = !!(perms.can_objects || perms.can_settings_work);
+  return perms;
+}
+
 router.use((_req, res, next) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.set('Pragma', 'no-cache');
@@ -19,12 +33,17 @@ router.use((_req, res, next) => {
 });
 
 function userPayload(base, perms = {}) {
+  const effectivePerms = {
+    ...perms,
+    can_objects: !!(perms.can_objects || perms.can_settings_work),
+  };
   return {
     id: base.id,
     login: base.login,
     display_name: base.display_name,
     role: base.role,
-    ...Object.fromEntries(PERMISSION_KEYS.map((k) => [k, !!perms[k]])),
+    admin_permission_bypass: !!(perms.admin_permission_bypass ?? base.admin_permission_bypass),
+    ...Object.fromEntries(PERMISSION_KEYS.map((k) => [k, !!effectivePerms[k]])),
   };
 }
 
@@ -65,14 +84,19 @@ router.post('/login', async (req, res) => {
   }
 
   const perm = await pool.query(
-    `SELECT ${PERMISSIONS_SELECT}
+    `SELECT ${ADMIN_PERMISSION_BYPASS_SQL} AS admin_permission_bypass,
+            ${ROLE_PERMISSIONS_SELECT}
      FROM users u
      LEFT JOIN roles r ON r.id = u.role_id
      WHERE u.id = $1`,
     [user.id]
   );
-  const p = perm.rows[0] || {};
-  const hasAnyAccess = PERMISSION_KEYS.some((k) => p[k]);
+  const permRow = perm.rows[0] || {};
+  const p = {
+    admin_permission_bypass: !!permRow.admin_permission_bypass,
+    ...effectivePermissionsFromRoleRow(permRow),
+  };
+  const hasAnyAccess = !!p.admin_permission_bypass || PERMISSION_KEYS.some((k) => p[k]);
   if (!hasAnyAccess) {
     return res.status(403).json({
       error: 'Нет назначенных прав доступа. Обратитесь к администратору.',
