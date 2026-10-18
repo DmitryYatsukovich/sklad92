@@ -957,8 +957,9 @@ export default function ObjectSettingsTabRefactored() {
     resetEntryEditor();
   };
 
-  const closeSlotCableModal = useCallback(() => {
-    if (slotCableBusy) return;
+  const closeSlotCableModal = useCallback((options = {}) => {
+    const force = Boolean(options?.force);
+    if (slotCableBusy && !force) return;
     setSlotCableModalOpen(false);
     setSlotCableDraft(null);
   }, [slotCableBusy]);
@@ -1029,8 +1030,9 @@ export default function ObjectSettingsTabRefactored() {
     setSlotCableModalOpen(true);
   }, [activeSlot, activeSlotCableAnchor, slotCableTransitOptions]);
 
-  const handleSaveSlotCableConnection = async (e) => {
+  const handleSaveSlotCableConnection = async (e, options = {}) => {
     e.preventDefault();
+    const keepOpen = Boolean(options?.keepOpen);
     if (!activeSlot?.id || !slotCableDraft) return;
     const routeMode = slotCableDraft.routeMode === 'direct' ? 'direct' : 'transit';
     const transitIdParsed = Number.parseInt(slotCableDraft.transitId, 10);
@@ -1066,8 +1068,16 @@ export default function ObjectSettingsTabRefactored() {
       }));
       revealCableSlotFloor(activeSlot.id);
       revealCableSlotFloor(toSlotId);
-      setNotice('Кабельная линия сохранена.');
-      closeSlotCableModal();
+      if (keepOpen) {
+        setSlotCableDraft((prev) => ({
+          ...prev,
+          toSlotId: '',
+        }));
+        setNotice('Кабельная линия сохранена. Можно добавить следующее соединение.');
+      } else {
+        setNotice('Кабельная линия сохранена.');
+        closeSlotCableModal({ force: true });
+      }
     } catch (err) {
       setError(err.message || 'Не удалось сохранить кабельную линию');
     } finally {
@@ -3882,7 +3892,7 @@ export default function ObjectSettingsTabRefactored() {
             <p className="text-zinc-400 text-sm mt-1">
               От: {activeSlot ? describeSlot(activeSlot.id) : '—'}
             </p>
-            <form className="space-y-3 mt-4" onSubmit={handleSaveSlotCableConnection}>
+            <form className="space-y-3 mt-4" onSubmit={(e) => handleSaveSlotCableConnection(e, { keepOpen: true })}>
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <label className="label">Маршрут</label>
@@ -4003,8 +4013,16 @@ export default function ObjectSettingsTabRefactored() {
                 <button type="button" className="btn-secondary text-sm" onClick={closeSlotCableModal} disabled={slotCableBusy}>
                   Отмена
                 </button>
+                <button
+                  type="button"
+                  className="btn-secondary text-sm"
+                  onClick={(e) => handleSaveSlotCableConnection(e, { keepOpen: false })}
+                  disabled={slotCableBusy}
+                >
+                  {slotCableBusy ? 'Сохранение…' : 'Сохранить и закрыть'}
+                </button>
                 <button type="submit" className="btn-primary text-sm" disabled={slotCableBusy}>
-                  {slotCableBusy ? 'Сохранение…' : 'Сохранить соединение'}
+                  {slotCableBusy ? 'Сохранение…' : 'Сохранить и добавить ещё'}
                 </button>
               </div>
             </form>
