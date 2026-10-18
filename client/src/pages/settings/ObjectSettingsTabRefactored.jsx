@@ -2720,7 +2720,7 @@ export default function ObjectSettingsTabRefactored() {
           const toOrdered = [...items].sort((a, b) => (a.to.center.y - b.to.center.y) || naturalCompare(a.key, b.key));
           const fromOrder = new Map(fromOrdered.map((item, index) => [item.key, index]));
           const toOrder = new Map(toOrdered.map((item, index) => [item.key, index]));
-          const arranged = [...items].sort((a, b) => {
+          const baseArranged = [...items].sort((a, b) => {
             const aFrom = fromOrder.get(a.key) ?? 0;
             const aTo = toOrder.get(a.key) ?? 0;
             const bFrom = fromOrder.get(b.key) ?? 0;
@@ -2730,6 +2730,68 @@ export default function ObjectSettingsTabRefactored() {
               || (Math.abs(aFrom - aTo) - Math.abs(bFrom - bTo))
               || (a.from.center.y - b.from.center.y)
             );
+          });
+          const estimateCrossingScore = (order) => {
+            let score = 0;
+            for (let i = 0; i < order.length; i += 1) {
+              for (let j = i + 1; j < order.length; j += 1) {
+                const a = order[i];
+                const b = order[j];
+                const fromDelta = a.from.center.y - b.from.center.y;
+                const toDelta = a.to.center.y - b.to.center.y;
+                if (fromDelta === 0 || toDelta === 0) {
+                  score += 0.12;
+                } else if ((fromDelta > 0 && toDelta < 0) || (fromDelta < 0 && toDelta > 0)) {
+                  score += 1;
+                }
+              }
+            }
+            return score;
+          };
+          const optimizeOrderBySwaps = (seedOrder) => {
+            if (seedOrder.length < 3) return seedOrder;
+            let best = [...seedOrder];
+            let bestScore = estimateCrossingScore(best);
+            // Adjacent-swap hill climbing: actively "swap places" where it reduces crossings.
+            for (let pass = 0; pass < Math.min(10, best.length * 2); pass += 1) {
+              let improved = false;
+              for (let i = 0; i < best.length - 1; i += 1) {
+                const candidate = [...best];
+                [candidate[i], candidate[i + 1]] = [candidate[i + 1], candidate[i]];
+                const candidateScore = estimateCrossingScore(candidate);
+                if (candidateScore + 0.001 < bestScore) {
+                  best = candidate;
+                  bestScore = candidateScore;
+                  improved = true;
+                }
+              }
+              if (!improved) break;
+            }
+            const reversed = [...best].reverse();
+            const reversedScore = estimateCrossingScore(reversed);
+            return reversedScore + 0.001 < bestScore ? reversed : best;
+          };
+          const arranged = optimizeOrderBySwaps(baseArranged);
+          const duplicateGroup = new Map();
+          arranged.forEach((item) => {
+            const a = Number(item.fromSlotId || 0);
+            const b = Number(item.toSlotId || 0);
+            const left = Math.min(a, b);
+            const right = Math.max(a, b);
+            const routeKey = `${item.line.route_mode || (item.transit ? 'transit' : 'direct')}:${Number(item.line.transit_id || 0)}`;
+            const pairKey = `${routeKey}:${left}:${right}`;
+            const list = duplicateGroup.get(pairKey) || [];
+            list.push(item);
+            duplicateGroup.set(pairKey, list);
+          });
+          const duplicateOffsetByKey = new Map();
+          duplicateGroup.forEach((groupItems) => {
+            if (groupItems.length <= 1) return;
+            const sortedGroup = [...groupItems].sort((a, b) => naturalCompare(a.key, b.key));
+            sortedGroup.forEach((item, index) => {
+              const offset = (index - ((sortedGroup.length - 1) / 2)) * 0.9;
+              duplicateOffsetByKey.set(item.key, offset);
+            });
           });
 
           const hasTransitRoute = Boolean(arranged[0]?.transit);
@@ -2743,19 +2805,20 @@ export default function ObjectSettingsTabRefactored() {
             const fromJunction = getJunctionPoint(fromTerminal, fromEdge);
             const toJunction = getJunctionPoint(toTerminal, toEdge);
             const excludeSlotIds = new Set([item.fromSlotId, item.toSlotId].filter(Boolean));
+            const duplicateOffset = duplicateOffsetByKey.get(item.key) || 0;
             const points = [];
             if (hasTransitRoute && item.transit) {
               const laneShift = (index - ((arranged.length - 1) / 2)) * 1.9;
               const laneBase = item.transit.right - 6;
               const fromYBase = findSafeHorizontalY({
-                initialY: fromJunction.y,
+                initialY: fromJunction.y + duplicateOffset,
                 x1: fromJunction.x,
                 x2: laneBase + laneShift,
                 preferredDirection: fromEdge === 'top' ? 'up' : 'down',
                 excludeSlotIds,
               });
               const toYBase = findSafeHorizontalY({
-                initialY: toJunction.y,
+                initialY: toJunction.y + duplicateOffset,
                 x1: laneBase + laneShift,
                 x2: toJunction.x,
                 preferredDirection: toEdge === 'top' ? 'up' : 'down',
@@ -2816,14 +2879,14 @@ export default function ObjectSettingsTabRefactored() {
               const laneShift = (index - ((arranged.length - 1) / 2)) * 1.9;
               const laneBase = preferredBase + laneShift;
               const fromYBase = findSafeHorizontalY({
-                initialY: fromJunction.y,
+                initialY: fromJunction.y + duplicateOffset,
                 x1: fromJunction.x,
                 x2: laneBase,
                 preferredDirection: fromEdge === 'top' ? 'up' : 'down',
                 excludeSlotIds,
               });
               const toYBase = findSafeHorizontalY({
-                initialY: toJunction.y,
+                initialY: toJunction.y + duplicateOffset,
                 x1: laneBase,
                 x2: toJunction.x,
                 preferredDirection: toEdge === 'top' ? 'up' : 'down',
