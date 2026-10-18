@@ -2865,6 +2865,11 @@ export default function ObjectSettingsTabRefactored() {
             const d = points.map((point, idx) => `${idx === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
             const segments = buildSegments(points);
             const optimistic = Boolean(item.line.__optimistic);
+            const createdAtMs = Number(new Date(item.line.created_at || 0).getTime() || 0);
+            const numericLineId = Number.parseInt(String(item.line.id || ''), 10);
+            const priorityScore = Number.isFinite(numericLineId) && numericLineId > 0
+              ? numericLineId
+              : (createdAtMs > 0 ? createdAtMs : (index + 1));
             paths.push({
               key: `${item.key}:${item.line.transit_id}`,
               lineId: item.line.__overlay_preview || optimistic ? null : item.line.id,
@@ -2872,6 +2877,7 @@ export default function ObjectSettingsTabRefactored() {
               color: '#F8FAFC',
               preview: Boolean(item.line.__overlay_preview || optimistic),
               segments,
+              priorityScore,
               name: String(item.line.name || '').trim() || 'Без названия',
               lengthM: Number(item.line.length_m || 0),
               fromLabel: describeLineEndpoint(item.fromSlotId),
@@ -2892,20 +2898,27 @@ export default function ObjectSettingsTabRefactored() {
                 if (segmentA.horizontal === segmentB.horizontal) return;
                 const horizontal = segmentA.horizontal ? segmentA : segmentB;
                 const vertical = segmentA.horizontal ? segmentB : segmentA;
-                const horizontalPath = segmentA.horizontal ? pathA : pathB;
                 const x = vertical.x1;
                 const y = horizontal.y1;
                 if (!segmentContains(horizontal, x, y) || !segmentContains(vertical, x, y)) return;
                 if (!farFromEndpoints(horizontal, x, y, 1.1) || !farFromEndpoints(vertical, x, y, 1.1)) return;
-                const key = `${horizontalPath.key}:${x.toFixed(2)}:${y.toFixed(2)}`;
+                const jumperPath = (() => {
+                  const scoreA = Number(pathA.priorityScore || 0);
+                  const scoreB = Number(pathB.priorityScore || 0);
+                  if (scoreA === scoreB) return segmentA.horizontal ? pathA : pathB;
+                  return scoreA > scoreB ? pathA : pathB;
+                })();
+                const jumperSegment = jumperPath === pathA ? segmentA : segmentB;
+                const orientation = jumperSegment.horizontal ? 'horizontal' : 'vertical';
+                const key = `${jumperPath.key}:${x.toFixed(2)}:${y.toFixed(2)}:${orientation}`;
                 if (jumpSeen.has(key)) return;
                 jumpSeen.add(key);
                 jumps.push({
                   key,
-                  pathKey: horizontalPath.key,
+                  pathKey: jumperPath.key,
                   x,
                   y,
-                  orientation: 'horizontal',
+                  orientation,
                 });
               });
             });
@@ -3996,20 +4009,41 @@ export default function ObjectSettingsTabRefactored() {
                                   ))}
                                   {(entranceOverlay.jumps || []).map((jump) => (
                                     <g key={`jump-${jump.key}`} pointerEvents="none">
-                                      <path
-                                        d={`M ${jump.x - 5.5} ${jump.y} L ${jump.x + 5.5} ${jump.y}`}
-                                        fill="none"
-                                        stroke="#0B1220"
-                                        strokeWidth="2.7"
-                                        strokeLinecap="round"
-                                      />
-                                      <path
-                                        d={`M ${jump.x - 5.5} ${jump.y} Q ${jump.x} ${jump.y - 6.3} ${jump.x + 5.5} ${jump.y}`}
-                                        fill="none"
-                                        stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
-                                        strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '1.35' : '1.15'}
-                                        strokeLinecap="round"
-                                      />
+                                      {jump.orientation === 'vertical' ? (
+                                        <>
+                                          <path
+                                            d={`M ${jump.x} ${jump.y - 5.5} L ${jump.x} ${jump.y + 5.5}`}
+                                            fill="none"
+                                            stroke="#0B1220"
+                                            strokeWidth="2.7"
+                                            strokeLinecap="round"
+                                          />
+                                          <path
+                                            d={`M ${jump.x} ${jump.y - 5.5} Q ${jump.x + 6.3} ${jump.y} ${jump.x} ${jump.y + 5.5}`}
+                                            fill="none"
+                                            stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
+                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '1.35' : '1.15'}
+                                            strokeLinecap="round"
+                                          />
+                                        </>
+                                      ) : (
+                                        <>
+                                          <path
+                                            d={`M ${jump.x - 5.5} ${jump.y} L ${jump.x + 5.5} ${jump.y}`}
+                                            fill="none"
+                                            stroke="#0B1220"
+                                            strokeWidth="2.7"
+                                            strokeLinecap="round"
+                                          />
+                                          <path
+                                            d={`M ${jump.x - 5.5} ${jump.y} Q ${jump.x} ${jump.y - 6.3} ${jump.x + 5.5} ${jump.y}`}
+                                            fill="none"
+                                            stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
+                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '1.35' : '1.15'}
+                                            strokeLinecap="round"
+                                          />
+                                        </>
+                                      )}
                                     </g>
                                   ))}
                                 </svg>
