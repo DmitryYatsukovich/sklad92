@@ -530,14 +530,8 @@ async function validateTransitCableLineInput(db, {
   if (!isTransitCableEndpointKind(fromSlot.location_kind) || !isTransitCableEndpointKind(toSlot.location_kind)) {
     return { error: 'Кабель можно привязать только к блокам квартир и помещений' };
   }
-  if (system && (Number(fromSlot.system_id || 0) !== Number(system.id) || Number(toSlot.system_id || 0) !== Number(system.id))) {
-    return { error: 'Выбранные блоки должны относиться к выбранной системе' };
-  }
-  if (category) {
-    if (Number(fromSlot.category_id || 0) !== Number(category.id) || Number(toSlot.category_id || 0) !== Number(category.id)) {
-      return { error: 'Выбранные блоки должны относиться к выбранной категории' };
-    }
-  }
+  // Линия может иметь собственные систему/категорию как метаданные,
+  // поэтому не требуем совпадения со слотами От/До при сохранении.
 
   const fromLocation = fromSlot.location;
   const toLocation = toSlot.location;
