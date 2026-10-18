@@ -130,7 +130,7 @@ function SystemSquare({
         }
         onOpen(slot);
       }}
-      className={`relative w-[2.9rem] h-[2.9rem] rounded-md border p-0.5 text-left transition hover:bg-white/10 hover:shadow-[0_8px_18px_rgba(0,0,0,0.24)] shadow-[0_4px_10px_rgba(0,0,0,0.18)] ${incomplete ? 'border-rose-500/70 bg-rose-950/35 text-rose-100' : 'border-white/15 bg-zinc-900/80 text-zinc-100'} ${selectionMode ? (selected ? `ring-2 ${selectedRingClass}` : `ring-1 ${idleRingClass}`) : ''} ${disabledSelectionClass}`}
+      className={`relative w-[2.45rem] h-[2.45rem] rounded-md border p-0.5 text-left transition hover:bg-white/10 hover:shadow-[0_6px_14px_rgba(0,0,0,0.24)] shadow-[0_3px_8px_rgba(0,0,0,0.18)] ${incomplete ? 'border-rose-500/70 bg-rose-950/35 text-rose-100' : 'border-white/15 bg-zinc-900/80 text-zinc-100'} ${selectionMode ? (selected ? `ring-2 ${selectedRingClass}` : `ring-1 ${idleRingClass}`) : ''} ${disabledSelectionClass}`}
       title={tooltip}
     >
       {selectionMode && (
@@ -141,12 +141,12 @@ function SystemSquare({
       )}
       <div className="flex h-full flex-col justify-between">
         <div className="space-y-0.5">
-          <p className="text-[5px] font-semibold leading-tight truncate tracking-wide uppercase">{systemShort}</p>
-          <p className="text-[5px] text-zinc-400 leading-tight truncate">{slot.category_name || 'Без'}</p>
+          <p className="text-[4.5px] font-semibold leading-tight truncate tracking-wide uppercase">{systemShort}</p>
+          <p className="text-[4.5px] text-zinc-400 leading-tight truncate">{slot.category_name || 'Без'}</p>
         </div>
         <div className="space-y-0.5">
-          <p className="text-[5px] text-zinc-200/90 leading-tight truncate">{previewText}</p>
-          <p className="inline-flex rounded-full border border-white/15 px-0.5 py-0.5 text-[5px] text-zinc-300 leading-tight">
+          <p className="text-[4.5px] text-zinc-200/90 leading-tight truncate">{previewText}</p>
+          <p className="inline-flex rounded-full border border-white/15 px-0.5 py-0.5 text-[4.5px] text-zinc-300 leading-tight">
             {totals?.positions || previewCount || 0} поз.
           </p>
         </div>
@@ -206,6 +206,9 @@ export default function ObjectSettingsTabRefactored() {
   const [selectedMaterial, setSelectedMaterial] = useState(null);
   const [entryQuantity, setEntryQuantity] = useState('1');
   const [slotBusy, setSlotBusy] = useState(false);
+  const [slotCableModalOpen, setSlotCableModalOpen] = useState(false);
+  const [slotCableDraft, setSlotCableDraft] = useState(null);
+  const [slotCableBusy, setSlotCableBusy] = useState(false);
   const [copiedSlotTemplate, setCopiedSlotTemplate] = useState(null);
   const [copiedLocationTemplate, setCopiedLocationTemplate] = useState(null);
   const [copiedFloorTemplate, setCopiedFloorTemplate] = useState(null);
@@ -944,11 +947,132 @@ export default function ObjectSettingsTabRefactored() {
 
   const closeSlotModal = () => {
     setSlotModalOpen(false);
+    setSlotCableModalOpen(false);
+    setSlotCableDraft(null);
+    setSlotCableBusy(false);
     setActiveSlot(null);
     setSlotDraft({ locationKind: '', locationId: null, title: '' });
     setSlotSystemId('');
     setSlotCategoryId('');
     resetEntryEditor();
+  };
+
+  const closeSlotCableModal = useCallback(() => {
+    if (slotCableBusy) return;
+    setSlotCableModalOpen(false);
+    setSlotCableDraft(null);
+  }, [slotCableBusy]);
+
+  const activeSlotPlacement = useMemo(
+    () => (activeSlot?.id ? (slotPlacementById.get(activeSlot.id) || null) : null),
+    [activeSlot?.id, slotPlacementById],
+  );
+  const activeSlotCableAnchor = activeSlotPlacement?.location
+    ? {
+      object_id: Number(activeSlotPlacement.location.object_id || 0),
+      entrance_id: Number(activeSlotPlacement.location.entrance_id || 0),
+    }
+    : null;
+  const slotCableTransitOptions = activeSlotCableAnchor?.entrance_id
+    ? (transitsByEntrance.get(activeSlotCableAnchor.entrance_id) || [])
+    : [];
+  const slotCableSelectableSlots = useMemo(() => {
+    if (!activeSlot?.id || !activeSlotCableAnchor?.entrance_id) return [];
+    return data.locationSystems
+      .filter((slot) => ['apartment', 'room'].includes(slot.location_kind))
+      .filter((slot) => Number(slot.id) !== Number(activeSlot.id))
+      .filter((slot) => {
+        const placement = slotPlacementById.get(slot.id);
+        const location = placement?.location;
+        if (!location) return false;
+        return (
+          Number(location.object_id || 0) === Number(activeSlotCableAnchor.object_id || 0)
+          && Number(location.entrance_id || 0) === Number(activeSlotCableAnchor.entrance_id || 0)
+        );
+      })
+      .sort((a, b) => {
+        const placementA = slotPlacementById.get(a.id);
+        const placementB = slotPlacementById.get(b.id);
+        const rankA = floorSortRank({ sort_order: placementA?.location?.floor_sort_order });
+        const rankB = floorSortRank({ sort_order: placementB?.location?.floor_sort_order });
+        return (
+          (rankA - rankB)
+          || naturalCompare(placementA?.location?.apartment_name || '', placementB?.location?.apartment_name || '')
+          || naturalCompare(placementA?.location?.name || '', placementB?.location?.name || '')
+          || naturalCompare(a.system_name || '', b.system_name || '')
+          || (a.id - b.id)
+        );
+      });
+  }, [activeSlot?.id, activeSlotCableAnchor, data.locationSystems, slotPlacementById]);
+
+  const openSlotCableModal = useCallback(() => {
+    if (!activeSlot?.id) return;
+    if (!['apartment', 'room'].includes(activeSlot.location_kind)) {
+      setError('Соединять кабелем можно только блоки квартир и помещений');
+      return;
+    }
+    if (!activeSlotCableAnchor?.entrance_id) {
+      setError('Не удалось определить подъезд текущего блока');
+      return;
+    }
+    const hasTransitOptions = slotCableTransitOptions.length > 0;
+    setSlotCableDraft({
+      routeMode: hasTransitOptions ? 'transit' : 'direct',
+      transitId: hasTransitOptions ? String(slotCableTransitOptions[0].id) : '',
+      toSlotId: '',
+      name: 'Кабель',
+      lengthM: '1',
+      systemId: '',
+      categoryId: '',
+    });
+    setError('');
+    setSlotCableModalOpen(true);
+  }, [activeSlot, activeSlotCableAnchor, slotCableTransitOptions]);
+
+  const handleSaveSlotCableConnection = async (e) => {
+    e.preventDefault();
+    if (!activeSlot?.id || !slotCableDraft) return;
+    const routeMode = slotCableDraft.routeMode === 'direct' ? 'direct' : 'transit';
+    const transitIdParsed = Number.parseInt(slotCableDraft.transitId, 10);
+    const transitId = routeMode === 'transit' ? (transitIdParsed || null) : null;
+    const toSlotId = Number.parseInt(slotCableDraft.toSlotId, 10);
+    const name = String(slotCableDraft.name || '').trim();
+    const lengthM = parseDecimalInput(slotCableDraft.lengthM);
+    const systemId = slotCableDraft.systemId === '' ? null : Number.parseInt(slotCableDraft.systemId, 10);
+    const categoryId = slotCableDraft.categoryId === '' ? null : Number.parseInt(slotCableDraft.categoryId, 10);
+    if (routeMode === 'transit' && !transitId) return setError('Выберите транзит для маршрута');
+    if (!toSlotId) return setError('Выберите второй блок для соединения');
+    if (Number(toSlotId) === Number(activeSlot.id)) return setError('Нельзя соединить блок сам с собой');
+    if (!name) return setError('Укажите название кабельной линии');
+    if (!Number.isFinite(lengthM) || lengthM <= 0) return setError('Укажите корректную длину кабеля');
+    if (slotCableDraft.systemId !== '' && !systemId) return setError('Выберите корректную систему кабельной линии');
+    if (slotCableDraft.categoryId !== '' && !categoryId) return setError('Выберите корректную категорию');
+
+    setSlotCableBusy(true);
+    setError('');
+    try {
+      const createdLine = await settingsApi.objectSettings.createCableLine({
+        transit_id: transitId,
+        from_location_system_id: activeSlot.id,
+        to_location_system_id: toSlotId,
+        system_id: systemId,
+        category_id: categoryId,
+        name,
+        length_m: lengthM,
+      });
+      setData((prev) => ({
+        ...prev,
+        transitCableLines: mergeTransitCableLine(prev.transitCableLines, createdLine),
+      }));
+      revealCableSlotFloor(activeSlot.id);
+      revealCableSlotFloor(toSlotId);
+      setNotice('Кабельная линия сохранена.');
+      closeSlotCableModal();
+    } catch (err) {
+      setError(err.message || 'Не удалось сохранить кабельную линию');
+    } finally {
+      setSlotCableBusy(false);
+    }
   };
 
   const handleSaveSlotMeta = async (e) => {
@@ -1851,11 +1975,11 @@ export default function ObjectSettingsTabRefactored() {
     const selectedCount = selectingMultiple ? multiCopySelectedSlotIds.length : 0;
     const cableSelectionActive = Boolean(activeCableTransitId);
     return (
-      <div className="grid grid-cols-2 gap-1">
+      <div className="flex flex-wrap items-center gap-1">
         <button
           type="button"
           onClick={() => handleCopyLocationBlocks(locationKind, locationId, title)}
-          className="px-1 py-0.5 rounded border border-white/15 text-[8px] text-zinc-200 hover:bg-white/10 leading-tight"
+          className="inline-flex px-1.5 py-0.5 rounded border border-white/15 text-[7px] text-zinc-200 hover:bg-white/10 leading-tight"
           disabled={!!pasteBusyKey || slotBusy || cableSelectionActive}
         >
           Коп. все
@@ -1864,7 +1988,7 @@ export default function ObjectSettingsTabRefactored() {
           <button
             type="button"
             onClick={() => handleStartMultiCopySelection(locationKind, locationId)}
-            className="px-1 py-0.5 rounded border border-indigo-400/40 text-[8px] text-indigo-200 hover:bg-indigo-900/30 leading-tight"
+            className="inline-flex px-1.5 py-0.5 rounded border border-indigo-400/40 text-[7px] text-indigo-200 hover:bg-indigo-900/30 leading-tight"
             disabled={!!pasteBusyKey || slotBusy || blockCount === 0 || cableSelectionActive}
           >
             Коп. выбор
@@ -1874,7 +1998,7 @@ export default function ObjectSettingsTabRefactored() {
             <button
               type="button"
               onClick={() => handleCopySelectedBlocks(locationKind, locationId, title)}
-              className="px-1 py-0.5 rounded border border-indigo-300/60 text-[8px] text-indigo-100 hover:bg-indigo-900/40 disabled:opacity-40 leading-tight"
+              className="inline-flex px-1.5 py-0.5 rounded border border-indigo-300/60 text-[7px] text-indigo-100 hover:bg-indigo-900/40 disabled:opacity-40 leading-tight"
               disabled={!!pasteBusyKey || slotBusy || selectedCount === 0 || cableSelectionActive}
             >
               Коп. ({selectedCount})
@@ -1882,7 +2006,7 @@ export default function ObjectSettingsTabRefactored() {
             <button
               type="button"
               onClick={handleCancelMultiCopySelection}
-              className="px-1 py-0.5 rounded border border-white/20 text-[8px] text-zinc-300 hover:bg-white/10 leading-tight"
+              className="inline-flex px-1.5 py-0.5 rounded border border-white/20 text-[7px] text-zinc-300 hover:bg-white/10 leading-tight"
               disabled={!!pasteBusyKey || slotBusy || cableSelectionActive}
             >
               Снять выбор
@@ -1893,7 +2017,7 @@ export default function ObjectSettingsTabRefactored() {
           <button
             type="button"
             onClick={() => handlePasteLocationBlocks(locationKind, locationId, title)}
-            className="px-1 py-0.5 rounded border border-sky-400/40 text-[8px] text-sky-200 hover:bg-sky-900/30 leading-tight"
+            className="inline-flex px-1.5 py-0.5 rounded border border-sky-400/40 text-[7px] text-sky-200 hover:bg-sky-900/30 leading-tight"
             disabled={!!pasteBusyKey || slotBusy || cableSelectionActive}
           >
             {locationBusy ? 'Вставка…' : 'Вставить'}
@@ -1902,7 +2026,7 @@ export default function ObjectSettingsTabRefactored() {
         <button
           type="button"
           onClick={() => handleDeleteLocationBlocks(locationKind, locationId, title)}
-          className={`px-1 py-0.5 rounded border border-rose-400/40 text-[8px] text-rose-200 hover:bg-rose-900/30 disabled:opacity-40 leading-tight ${canPaste ? 'col-span-2' : ''}`}
+          className="inline-flex px-1.5 py-0.5 rounded border border-rose-400/40 text-[7px] text-rose-200 hover:bg-rose-900/30 disabled:opacity-40 leading-tight"
           disabled={!!pasteBusyKey || slotBusy || blockCount === 0 || cableSelectionActive}
         >
           Удалить
@@ -1986,7 +2110,16 @@ export default function ObjectSettingsTabRefactored() {
               {systemRow.categories.map((categoryRow) => (
                 <div key={`${systemRow.systemName}:${categoryRow.categoryName}`} className="space-y-0.5">
                   <p className="text-[9px] text-zinc-400">{categoryRow.categoryName}</p>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 xl:grid-cols-6 gap-1">
+                  <div
+                    className="grid gap-0.5"
+                    style={{
+                      gridTemplateColumns: `repeat(auto-fill, minmax(${
+                        categoryRow.items.length > 16
+                          ? '2.05rem'
+                          : (categoryRow.items.length > 10 ? '2.2rem' : '2.35rem')
+                      }, 1fr))`,
+                    }}
+                  >
                     {categoryRow.items.map(({ slot, entries, entryNames, completeness }) => {
                       const selectedForMultiCopy = selectingMultiple && multiCopySelectedSlotIds.includes(String(slot.id));
                       const selectedForCustomSelection = isCustomSelectionMode && selectedSet.has(String(slot.id));
@@ -2023,7 +2156,7 @@ export default function ObjectSettingsTabRefactored() {
           <button
             type="button"
             onClick={() => openCreateSlotModal(locationKind, locationId, title)}
-            className="w-[2.9rem] h-[2.9rem] rounded-md border border-dashed border-white/20 bg-black/20 hover:bg-white/10 text-zinc-300 text-[7px] shadow-[0_4px_10px_rgba(0,0,0,0.18)]"
+            className="w-[2.45rem] h-[2.45rem] rounded-md border border-dashed border-white/20 bg-black/20 hover:bg-white/10 text-zinc-300 text-[6px] shadow-[0_3px_8px_rgba(0,0,0,0.18)]"
             disabled={Boolean(activeCableTransitId)}
           >
             +Сист.
@@ -2032,7 +2165,7 @@ export default function ObjectSettingsTabRefactored() {
             <button
               type="button"
               onClick={() => handlePasteSlotToLocation(locationKind, locationId, title)}
-              className="w-[2.9rem] h-[2.9rem] rounded-md border border-dashed border-sky-400/40 bg-sky-900/20 hover:bg-sky-800/30 text-sky-100 text-[7px] shadow-[0_4px_10px_rgba(0,0,0,0.18)]"
+              className="w-[2.45rem] h-[2.45rem] rounded-md border border-dashed border-sky-400/40 bg-sky-900/20 hover:bg-sky-800/30 text-sky-100 text-[6px] shadow-[0_3px_8px_rgba(0,0,0,0.18)]"
               disabled={!!pasteBusyKey || slotBusy || Boolean(activeCableTransitId)}
               title={`Вставить блок: ${copiedSlotTemplate.systemName}`}
             >
@@ -3557,6 +3690,14 @@ export default function ObjectSettingsTabRefactored() {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    onClick={openSlotCableModal}
+                    className="btn-secondary text-sm"
+                    disabled={slotBusy}
+                  >
+                    Соединить
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleCopyActiveSlot}
                     className="btn-secondary text-sm"
                     disabled={slotBusy}
@@ -3730,6 +3871,143 @@ export default function ObjectSettingsTabRefactored() {
             <div className="flex justify-end mt-5">
               <button type="button" onClick={closeSlotModal} className="btn-secondary text-sm">Закрыть</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {slotCableModalOpen && slotCableDraft && (
+        <div className="modal-backdrop z-[60]" onClick={closeSlotCableModal} role="dialog" aria-modal="true">
+          <div className="card p-5 max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-white text-lg font-medium">Соединить блок кабелем</h3>
+            <p className="text-zinc-400 text-sm mt-1">
+              От: {activeSlot ? describeSlot(activeSlot.id) : '—'}
+            </p>
+            <form className="space-y-3 mt-4" onSubmit={handleSaveSlotCableConnection}>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="label">Маршрут</label>
+                  <select
+                    value={slotCableDraft.routeMode || 'direct'}
+                    onChange={(e) => {
+                      const routeMode = e.target.value === 'transit' ? 'transit' : 'direct';
+                      setSlotCableDraft((prev) => ({
+                        ...prev,
+                        routeMode,
+                        transitId: routeMode === 'transit'
+                          ? (prev.transitId || String(slotCableTransitOptions[0]?.id || ''))
+                          : '',
+                      }));
+                    }}
+                    className="input"
+                    disabled={slotCableBusy}
+                  >
+                    <option value="direct">Напрямую</option>
+                    <option value="transit">Через транзит</option>
+                  </select>
+                </div>
+                {slotCableDraft.routeMode === 'transit' && (
+                  <div>
+                    <label className="label">Транзит</label>
+                    <select
+                      value={slotCableDraft.transitId || ''}
+                      onChange={(e) => setSlotCableDraft((prev) => ({ ...prev, transitId: e.target.value }))}
+                      className="input"
+                      disabled={slotCableBusy}
+                      required
+                    >
+                      <option value="">— Выберите транзит —</option>
+                      {slotCableTransitOptions.map((transit) => (
+                        <option key={`slot-cable-transit-${transit.id}`} value={transit.id}>{transit.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="label">Блок «До»</label>
+                <select
+                  value={slotCableDraft.toSlotId || ''}
+                  onChange={(e) => setSlotCableDraft((prev) => ({ ...prev, toSlotId: e.target.value }))}
+                  className="input"
+                  disabled={slotCableBusy}
+                  required
+                >
+                  <option value="">— Выберите второй блок —</option>
+                  {slotCableSelectableSlots.map((slot) => (
+                    <option key={`slot-cable-target-${slot.id}`} value={slot.id}>
+                      {describeSlot(slot.id)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="label">Название кабеля</label>
+                  <input
+                    type="text"
+                    value={slotCableDraft.name}
+                    onChange={(e) => setSlotCableDraft((prev) => ({ ...prev, name: e.target.value }))}
+                    className="input"
+                    required
+                    disabled={slotCableBusy}
+                  />
+                </div>
+                <div>
+                  <label className="label">Длина, м</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={slotCableDraft.lengthM}
+                    onChange={(e) => setSlotCableDraft((prev) => ({ ...prev, lengthM: e.target.value }))}
+                    className="input"
+                    required
+                    disabled={slotCableBusy}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="label">Система (опц.)</label>
+                  <select
+                    value={slotCableDraft.systemId}
+                    onChange={(e) => setSlotCableDraft((prev) => ({ ...prev, systemId: e.target.value }))}
+                    className="input"
+                    disabled={slotCableBusy}
+                  >
+                    <option value="">Без системы</option>
+                    {data.systems.map((system) => (
+                      <option key={`slot-cable-system-${system.id}`} value={system.id}>{system.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Категория (опц.)</label>
+                  <select
+                    value={slotCableDraft.categoryId}
+                    onChange={(e) => setSlotCableDraft((prev) => ({ ...prev, categoryId: e.target.value }))}
+                    className="input"
+                    disabled={slotCableBusy}
+                  >
+                    <option value="">Без категории</option>
+                    {data.categories.map((category) => (
+                      <option key={`slot-cable-category-${category.id}`} value={category.id}>{category.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" className="btn-secondary text-sm" onClick={closeSlotCableModal} disabled={slotCableBusy}>
+                  Отмена
+                </button>
+                <button type="submit" className="btn-primary text-sm" disabled={slotCableBusy}>
+                  {slotCableBusy ? 'Сохранение…' : 'Сохранить соединение'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
