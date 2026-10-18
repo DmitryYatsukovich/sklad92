@@ -247,6 +247,7 @@ export default function ObjectSettingsTabRefactored() {
   const [cableEditModalOpen, setCableEditModalOpen] = useState(false);
   const [cableEditDraft, setCableEditDraft] = useState(null);
   const [cableEditBusy, setCableEditBusy] = useState(false);
+  const [cableEditPickTarget, setCableEditPickTarget] = useState('');
   const entranceGridRefs = useRef(new Map());
   const [entranceCableOverlay, setEntranceCableOverlay] = useState({});
   const [hoveredCableLine, setHoveredCableLine] = useState(null);
@@ -1908,11 +1909,13 @@ export default function ObjectSettingsTabRefactored() {
       lengthM: String(line.length_m ?? ''),
     });
     setCableEditModalOpen(true);
+    setCableEditPickTarget('');
     setError('');
   };
 
   const closeCableEditModal = () => {
     if (cableEditBusy) return;
+    setCableEditPickTarget('');
     setCableEditModalOpen(false);
     setCableEditDraft(null);
   };
@@ -2056,7 +2059,10 @@ export default function ObjectSettingsTabRefactored() {
     const blockCount = (slotsByLocation.get(key) || []).length;
     const selectingMultiple = multiCopyLocationKey === key;
     const selectedCount = selectingMultiple ? multiCopySelectedSlotIds.length : 0;
-    const cableSelectionActive = Boolean(activeCableTransitId && cablePickTarget);
+    const cableSelectionActive = Boolean(
+      (activeCableTransitId && cablePickTarget)
+      || (cableEditModalOpen && cableEditPickTarget),
+    );
     return (
       <div className="flex flex-wrap items-center gap-1">
         <button
@@ -2240,7 +2246,7 @@ export default function ObjectSettingsTabRefactored() {
             type="button"
             onClick={() => openCreateSlotModal(locationKind, locationId, title)}
             className="w-[2.45rem] h-[2.45rem] rounded-md border border-dashed border-white/20 bg-black/20 hover:bg-white/10 text-zinc-300 text-[6px] shadow-[0_3px_8px_rgba(0,0,0,0.18)]"
-            disabled={Boolean(activeCableTransitId && cablePickTarget)}
+            disabled={Boolean((activeCableTransitId && cablePickTarget) || (cableEditModalOpen && cableEditPickTarget))}
           >
             +Сист.
           </button>
@@ -2249,7 +2255,7 @@ export default function ObjectSettingsTabRefactored() {
               type="button"
               onClick={() => handlePasteSlotToLocation(locationKind, locationId, title)}
               className="w-[2.45rem] h-[2.45rem] rounded-md border border-dashed border-sky-400/40 bg-sky-900/20 hover:bg-sky-800/30 text-sky-100 text-[6px] shadow-[0_3px_8px_rgba(0,0,0,0.18)]"
-              disabled={!!pasteBusyKey || slotBusy || Boolean(activeCableTransitId && cablePickTarget)}
+              disabled={!!pasteBusyKey || slotBusy || Boolean((activeCableTransitId && cablePickTarget) || (cableEditModalOpen && cableEditPickTarget))}
               title={`Вставить блок: ${copiedSlotTemplate.systemName}`}
             >
               {isPastingHere ? '…' : 'Встав.'}
@@ -2266,8 +2272,17 @@ export default function ObjectSettingsTabRefactored() {
   };
 
   const buildCableSelectionOptions = (locationKind) => {
-    if (!activeCableTransit || !cablePickTarget) return null;
     if (!['room', 'apartment'].includes(locationKind)) return null;
+    if (cableEditModalOpen && cableEditPickTarget) {
+      return {
+        selectionMode: true,
+        selectionTone: 'cable',
+        selectedSlotIds: cableEditSelectedSlotIds,
+        onSelectSlot: handlePickCableEditSlot,
+        isSlotSelectable: (slot) => cableEditSelectableSlotIdSet.has(String(slot.id)),
+      };
+    }
+    if (!activeCableTransit || !cablePickTarget) return null;
     return {
       selectionMode: true,
       selectionTone: 'cable',
@@ -2419,7 +2434,7 @@ export default function ObjectSettingsTabRefactored() {
         );
         const getJunctionPoint = (terminalPoint, edge) => ({
           x: terminalPoint.x,
-          y: terminalPoint.y + (edge === 'top' ? -6 : 6),
+          y: terminalPoint.y + (edge === 'top' ? -2 : 2),
         });
         const slotObstacles = Array.from(gridEl.querySelectorAll('[data-slot-id]'))
           .map((node) => {
@@ -2601,6 +2616,86 @@ export default function ObjectSettingsTabRefactored() {
         });
 
         const paths = [];
+        const usedVerticalLanes = [];
+        const usedHorizontalLanes = [];
+        const rangesOverlap = (a1, a2, b1, b2) => (
+          Math.max(Math.min(a1, a2), Math.min(b1, b2))
+          <= (Math.min(Math.max(a1, a2), Math.max(b1, b2)) + 0.01)
+        );
+        const hasVerticalLaneNear = (xValue, y1, y2) => usedVerticalLanes.some((used) => (
+          Math.abs(used.x - xValue) < 1.1
+          && rangesOverlap(used.y1, used.y2, y1, y2)
+        ));
+        const hasHorizontalLaneNear = (yValue, x1, x2) => usedHorizontalLanes.some((used) => (
+          Math.abs(used.y - yValue) < 1.1
+          && rangesOverlap(used.x1, used.x2, x1, x2)
+        ));
+        const reserveLaneX = ({
+          initialX,
+          y1,
+          y2,
+          preferredDirection,
+          excludeSlotIds,
+        }) => {
+          for (let attempt = 0; attempt < 18; attempt += 1) {
+            const ring = Math.floor(attempt / 2) + 1;
+            const sign = attempt === 0 ? 0 : (attempt % 2 === 1 ? 1 : -1);
+            const probeX = attempt === 0 ? initialX : (initialX + (sign * ring * 1.25));
+            const safeX = findSafeVerticalX({
+              initialX: probeX,
+              y1,
+              y2,
+              preferredDirection,
+              excludeSlotIds,
+            });
+            if (!hasVerticalLaneNear(safeX, y1, y2)) {
+              usedVerticalLanes.push({ x: safeX, y1, y2 });
+              return safeX;
+            }
+          }
+          const fallback = findSafeVerticalX({
+            initialX,
+            y1,
+            y2,
+            preferredDirection,
+            excludeSlotIds,
+          });
+          usedVerticalLanes.push({ x: fallback, y1, y2 });
+          return fallback;
+        };
+        const reserveHorizontalY = ({
+          initialY,
+          x1,
+          x2,
+          preferredDirection,
+          excludeSlotIds,
+        }) => {
+          for (let attempt = 0; attempt < 18; attempt += 1) {
+            const ring = Math.floor(attempt / 2) + 1;
+            const sign = attempt === 0 ? 0 : (attempt % 2 === 1 ? 1 : -1);
+            const baseY = attempt === 0 ? initialY : (initialY + (sign * ring * 1.25));
+            const safeY = findSafeHorizontalY({
+              initialY: baseY,
+              x1,
+              x2,
+              preferredDirection,
+              excludeSlotIds,
+            });
+            if (!hasHorizontalLaneNear(safeY, x1, x2)) {
+              usedHorizontalLanes.push({ y: safeY, x1, x2 });
+              return safeY;
+            }
+          }
+          const fallback = findSafeHorizontalY({
+            initialY,
+            x1,
+            x2,
+            preferredDirection,
+            excludeSlotIds,
+          });
+          usedHorizontalLanes.push({ y: fallback, x1, x2 });
+          return fallback;
+        };
         itemsByTransit.forEach((items) => {
           if (!items.length) return;
           const fromOrdered = [...items].sort((a, b) => (a.from.center.y - b.from.center.y) || naturalCompare(a.key, b.key));
@@ -2622,107 +2717,6 @@ export default function ObjectSettingsTabRefactored() {
           const hasTransitRoute = Boolean(arranged[0]?.transit);
           const globalRight = slotObstacles.length ? Math.max(...slotObstacles.map((rect) => rect.right)) : (gridRect.width - 2);
           const globalLeft = slotObstacles.length ? Math.min(...slotObstacles.map((rect) => rect.left)) : 2;
-          const branchGap = 1.4;
-          const buildBranchOffsetMap = (slotField, oppositeField) => {
-            const map = new Map();
-            const grouped = new Map();
-            arranged.forEach((item) => {
-              const key = item[slotField];
-              if (!key) return;
-              const list = grouped.get(key) || [];
-              list.push(item);
-              grouped.set(key, list);
-            });
-            grouped.forEach((list) => {
-              const sorted = [...list].sort((a, b) => (
-                (a[oppositeField]?.center?.y || 0) - (b[oppositeField]?.center?.y || 0)
-              ) || naturalCompare(a.key, b.key));
-              sorted.forEach((item, index) => {
-                const offset = (index - ((sorted.length - 1) / 2)) * branchGap;
-                map.set(item.key, offset);
-              });
-            });
-            return map;
-          };
-          const fromBranchOffset = buildBranchOffsetMap('fromSlotId', 'to');
-          const toBranchOffset = buildBranchOffsetMap('toSlotId', 'from');
-          const usedLaneXs = [];
-          const usedHorizontalLanes = [];
-          const hasLaneNear = (xValue) => usedLaneXs.some((used) => Math.abs(used - xValue) < 1.1);
-          const rangesOverlap = (a1, a2, b1, b2) => (
-            Math.max(Math.min(a1, a2), Math.min(b1, b2))
-            <= (Math.min(Math.max(a1, a2), Math.max(b1, b2)) + 0.01)
-          );
-          const hasHorizontalLaneNear = (yValue, x1, x2) => usedHorizontalLanes.some((used) => (
-            Math.abs(used.y - yValue) < 1.1
-            && rangesOverlap(used.x1, used.x2, x1, x2)
-          ));
-          const reserveLaneX = ({
-            initialX,
-            y1,
-            y2,
-            preferredDirection,
-            excludeSlotIds,
-          }) => {
-            for (let attempt = 0; attempt < 18; attempt += 1) {
-              const ring = Math.floor(attempt / 2) + 1;
-              const sign = attempt === 0 ? 0 : (attempt % 2 === 1 ? 1 : -1);
-              const probeX = attempt === 0 ? initialX : (initialX + (sign * ring * 1.25));
-              const safeX = findSafeVerticalX({
-                initialX: probeX,
-                y1,
-                y2,
-                preferredDirection,
-                excludeSlotIds,
-              });
-              if (!hasLaneNear(safeX)) {
-                usedLaneXs.push(safeX);
-                return safeX;
-              }
-            }
-            const fallback = findSafeVerticalX({
-              initialX,
-              y1,
-              y2,
-              preferredDirection,
-              excludeSlotIds,
-            });
-            usedLaneXs.push(fallback);
-            return fallback;
-          };
-          const reserveHorizontalY = ({
-            initialY,
-            x1,
-            x2,
-            preferredDirection,
-            excludeSlotIds,
-          }) => {
-            for (let attempt = 0; attempt < 18; attempt += 1) {
-              const ring = Math.floor(attempt / 2) + 1;
-              const sign = attempt === 0 ? 0 : (attempt % 2 === 1 ? 1 : -1);
-              const baseY = attempt === 0 ? initialY : (initialY + (sign * ring * 1.25));
-              const safeY = findSafeHorizontalY({
-                initialY: baseY,
-                x1,
-                x2,
-                preferredDirection,
-                excludeSlotIds,
-              });
-              if (!hasHorizontalLaneNear(safeY, x1, x2)) {
-                usedHorizontalLanes.push({ y: safeY, x1, x2 });
-                return safeY;
-              }
-            }
-            const fallback = findSafeHorizontalY({
-              initialY,
-              x1,
-              x2,
-              preferredDirection,
-              excludeSlotIds,
-            });
-            usedHorizontalLanes.push({ y: fallback, x1, x2 });
-            return fallback;
-          };
           arranged.forEach((item, index) => {
             const fromEdge = choosePreferredEdge(item.from);
             const toEdge = choosePreferredEdge(item.to);
@@ -2731,21 +2725,19 @@ export default function ObjectSettingsTabRefactored() {
             const fromJunction = getJunctionPoint(fromTerminal, fromEdge);
             const toJunction = getJunctionPoint(toTerminal, toEdge);
             const excludeSlotIds = new Set([item.fromSlotId, item.toSlotId].filter(Boolean));
-            const fromSpread = fromBranchOffset.get(item.key) || 0;
-            const toSpread = toBranchOffset.get(item.key) || 0;
             const points = [];
             if (hasTransitRoute && item.transit) {
               const laneShift = (index - ((arranged.length - 1) / 2)) * 1.9;
               const laneBase = item.transit.right - 6;
               const fromYBase = findSafeHorizontalY({
-                initialY: fromJunction.y + fromSpread,
+                initialY: fromJunction.y,
                 x1: fromJunction.x,
                 x2: laneBase + laneShift,
                 preferredDirection: fromEdge === 'top' ? 'up' : 'down',
                 excludeSlotIds,
               });
               const toYBase = findSafeHorizontalY({
-                initialY: toJunction.y + toSpread,
+                initialY: toJunction.y,
                 x1: laneBase + laneShift,
                 x2: toJunction.x,
                 preferredDirection: toEdge === 'top' ? 'up' : 'down',
@@ -2779,19 +2771,23 @@ export default function ObjectSettingsTabRefactored() {
                 preferredDirection: laneShift <= 0 ? 'left' : 'right',
                 excludeSlotIds,
               });
+              const fromSplitX = fromJunction.x + (((laneX - fromJunction.x) >= 0 ? 1 : -1) * 2.5);
+              const toSplitX = toJunction.x + (((laneX - toJunction.x) >= 0 ? 1 : -1) * 2.5);
               pushPoint(points, fromTerminal);
               pushPoint(points, fromJunction);
+              pushPoint(points, { x: fromSplitX, y: fromJunction.y });
               if (Math.abs(fromY - fromJunction.y) > 0.5) {
-                pushPoint(points, { x: fromJunction.x, y: fromY });
+                pushPoint(points, { x: fromSplitX, y: fromY });
               }
               pushPoint(points, { x: laneX, y: fromY });
               if (Math.abs(toY - fromY) > 0.5) {
                 pushPoint(points, { x: laneX, y: toY });
               }
-              pushPoint(points, { x: toJunction.x, y: toY });
+              pushPoint(points, { x: toSplitX, y: toY });
               if (Math.abs(toY - toJunction.y) > 0.5) {
-                pushPoint(points, { x: toJunction.x, y: toJunction.y });
+                pushPoint(points, { x: toSplitX, y: toJunction.y });
               }
+              pushPoint(points, { x: toJunction.x, y: toJunction.y });
               pushPoint(points, toTerminal);
             } else {
               const directionRight = item.to.center.x >= item.from.center.x;
@@ -2806,14 +2802,14 @@ export default function ObjectSettingsTabRefactored() {
               const laneShift = (index - ((arranged.length - 1) / 2)) * 1.9;
               const laneBase = preferredBase + laneShift;
               const fromYBase = findSafeHorizontalY({
-                initialY: fromJunction.y + fromSpread,
+                initialY: fromJunction.y,
                 x1: fromJunction.x,
                 x2: laneBase,
                 preferredDirection: fromEdge === 'top' ? 'up' : 'down',
                 excludeSlotIds,
               });
               const toYBase = findSafeHorizontalY({
-                initialY: toJunction.y + toSpread,
+                initialY: toJunction.y,
                 x1: laneBase,
                 x2: toJunction.x,
                 preferredDirection: toEdge === 'top' ? 'up' : 'down',
@@ -2847,19 +2843,23 @@ export default function ObjectSettingsTabRefactored() {
                 preferredDirection: useRight ? 'right' : 'left',
                 excludeSlotIds,
               });
+              const fromSplitX = fromJunction.x + (((corridorX - fromJunction.x) >= 0 ? 1 : -1) * 2.5);
+              const toSplitX = toJunction.x + (((corridorX - toJunction.x) >= 0 ? 1 : -1) * 2.5);
               pushPoint(points, fromTerminal);
               pushPoint(points, fromJunction);
+              pushPoint(points, { x: fromSplitX, y: fromJunction.y });
               if (Math.abs(fromY - fromJunction.y) > 0.5) {
-                pushPoint(points, { x: fromJunction.x, y: fromY });
+                pushPoint(points, { x: fromSplitX, y: fromY });
               }
               pushPoint(points, { x: corridorX, y: fromY });
               if (Math.abs(toY - fromY) > 0.5) {
                 pushPoint(points, { x: corridorX, y: toY });
               }
-              pushPoint(points, { x: toJunction.x, y: toY });
+              pushPoint(points, { x: toSplitX, y: toY });
               if (Math.abs(toY - toJunction.y) > 0.5) {
-                pushPoint(points, { x: toJunction.x, y: toJunction.y });
+                pushPoint(points, { x: toSplitX, y: toJunction.y });
               }
+              pushPoint(points, { x: toJunction.x, y: toJunction.y });
               pushPoint(points, toTerminal);
             }
             const d = points.map((point, idx) => `${idx === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
@@ -2949,7 +2949,10 @@ export default function ObjectSettingsTabRefactored() {
     const spanFloors = Array.isArray(locationRow?.spanFloors) ? locationRow.spanFloors : [];
     if (!spanFloors.length) return null;
     const canPasteSlot = Boolean(copiedSlotTemplate);
-    const actionsDisabled = !!pasteBusyKey || slotBusy || Boolean(activeCableTransitId && cablePickTarget);
+    const actionsDisabled = !!pasteBusyKey || slotBusy || Boolean(
+      (activeCableTransitId && cablePickTarget)
+      || (cableEditModalOpen && cableEditPickTarget),
+    );
     const pasteTitle = copiedSlotTemplate ? `Вставить блок: ${copiedSlotTemplate.systemName}` : 'Вставить блок';
     const floorHeights = entranceFloorHeights[Number(entranceId)] || {};
     const resolveSegmentHeight = (floorId) => {
@@ -3186,10 +3189,7 @@ export default function ObjectSettingsTabRefactored() {
                   setCableDraft((prev) => ({
                     ...prev,
                     systemId: nextValue,
-                    fromSlotId: null,
-                    toSlotId: null,
                   }));
-                  setCablePickTarget('from');
                   setCableSelectedMaterial(null);
                 }}
                 className="input h-7 text-xs"
@@ -3207,10 +3207,7 @@ export default function ObjectSettingsTabRefactored() {
                   setCableDraft((prev) => ({
                     ...prev,
                     categoryId: nextValue,
-                    fromSlotId: null,
-                    toSlotId: null,
                   }));
-                  setCablePickTarget('from');
                   setCableSelectedMaterial(null);
                 }}
                 className="input h-7 text-xs"
@@ -3447,6 +3444,60 @@ export default function ObjectSettingsTabRefactored() {
       },
     )
     : [];
+  const cableEditSelectableSlotIdSet = useMemo(
+    () => new Set(cableEditSelectableSlots.map((slot) => String(slot.id))),
+    [cableEditSelectableSlots],
+  );
+  const cableEditSelectedSlotIds = useMemo(() => {
+    const values = [cableEditDraft?.fromSlotId, cableEditDraft?.toSlotId]
+      .map((value) => Number.parseInt(value, 10))
+      .filter((value) => Number.isInteger(value) && value > 0);
+    return new Set(values.map(String));
+  }, [cableEditDraft?.fromSlotId, cableEditDraft?.toSlotId]);
+  const handlePickCableEditSlot = useCallback((slot) => {
+    if (!cableEditModalOpen || !cableEditDraft) return;
+    if (!cableEditPickTarget) {
+      setError('Нажмите «Выбрать От» или «Выбрать До».');
+      return;
+    }
+    if (!cableEditSelectableSlotIdSet.has(String(slot.id))) {
+      setError(cableEditDraft.routeMode === 'transit'
+        ? 'Для маршрута через транзит выберите блок в том же подъезде и по текущим фильтрам.'
+        : 'Для прямого маршрута блок недоступен по текущим фильтрам.');
+      return;
+    }
+    const pickedId = Number(slot.id);
+    setCableEditDraft((prev) => {
+      if (!prev) return prev;
+      if (cableEditPickTarget === 'from') {
+        return {
+          ...prev,
+          fromSlotId: pickedId,
+          toSlotId: Number(prev.toSlotId) === pickedId ? null : prev.toSlotId,
+        };
+      }
+      return {
+        ...prev,
+        toSlotId: pickedId,
+        fromSlotId: Number(prev.fromSlotId) === pickedId ? null : prev.fromSlotId,
+      };
+    });
+    revealCableSlotFloor(slot.id);
+    if (cableEditPickTarget === 'from') {
+      setCableEditPickTarget('to');
+      setNotice('Блок «От» выбран в режиме редактирования. Выберите «До».');
+    } else {
+      setCableEditPickTarget('');
+      setNotice('Блок «До» выбран. Сохраните изменения линии.');
+    }
+    setError('');
+  }, [
+    cableEditModalOpen,
+    cableEditDraft,
+    cableEditPickTarget,
+    cableEditSelectableSlotIdSet,
+    revealCableSlotFloor,
+  ]);
   const allFloorIds = useMemo(
     () => sortedFloors.map((floor) => String(floor.id)),
     [sortedFloors],
@@ -3763,7 +3814,7 @@ export default function ObjectSettingsTabRefactored() {
                                           type="button"
                                           onClick={() => handleCopyFloorBlocks(floor)}
                                           className="px-2 py-0.5 rounded border border-white/15 text-[10px] text-zinc-200 hover:bg-white/10"
-                                          disabled={!!pasteBusyKey || slotBusy || Boolean(activeCableTransitId && cablePickTarget)}
+                                          disabled={!!pasteBusyKey || slotBusy || Boolean((activeCableTransitId && cablePickTarget) || (cableEditModalOpen && cableEditPickTarget))}
                                         >
                                           Копировать этаж
                                         </button>
@@ -3772,7 +3823,7 @@ export default function ObjectSettingsTabRefactored() {
                                             type="button"
                                             onClick={() => handlePasteFloorBlocks(floor)}
                                             className="px-2 py-0.5 rounded border border-sky-400/40 text-[10px] text-sky-200 hover:bg-sky-900/30"
-                                            disabled={!!pasteBusyKey || slotBusy || Boolean(activeCableTransitId && cablePickTarget)}
+                                            disabled={!!pasteBusyKey || slotBusy || Boolean((activeCableTransitId && cablePickTarget) || (cableEditModalOpen && cableEditPickTarget))}
                                           >
                                             {pasteBusyKey === `floor:${floor.id}` ? 'Вставка…' : 'Вставить этаж'}
                                           </button>
@@ -3995,8 +4046,16 @@ export default function ObjectSettingsTabRefactored() {
       </div>
 
       {cableEditModalOpen && cableEditDraft && (
-        <div className="modal-backdrop z-50" onClick={closeCableEditModal} role="dialog" aria-modal="true">
-          <div className="card p-5 max-w-xl w-full" onClick={(e) => e.stopPropagation()}>
+        <div
+          className={`modal-backdrop z-50 ${cableEditPickTarget ? 'pointer-events-none' : ''}`}
+          onClick={() => {
+            if (cableEditPickTarget) return;
+            closeCableEditModal();
+          }}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="card p-5 max-w-xl w-full pointer-events-auto" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-white text-lg font-medium">Редактирование кабельной линии</h3>
             <form className="space-y-3 mt-4" onSubmit={handleSaveCableEdit}>
               <div className="grid gap-3 md:grid-cols-2">
@@ -4058,8 +4117,6 @@ export default function ObjectSettingsTabRefactored() {
                     setCableEditDraft((prev) => ({
                       ...prev,
                       systemId,
-                      fromSlotId: null,
-                      toSlotId: null,
                     }));
                   }}
                   className="input"
@@ -4080,8 +4137,6 @@ export default function ObjectSettingsTabRefactored() {
                     setCableEditDraft((prev) => ({
                       ...prev,
                       categoryId,
-                      fromSlotId: null,
-                      toSlotId: null,
                     }));
                   }}
                   className="input"
@@ -4108,6 +4163,18 @@ export default function ObjectSettingsTabRefactored() {
                       <option key={`edit-from-${slot.id}`} value={slot.id}>{describeSlot(slot.id)}</option>
                     ))}
                   </select>
+                  <button
+                    type="button"
+                    onClick={() => setCableEditPickTarget((prev) => (prev === 'from' ? '' : 'from'))}
+                    className={`mt-1 w-full px-2 py-1 rounded border text-xs ${
+                      cableEditPickTarget === 'from'
+                        ? 'border-cyan-300/70 text-cyan-100 bg-cyan-900/35'
+                        : 'border-white/20 text-zinc-200 hover:bg-white/10'
+                    }`}
+                    disabled={cableEditBusy}
+                  >
+                    {cableEditPickTarget === 'from' ? 'Выбор От: активен' : 'Выбрать От на схеме'}
+                  </button>
                 </div>
                 <div>
                   <label className="label">До</label>
@@ -4123,8 +4190,25 @@ export default function ObjectSettingsTabRefactored() {
                       <option key={`edit-to-${slot.id}`} value={slot.id}>{describeSlot(slot.id)}</option>
                     ))}
                   </select>
+                  <button
+                    type="button"
+                    onClick={() => setCableEditPickTarget((prev) => (prev === 'to' ? '' : 'to'))}
+                    className={`mt-1 w-full px-2 py-1 rounded border text-xs ${
+                      cableEditPickTarget === 'to'
+                        ? 'border-cyan-300/70 text-cyan-100 bg-cyan-900/35'
+                        : 'border-white/20 text-zinc-200 hover:bg-white/10'
+                    }`}
+                    disabled={cableEditBusy}
+                  >
+                    {cableEditPickTarget === 'to' ? 'Выбор До: активен' : 'Выбрать До на схеме'}
+                  </button>
                 </div>
               </div>
+              {cableEditPickTarget && (
+                <p className="text-xs text-cyan-200">
+                  Режим выбора на схеме: <b>{cableEditPickTarget === 'from' ? 'От' : 'До'}</b>. Кликните по блоку в структуре объекта.
+                </p>
+              )}
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <label className="label">Название</label>
