@@ -247,6 +247,10 @@ export function fullPermissionFlags(value = true) {
 
 export function permissionsFromBody(body = {}) {
   const perms = Object.fromEntries(PERMISSION_KEYS.map((k) => [k, !!body[k]]));
+  if (perms.can_settings_work) {
+    // Доступ к рабочей схеме в настройках должен включать просмотр вкладки «Объекты».
+    perms.can_objects = true;
+  }
   if (!perms.can_tasks) {
     perms.can_task_notifications = false;
     perms.can_tasks_all = false;

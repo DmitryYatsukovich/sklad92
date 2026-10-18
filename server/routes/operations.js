@@ -25,7 +25,8 @@ async function ensureProductionAllocationSchema() {
         `CREATE TABLE IF NOT EXISTS issuance_production_allocations (
           id SERIAL PRIMARY KEY,
           issuance_id INTEGER NOT NULL REFERENCES issuances(id) ON DELETE CASCADE,
-          location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE RESTRICT,
+          location_system_id INTEGER REFERENCES work_location_systems(id) ON DELETE RESTRICT,
+          transit_cable_line_id INTEGER REFERENCES work_transit_cable_lines(id) ON DELETE RESTRICT,
           worker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
           status_id INTEGER REFERENCES work_block_statuses(id) ON DELETE SET NULL,
           quantity DECIMAL(18,4) NOT NULL DEFAULT 0,
@@ -35,6 +36,23 @@ async function ensureProductionAllocationSchema() {
         )`,
       );
       await pool.query(
+        'ALTER TABLE issuance_production_allocations ADD COLUMN IF NOT EXISTS transit_cable_line_id INTEGER REFERENCES work_transit_cable_lines(id) ON DELETE RESTRICT',
+      );
+      await pool.query(
+        'ALTER TABLE issuance_production_allocations ALTER COLUMN location_system_id DROP NOT NULL',
+      );
+      await pool.query(
+        'ALTER TABLE issuance_production_allocations DROP CONSTRAINT IF EXISTS issuance_production_allocations_target_check',
+      );
+      await pool.query(
+        `ALTER TABLE issuance_production_allocations
+         ADD CONSTRAINT issuance_production_allocations_target_check
+         CHECK (
+           (location_system_id IS NOT NULL AND transit_cable_line_id IS NULL)
+           OR (location_system_id IS NULL AND transit_cable_line_id IS NOT NULL)
+         )`,
+      );
+      await pool.query(
         'CREATE INDEX IF NOT EXISTS idx_ipa_issuance ON issuance_production_allocations(issuance_id, created_at DESC)',
       );
       await pool.query(
@@ -42,6 +60,9 @@ async function ensureProductionAllocationSchema() {
       );
       await pool.query(
         'CREATE INDEX IF NOT EXISTS idx_ipa_location_system ON issuance_production_allocations(location_system_id)',
+      );
+      await pool.query(
+        'CREATE INDEX IF NOT EXISTS idx_ipa_transit_cable_line ON issuance_production_allocations(transit_cable_line_id)',
       );
     })().catch((error) => {
       ensureProductionAllocationSchemaPromise = null;
@@ -690,6 +711,7 @@ router.get('/issuances/:id/production-distribution', async (req, res) => {
 
   const rows = (await pool.query(
     `SELECT ipa.location_system_id,
+            ipa.transit_cable_line_id,
             ipa.status_id,
             bs.name AS status_name,
             bs.color AS status_color,
@@ -700,11 +722,12 @@ router.get('/issuances/:id/production-distribution', async (req, res) => {
      LEFT JOIN work_block_statuses bs ON bs.id = ipa.status_id
      LEFT JOIN users u ON u.id = ipa.worker_user_id
      WHERE ipa.issuance_id = $1
-     GROUP BY ipa.location_system_id, ipa.status_id, bs.name, bs.color
-     ORDER BY ipa.location_system_id`,
+     GROUP BY ipa.location_system_id, ipa.transit_cable_line_id, ipa.status_id, bs.name, bs.color
+     ORDER BY ipa.location_system_id NULLS LAST, ipa.transit_cable_line_id NULLS LAST`,
     [issuanceId],
   )).rows.map((row) => ({
-    location_system_id: Number(row.location_system_id),
+    location_system_id: row.location_system_id == null ? null : Number(row.location_system_id),
+    transit_cable_line_id: row.transit_cable_line_id == null ? null : Number(row.transit_cable_line_id),
     status_id: row.status_id == null ? null : Number(row.status_id),
     status_name: row.status_name || null,
     status_color: row.status_color || null,
@@ -724,6 +747,7 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
   const assignmentsMap = new Map();
   for (const row of rawAssignments) {
     const locationSystemId = parseId(row?.location_system_id);
+    const transitCableLineId = parseId(row?.transit_cable_line_id);
     const workerUserIdsRaw = Array.isArray(row?.worker_user_ids)
       ? row.worker_user_ids
       : [row?.worker_user_id];
@@ -731,14 +755,25 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
       workerUserIdsRaw.map((value) => parseId(value)).filter(Boolean),
     )];
     const statusId = parseId(row?.status_id);
-    if (!locationSystemId || !workerUserIds.length || !statusId) {
-      return res.status(400).json({ error: 'В каждом блоке нужно выбрать статус и хотя бы одного сотрудника' });
+    const hasSlot = !!locationSystemId;
+    const hasLine = !!transitCableLineId;
+    if ((hasSlot && hasLine) || (!hasSlot && !hasLine) || !workerUserIds.length || !statusId) {
+      return res.status(400).json({ error: 'В каждой позиции нужно выбрать статус и хотя бы одного сотрудника' });
     }
-    assignmentsMap.set(locationSystemId, { locationSystemId, workerUserIds, statusId });
+    const targetType = hasLine ? 'line' : 'slot';
+    const targetKey = hasLine ? `line:${transitCableLineId}` : `slot:${locationSystemId}`;
+    assignmentsMap.set(targetKey, {
+      targetType,
+      targetKey,
+      locationSystemId: hasSlot ? locationSystemId : null,
+      transitCableLineId: hasLine ? transitCableLineId : null,
+      workerUserIds,
+      statusId,
+    });
   }
   const assignments = [...assignmentsMap.values()];
   if (!assignments.length) {
-    return res.status(400).json({ error: 'Добавьте хотя бы один блок для выработки' });
+    return res.status(400).json({ error: 'Добавьте хотя бы одну позицию для выработки' });
   }
 
   const client = await pool.connect();
@@ -817,71 +852,75 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
       return res.status(400).json({ error: 'Сотрудник для выработки не найден' });
     }
 
-    const slotIds = assignments.map((row) => row.locationSystemId);
-    const slotsResult = await client.query(
-      `SELECT ls.id AS location_system_id,
-              ls.location_kind,
-              ls.location_id,
-              ls.system_id,
-              ls.category_id
-       FROM work_location_systems ls
-       WHERE ls.id = ANY($1::int[])
-       FOR UPDATE OF ls`,
-      [slotIds],
-    );
-    const slotMap = new Map(slotsResult.rows.map((row) => [Number(row.location_system_id), row]));
-    const missingSlot = assignments.find((row) => !slotMap.has(row.locationSystemId));
-    if (missingSlot) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Часть выбранных блоков не найдена' });
-    }
+    const slotAssignments = assignments.filter((row) => row.targetType === 'slot');
+    const lineAssignments = assignments.filter((row) => row.targetType === 'line');
+    const targetQuantityMap = new Map();
 
-    const slotWithWrongSystemOrCategory = assignments.find((row) => {
-      const slot = slotMap.get(row.locationSystemId);
-      if (!slot) return true;
-      const sameSystem = Number(slot.system_id || 0) === Number(materialMeta.system_id || 0);
-      const sameCategory = (
-        (slot.category_id == null && materialMeta.category_id == null)
-        || Number(slot.category_id || 0) === Number(materialMeta.category_id || 0)
+    if (slotAssignments.length) {
+      const slotIds = slotAssignments.map((row) => row.locationSystemId);
+      const slotsResult = await client.query(
+        `SELECT ls.id AS location_system_id,
+                ls.location_kind,
+                ls.location_id,
+                ls.system_id,
+                ls.category_id
+         FROM work_location_systems ls
+         WHERE ls.id = ANY($1::int[])
+         FOR UPDATE OF ls`,
+        [slotIds],
       );
-      return !sameSystem || !sameCategory;
-    });
-    if (slotWithWrongSystemOrCategory) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Блок не соответствует системе или категории выбранного материала' });
-    }
+      const slotMap = new Map(slotsResult.rows.map((row) => [Number(row.location_system_id), row]));
+      const missingSlot = slotAssignments.find((row) => !slotMap.has(row.locationSystemId));
+      if (missingSlot) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Часть выбранных блоков не найдена' });
+      }
 
-    const slotQuantitiesRows = await client.query(
-      `SELECT ls.id AS location_system_id,
-              COALESCE(SUM(CASE WHEN lm.material_id = $2 THEN lm.quantity ELSE 0 END), 0)::numeric AS exact_material_quantity,
-              COALESCE(SUM(CASE
-                WHEN LOWER(TRIM(m.name)) = LOWER(TRIM($3))
-                  AND (($4::int IS NULL AND m.system_id IS NULL) OR m.system_id = $4)
-                  AND (($5::int IS NULL AND m.category_id IS NULL) OR m.category_id = $5)
-                THEN lm.quantity
-                ELSE 0
-              END), 0)::numeric AS fallback_material_quantity
-              ,COALESCE((
-                SELECT SUM(eq.quantity)
-                FROM work_location_system_equipment eq
-                WHERE eq.location_system_id = ls.id
-                  AND LOWER(TRIM(eq.name)) = LOWER(TRIM($3))
-              ), 0)::numeric AS equipment_quantity
-              ,COALESCE((
-                SELECT SUM(w.quantity)
-                FROM work_location_system_works w
-                WHERE w.location_system_id = ls.id
-                  AND LOWER(TRIM(w.name)) = LOWER(TRIM($3))
-              ), 0)::numeric AS works_quantity
-       FROM work_location_systems ls
-       LEFT JOIN work_location_system_materials lm ON lm.location_system_id = ls.id
-       LEFT JOIN materials m ON m.id = lm.material_id
-       WHERE ls.id = ANY($1::int[])
-       GROUP BY ls.id`,
-      [slotIds, issuance.material_id, materialMeta.name || '', materialMeta.system_id, materialMeta.category_id],
-    );
-    const slotQuantityMap = new Map(
-      slotQuantitiesRows.rows.map((row) => {
+      const slotWithWrongSystemOrCategory = slotAssignments.find((row) => {
+        const slot = slotMap.get(row.locationSystemId);
+        if (!slot) return true;
+        const sameSystem = Number(slot.system_id || 0) === Number(materialMeta.system_id || 0);
+        const sameCategory = (
+          (slot.category_id == null && materialMeta.category_id == null)
+          || Number(slot.category_id || 0) === Number(materialMeta.category_id || 0)
+        );
+        return !sameSystem || !sameCategory;
+      });
+      if (slotWithWrongSystemOrCategory) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Блок не соответствует системе или категории выбранного материала' });
+      }
+
+      const slotQuantitiesRows = await client.query(
+        `SELECT ls.id AS location_system_id,
+                COALESCE(SUM(CASE WHEN lm.material_id = $2 THEN lm.quantity ELSE 0 END), 0)::numeric AS exact_material_quantity,
+                COALESCE(SUM(CASE
+                  WHEN LOWER(TRIM(m.name)) = LOWER(TRIM($3))
+                    AND (($4::int IS NULL AND m.system_id IS NULL) OR m.system_id = $4)
+                    AND (($5::int IS NULL AND m.category_id IS NULL) OR m.category_id = $5)
+                  THEN lm.quantity
+                  ELSE 0
+                END), 0)::numeric AS fallback_material_quantity
+                ,COALESCE((
+                  SELECT SUM(eq.quantity)
+                  FROM work_location_system_equipment eq
+                  WHERE eq.location_system_id = ls.id
+                    AND LOWER(TRIM(eq.name)) = LOWER(TRIM($3))
+                ), 0)::numeric AS equipment_quantity
+                ,COALESCE((
+                  SELECT SUM(w.quantity)
+                  FROM work_location_system_works w
+                  WHERE w.location_system_id = ls.id
+                    AND LOWER(TRIM(w.name)) = LOWER(TRIM($3))
+                ), 0)::numeric AS works_quantity
+         FROM work_location_systems ls
+         LEFT JOIN work_location_system_materials lm ON lm.location_system_id = ls.id
+         LEFT JOIN materials m ON m.id = lm.material_id
+         WHERE ls.id = ANY($1::int[])
+         GROUP BY ls.id`,
+        [slotIds, issuance.material_id, materialMeta.name || '', materialMeta.system_id, materialMeta.category_id],
+      );
+      slotQuantitiesRows.rows.forEach((row) => {
         const exactQty = Number(row.exact_material_quantity || 0);
         const fallbackQty = Number(row.fallback_material_quantity || 0);
         const equipmentQty = Number(row.equipment_quantity || 0);
@@ -891,22 +930,58 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
         else if (fallbackQty > 0) qty = fallbackQty;
         else if (equipmentQty > 0) qty = equipmentQty;
         else if (worksQty > 0) qty = worksQty;
-        return [Number(row.location_system_id), qty];
-      }),
-    );
+        targetQuantityMap.set(`slot:${Number(row.location_system_id)}`, qty);
+      });
+    }
 
-    const slotWithoutMaterialQuantity = assignments.find((row) => {
-      const qty = slotQuantityMap.get(row.locationSystemId) || 0;
+    if (lineAssignments.length) {
+      const lineIds = lineAssignments.map((row) => row.transitCableLineId);
+      const linesResult = await client.query(
+        `SELECT l.id AS transit_cable_line_id, l.system_id, l.category_id, l.length_m
+         FROM work_transit_cable_lines l
+         WHERE l.id = ANY($1::int[])
+         FOR UPDATE OF l`,
+        [lineIds],
+      );
+      const lineMap = new Map(linesResult.rows.map((row) => [Number(row.transit_cable_line_id), row]));
+      const missingLine = lineAssignments.find((row) => !lineMap.has(row.transitCableLineId));
+      if (missingLine) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Часть выбранных линий не найдена' });
+      }
+
+      const lineWithWrongSystemOrCategory = lineAssignments.find((row) => {
+        const line = lineMap.get(row.transitCableLineId);
+        if (!line) return true;
+        const sameSystem = Number(line.system_id || 0) === Number(materialMeta.system_id || 0);
+        const sameCategory = (
+          (line.category_id == null && materialMeta.category_id == null)
+          || Number(line.category_id || 0) === Number(materialMeta.category_id || 0)
+        );
+        return !sameSystem || !sameCategory;
+      });
+      if (lineWithWrongSystemOrCategory) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Линия не соответствует системе или категории выбранного материала' });
+      }
+
+      linesResult.rows.forEach((row) => {
+        targetQuantityMap.set(`line:${Number(row.transit_cable_line_id)}`, Number(row.length_m || 0));
+      });
+    }
+
+    const targetWithoutQuantity = assignments.find((row) => {
+      const qty = Number(targetQuantityMap.get(row.targetKey) || 0);
       return !(qty > 0);
     });
-    if (slotWithoutMaterialQuantity) {
+    if (targetWithoutQuantity) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'В одном из блоков не найдено количество этого материала' });
+      return res.status(400).json({ error: 'В одной из позиций не найдено количество для выработки' });
     }
 
     let totalProducedNow = 0;
     for (const assignment of assignments) {
-      totalProducedNow += Number(slotQuantityMap.get(assignment.locationSystemId) || 0);
+      totalProducedNow += Number(targetQuantityMap.get(assignment.targetKey) || 0);
     }
     if (totalProducedNow <= 0) {
       await client.query('ROLLBACK');
@@ -921,23 +996,24 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
 
     let totalAllocations = 0;
     for (const assignment of assignments) {
-      const slotQty = Number(slotQuantityMap.get(assignment.locationSystemId) || 0);
+      const targetQty = Number(targetQuantityMap.get(assignment.targetKey) || 0);
       const workersCount = assignment.workerUserIds.length;
-      const perWorkerQty = workersCount > 0 ? (slotQty / workersCount) : slotQty;
+      const perWorkerQty = workersCount > 0 ? (targetQty / workersCount) : targetQty;
       let distributedQty = 0;
       for (let idx = 0; idx < assignment.workerUserIds.length; idx += 1) {
         const workerUserId = assignment.workerUserIds[idx];
         const isLast = idx === assignment.workerUserIds.length - 1;
-        const qtyForWorker = isLast ? Math.max(slotQty - distributedQty, 0) : perWorkerQty;
+        const qtyForWorker = isLast ? Math.max(targetQty - distributedQty, 0) : perWorkerQty;
         distributedQty += qtyForWorker;
         if (!(qtyForWorker > 0)) continue;
         await client.query(
           `INSERT INTO issuance_production_allocations
-            (issuance_id, location_system_id, worker_user_id, status_id, quantity, created_by_user_id)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
+            (issuance_id, location_system_id, transit_cable_line_id, worker_user_id, status_id, quantity, created_by_user_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
           [
             issuanceId,
             assignment.locationSystemId,
+            assignment.transitCableLineId,
             workerUserId,
             assignment.statusId,
             qtyForWorker,
@@ -946,14 +1022,25 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
         );
         totalAllocations += 1;
       }
-      await client.query(
-        `UPDATE work_location_systems
-         SET status_id = $1,
-             assigned_user_id = $2,
-             updated_at = NOW()
-         WHERE id = $3`,
-        [assignment.statusId, assignment.workerUserIds[0], assignment.locationSystemId],
-      );
+      if (assignment.targetType === 'slot') {
+        await client.query(
+          `UPDATE work_location_systems
+           SET status_id = $1,
+               assigned_user_id = $2,
+               updated_at = NOW()
+           WHERE id = $3`,
+          [assignment.statusId, assignment.workerUserIds[0], assignment.locationSystemId],
+        );
+      } else {
+        await client.query(
+          `UPDATE work_transit_cable_lines
+           SET status_id = $1,
+               assigned_user_id = $2,
+               updated_at = NOW()
+           WHERE id = $3`,
+          [assignment.statusId, assignment.workerUserIds[0], assignment.transitCableLineId],
+        );
+      }
     }
 
     const workersSummary = [...new Set(
@@ -963,7 +1050,8 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
     const productionEventTag = makeIssuanceEventTag('production', {
       qty: totalProducedNow,
       workers: workersSummary,
-      blocks: assignments.length,
+      blocks: assignments.filter((row) => row.targetType === 'slot').length,
+      lines: assignments.filter((row) => row.targetType === 'line').length,
       at: new Date().toISOString(),
     });
     const nextNote = appendIssuanceEventTag(issuance.note, productionEventTag);
@@ -996,8 +1084,9 @@ router.post('/issuances/:id/production-distribution', async (req, res) => {
 router.delete('/issuances/:id/production-distribution', async (req, res) => {
   const issuanceId = parseId(req.params.id);
   const locationSystemId = parseId(req.body?.location_system_id);
-  if (!issuanceId || !locationSystemId) {
-    return res.status(400).json({ error: 'Нужно указать выдачу и блок для отмены выработки' });
+  const transitCableLineId = parseId(req.body?.transit_cable_line_id);
+  if (!issuanceId || (!locationSystemId && !transitCableLineId) || (locationSystemId && transitCableLineId)) {
+    return res.status(400).json({ error: 'Нужно указать выдачу и одну цель для отмены выработки' });
   }
 
   const client = await pool.connect();
@@ -1026,36 +1115,61 @@ router.delete('/issuances/:id/production-distribution', async (req, res) => {
     const deleted = await client.query(
       `DELETE FROM issuance_production_allocations
        WHERE issuance_id = $1
-         AND location_system_id = $2
+         AND (
+           ($2::int IS NOT NULL AND location_system_id = $2)
+           OR ($3::int IS NOT NULL AND transit_cable_line_id = $3)
+         )
        RETURNING id, quantity`,
-      [issuanceId, locationSystemId],
+      [issuanceId, locationSystemId, transitCableLineId],
     );
     if (!deleted.rowCount) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'По этому блоку нет выработки для отмены' });
+      return res.status(404).json({ error: 'По этой позиции нет выработки для отмены' });
     }
     const restoredQty = deleted.rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
-
-    const latestSlotAllocation = (await client.query(
-      `SELECT status_id, worker_user_id
-       FROM issuance_production_allocations
-       WHERE location_system_id = $1
-       ORDER BY created_at DESC, id DESC
-       LIMIT 1`,
-      [locationSystemId],
-    )).rows[0] || null;
-    await client.query(
-      `UPDATE work_location_systems
-       SET status_id = $1,
-           assigned_user_id = $2,
-           updated_at = NOW()
-       WHERE id = $3`,
-      [
-        latestSlotAllocation?.status_id ?? null,
-        latestSlotAllocation?.worker_user_id ?? null,
-        locationSystemId,
-      ],
-    );
+    if (locationSystemId) {
+      const latestSlotAllocation = (await client.query(
+        `SELECT status_id, worker_user_id
+         FROM issuance_production_allocations
+         WHERE location_system_id = $1
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1`,
+        [locationSystemId],
+      )).rows[0] || null;
+      await client.query(
+        `UPDATE work_location_systems
+         SET status_id = $1,
+             assigned_user_id = $2,
+             updated_at = NOW()
+         WHERE id = $3`,
+        [
+          latestSlotAllocation?.status_id ?? null,
+          latestSlotAllocation?.worker_user_id ?? null,
+          locationSystemId,
+        ],
+      );
+    } else if (transitCableLineId) {
+      const latestLineAllocation = (await client.query(
+        `SELECT status_id, worker_user_id
+         FROM issuance_production_allocations
+         WHERE transit_cable_line_id = $1
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1`,
+        [transitCableLineId],
+      )).rows[0] || null;
+      await client.query(
+        `UPDATE work_transit_cable_lines
+         SET status_id = $1,
+             assigned_user_id = $2,
+             updated_at = NOW()
+         WHERE id = $3`,
+        [
+          latestLineAllocation?.status_id ?? null,
+          latestLineAllocation?.worker_user_id ?? null,
+          transitCableLineId,
+        ],
+      );
+    }
 
     const cancelTag = makeIssuanceEventTag('production_cancel', {
       qty: restoredQty,
@@ -1076,6 +1190,7 @@ router.delete('/issuances/:id/production-distribution', async (req, res) => {
       ok: true,
       issuance_id: issuanceId,
       location_system_id: locationSystemId,
+      transit_cable_line_id: transitCableLineId,
       restored_quantity: restoredQty,
     });
   } catch (e) {

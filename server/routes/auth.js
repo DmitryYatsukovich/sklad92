@@ -10,12 +10,16 @@ const router = Router();
 const ACCESS_PERMISSION_KEYS = PERMISSION_KEYS.filter((k) => k !== 'can_offline_mode');
 
 function userPayload(base, perms = {}) {
+  const effectivePerms = {
+    ...perms,
+    can_objects: !!(perms.can_objects || perms.can_settings_work),
+  };
   return {
     id: base.id,
     login: base.login,
     display_name: base.display_name,
     role: base.role,
-    ...Object.fromEntries(PERMISSION_KEYS.map((k) => [k, !!perms[k]])),
+    ...Object.fromEntries(PERMISSION_KEYS.map((k) => [k, !!effectivePerms[k]])),
   };
 }
 

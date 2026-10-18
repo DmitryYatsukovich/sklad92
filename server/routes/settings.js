@@ -39,6 +39,7 @@ async function ensureObjectStatusSchema() {
           entrance_id INTEGER NOT NULL REFERENCES work_entrances(id) ON DELETE RESTRICT,
           from_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
           to_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+          sort_order INTEGER NOT NULL DEFAULT 0,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           UNIQUE (entrance_id, name)
         )`,
@@ -51,18 +52,51 @@ async function ensureObjectStatusSchema() {
           entrance_id INTEGER NOT NULL REFERENCES work_entrances(id) ON DELETE RESTRICT,
           from_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
           to_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+          sort_order INTEGER NOT NULL DEFAULT 0,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           UNIQUE (entrance_id, name)
         )`,
       );
+      await pool.query('ALTER TABLE work_transits ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0');
+      await pool.query('ALTER TABLE work_stairwells ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_object ON work_transits(object_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_entrance ON work_transits(entrance_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_sort_order ON work_transits(entrance_id, sort_order)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_from_floor ON work_transits(from_floor_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_to_floor ON work_transits(to_floor_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_object ON work_stairwells(object_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_entrance ON work_stairwells(entrance_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_sort_order ON work_stairwells(entrance_id, sort_order)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_from_floor ON work_stairwells(from_floor_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_to_floor ON work_stairwells(to_floor_id)');
+      await pool.query(
+        `WITH ranked AS (
+           SELECT id, ROW_NUMBER() OVER (
+             PARTITION BY entrance_id
+             ORDER BY sort_order NULLS LAST, created_at, id
+           ) AS rn
+           FROM work_transits
+         )
+         UPDATE work_transits wt
+         SET sort_order = ranked.rn
+         FROM ranked
+         WHERE wt.id = ranked.id
+           AND (wt.sort_order IS NULL OR wt.sort_order <> ranked.rn)`,
+      );
+      await pool.query(
+        `WITH ranked AS (
+           SELECT id, ROW_NUMBER() OVER (
+             PARTITION BY entrance_id
+             ORDER BY sort_order NULLS LAST, created_at, id
+           ) AS rn
+           FROM work_stairwells
+         )
+         UPDATE work_stairwells ws
+         SET sort_order = ranked.rn
+         FROM ranked
+         WHERE ws.id = ranked.id
+           AND (ws.sort_order IS NULL OR ws.sort_order <> ranked.rn)`,
+      );
       await pool.query(
         `CREATE TABLE IF NOT EXISTS work_transit_cable_lines (
           id SERIAL PRIMARY KEY,
@@ -79,10 +113,28 @@ async function ensureObjectStatusSchema() {
         )`,
       );
       await pool.query(
+        `CREATE TABLE IF NOT EXISTS work_block_statuses (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(200) NOT NULL UNIQUE,
+          color VARCHAR(16) NOT NULL,
+          is_for_production BOOLEAN NOT NULL DEFAULT false,
+          counts_as_produced BOOLEAN NOT NULL DEFAULT false,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        )`,
+      );
+      await pool.query(
         'ALTER TABLE work_transit_cable_lines ADD COLUMN IF NOT EXISTS system_id INTEGER REFERENCES material_systems(id) ON DELETE SET NULL',
       );
       await pool.query(
         'ALTER TABLE work_transit_cable_lines ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES material_categories(id) ON DELETE SET NULL',
+      );
+      await pool.query(
+        'ALTER TABLE work_transit_cable_lines ADD COLUMN IF NOT EXISTS status_id INTEGER REFERENCES work_block_statuses(id) ON DELETE SET NULL',
+      );
+      await pool.query(
+        'ALTER TABLE work_transit_cable_lines ADD COLUMN IF NOT EXISTS assigned_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
       );
       await pool.query(
         'ALTER TABLE work_transit_cable_lines ALTER COLUMN transit_id DROP NOT NULL',
@@ -92,6 +144,8 @@ async function ensureObjectStatusSchema() {
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_to_slot ON work_transit_cable_lines(to_location_system_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_system ON work_transit_cable_lines(system_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_category ON work_transit_cable_lines(category_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_status ON work_transit_cable_lines(status_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_assigned_user ON work_transit_cable_lines(assigned_user_id)');
       await pool.query(
         `CREATE TABLE IF NOT EXISTS work_block_statuses (
           id SERIAL PRIMARY KEY,
@@ -164,6 +218,7 @@ async function loadRangeLocationRow(db, kind, id) {
     `SELECT ${alias}.id, ${alias}.name, ${alias}.object_id, o.name AS object_name, ${alias}.entrance_id, e.name AS entrance_name,
             ${alias}.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
             ${alias}.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order,
+            ${alias}.sort_order,
             ${alias}.created_at
      FROM ${table} ${alias}
      JOIN work_entrances e ON e.id = ${alias}.entrance_id
@@ -271,6 +326,58 @@ async function moveFloorWithinEntrance(db, { entranceId, floorId, fromOrder, toO
     );
   }
   await db.query('UPDATE work_floors SET sort_order = $1 WHERE id = $2', [toOrder, floorId]);
+}
+
+async function resequenceRangeLocations(db, table, entranceId) {
+  if (!table || !entranceId) return;
+  await db.query(
+    `WITH ranked AS (
+       SELECT id, ROW_NUMBER() OVER (
+         PARTITION BY entrance_id
+         ORDER BY sort_order NULLS LAST, created_at, id
+       ) AS rn
+       FROM ${table}
+       WHERE entrance_id = $1
+     )
+     UPDATE ${table} target
+     SET sort_order = ranked.rn
+     FROM ranked
+     WHERE target.id = ranked.id
+       AND (target.sort_order IS NULL OR target.sort_order <> ranked.rn)`,
+    [entranceId],
+  );
+}
+
+async function getRangeLocationsCount(db, table, entranceId) {
+  if (!table || !entranceId) return 0;
+  const countResult = await db.query(`SELECT COUNT(*)::int AS total FROM ${table} WHERE entrance_id = $1`, [entranceId]);
+  return countResult.rows[0]?.total || 0;
+}
+
+async function moveRangeLocationWithinEntrance(db, table, { entranceId, itemId, fromOrder, toOrder }) {
+  if (!table || fromOrder === toOrder) return;
+  if (toOrder < fromOrder) {
+    await db.query(
+      `UPDATE ${table}
+       SET sort_order = sort_order + 1
+       WHERE entrance_id = $1
+         AND id <> $2
+         AND sort_order >= $3
+         AND sort_order < $4`,
+      [entranceId, itemId, toOrder, fromOrder],
+    );
+  } else {
+    await db.query(
+      `UPDATE ${table}
+       SET sort_order = sort_order - 1
+       WHERE entrance_id = $1
+         AND id <> $2
+         AND sort_order <= $3
+         AND sort_order > $4`,
+      [entranceId, itemId, toOrder, fromOrder],
+    );
+  }
+  await db.query(`UPDATE ${table} SET sort_order = $1 WHERE id = $2`, [toOrder, itemId]);
 }
 
 function floorSortRank(row) {
@@ -487,12 +594,17 @@ function isTransitCableEndpointKind(kind) {
 async function loadTransitCableLineById(db, id) {
   return (await db.query(
     `SELECT l.id, l.transit_id, l.from_location_system_id, l.to_location_system_id,
-            l.system_id, l.category_id, l.name, l.length_m, l.created_at, l.updated_at,
+            l.system_id, l.category_id, l.status_id, l.assigned_user_id, l.name, l.length_m, l.created_at, l.updated_at,
             s.name AS system_name,
-            c.name AS category_name, c.icon_key AS category_icon_key
+            c.name AS category_name, c.icon_key AS category_icon_key,
+            bs.name AS status_name, bs.color AS status_color,
+            COALESCE(NULLIF(TRIM(u.display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.login) AS assigned_user_name,
+            u.login AS assigned_user_login
      FROM work_transit_cable_lines l
      LEFT JOIN material_systems s ON s.id = l.system_id
      LEFT JOIN material_categories c ON c.id = l.category_id
+     LEFT JOIN work_block_statuses bs ON bs.id = l.status_id
+     LEFT JOIN users u ON u.id = l.assigned_user_id
      WHERE l.id = $1`,
     [id],
   )).rows[0] || null;
@@ -625,25 +737,27 @@ router.get('/catalog', requireAnyPermission(...CATALOG_READ_PERMS), async (_req,
         `SELECT t.id, t.name, t.object_id, o.name AS object_name, t.entrance_id, e.name AS entrance_name,
                 t.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
                 t.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order,
+                t.sort_order,
                 t.created_at
          FROM work_transits t
          JOIN work_entrances e ON e.id = t.entrance_id
          JOIN work_floors ff ON ff.id = t.from_floor_id
          JOIN work_floors tf ON tf.id = t.to_floor_id
          LEFT JOIN warehouse_objects o ON o.id = t.object_id
-         ORDER BY o.name NULLS LAST, e.name, COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), t.name`
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(t.sort_order, 2147483647), COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), t.name`
       ),
       pool.query(
         `SELECT s.id, s.name, s.object_id, o.name AS object_name, s.entrance_id, e.name AS entrance_name,
                 s.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
                 s.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order,
+                s.sort_order,
                 s.created_at
          FROM work_stairwells s
          JOIN work_entrances e ON e.id = s.entrance_id
          JOIN work_floors ff ON ff.id = s.from_floor_id
          JOIN work_floors tf ON tf.id = s.to_floor_id
          LEFT JOIN warehouse_objects o ON o.id = s.object_id
-         ORDER BY o.name NULLS LAST, e.name, COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), s.name`
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(s.sort_order, 2147483647), COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), s.name`
       ),
       pool.query('SELECT id, name FROM tool_types ORDER BY name'),
       pool.query('SELECT id, name, color, is_for_production, counts_as_produced, sort_order, created_at, updated_at FROM work_block_statuses ORDER BY sort_order, name'),
@@ -1616,6 +1730,7 @@ function registerRangeLocationRoutes({
       `SELECT ${alias}.id, ${alias}.name, ${alias}.object_id, o.name AS object_name, ${alias}.entrance_id, e.name AS entrance_name,
               ${alias}.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
               ${alias}.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order,
+              ${alias}.sort_order,
               ${alias}.created_at
        FROM ${table} ${alias}
        JOIN work_entrances e ON e.id = ${alias}.entrance_id
@@ -1623,7 +1738,7 @@ function registerRangeLocationRoutes({
        JOIN work_floors tf ON tf.id = ${alias}.to_floor_id
        LEFT JOIN warehouse_objects o ON o.id = ${alias}.object_id
        ${where}
-       ORDER BY o.name NULLS LAST, e.name, COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), ${alias}.name`,
+       ORDER BY o.name NULLS LAST, e.name, COALESCE(${alias}.sort_order, 2147483647), COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), ${alias}.name`,
       params,
     )).rows;
     res.json(rows);
@@ -1647,19 +1762,28 @@ function registerRangeLocationRoutes({
     });
     if (range.error) return res.status(400).json({ error: range.error });
 
+    const client = await pool.connect();
     try {
-      const created = (await pool.query(
-        `INSERT INTO ${table} (name, object_id, entrance_id, from_floor_id, to_floor_id)
-         VALUES ($1, $2, $3, $4, $5)
+      await client.query('BEGIN');
+      await resequenceRangeLocations(client, table, range.entrance.id);
+      const total = await getRangeLocationsCount(client, table, range.entrance.id);
+      const created = (await client.query(
+        `INSERT INTO ${table} (name, object_id, entrance_id, from_floor_id, to_floor_id, sort_order)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id`,
-        [name, range.objectId, range.entrance.id, range.fromFloor.id, range.toFloor.id],
+        [name, range.objectId, range.entrance.id, range.fromFloor.id, range.toFloor.id, total + 1],
       )).rows[0];
+      await resequenceRangeLocations(client, table, range.entrance.id);
+      await client.query('COMMIT');
       const row = await loadRangeLocationRow(pool, kind, created.id);
       res.status(201).json(row);
     } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
       if (e.code === '23505') return res.status(400).json({ error: duplicateMessage });
       if (e.code === '23503') return res.status(400).json({ error: missingRefMessage });
       throw e;
+    } finally {
+      client.release();
     }
   });
 
@@ -1668,7 +1792,7 @@ function registerRangeLocationRoutes({
     if (!id) return res.status(400).json({ error: 'Неверный id' });
 
     const current = (await pool.query(
-      `SELECT id, name, object_id, entrance_id, from_floor_id, to_floor_id
+      `SELECT id, name, object_id, entrance_id, from_floor_id, to_floor_id, sort_order
        FROM ${table}
        WHERE id = $1`,
       [id],
@@ -1699,19 +1823,94 @@ function registerRangeLocationRoutes({
     });
     if (range.error) return res.status(400).json({ error: range.error });
 
+    const client = await pool.connect();
     try {
-      await pool.query(
+      await client.query('BEGIN');
+      await resequenceRangeLocations(client, table, current.entrance_id);
+      if (Number(current.entrance_id || 0) !== Number(range.entrance.id || 0)) {
+        await resequenceRangeLocations(client, table, range.entrance.id);
+      }
+      const destinationCount = await getRangeLocationsCount(client, table, range.entrance.id);
+      const targetSortOrder = Number(current.entrance_id || 0) === Number(range.entrance.id || 0)
+        ? Number(current.sort_order || 1)
+        : (destinationCount + 1);
+      await client.query(
         `UPDATE ${table}
-         SET name = $1, object_id = $2, entrance_id = $3, from_floor_id = $4, to_floor_id = $5
-         WHERE id = $6`,
-        [name, range.objectId, range.entrance.id, range.fromFloor.id, range.toFloor.id, id],
+         SET name = $1,
+             object_id = $2,
+             entrance_id = $3,
+             from_floor_id = $4,
+             to_floor_id = $5,
+             sort_order = $6
+         WHERE id = $7`,
+        [name, range.objectId, range.entrance.id, range.fromFloor.id, range.toFloor.id, targetSortOrder, id],
       );
+      await resequenceRangeLocations(client, table, range.entrance.id);
+      if (Number(current.entrance_id || 0) !== Number(range.entrance.id || 0)) {
+        await resequenceRangeLocations(client, table, current.entrance_id);
+      }
+      await client.query('COMMIT');
       const row = await loadRangeLocationRow(pool, kind, id);
       res.json(row);
     } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
       if (e.code === '23505') return res.status(400).json({ error: duplicateMessage });
       if (e.code === '23503') return res.status(400).json({ error: missingRefMessage });
       throw e;
+    } finally {
+      client.release();
+    }
+  });
+
+  router.post(`${basePath}/:id/move`, requirePermission('can_settings_work'), async (req, res) => {
+    const id = parseId(req.params.id);
+    const direction = String(req.body?.direction || '').toLowerCase();
+    if (!id) return res.status(400).json({ error: 'Неверный id' });
+    if (direction !== 'up' && direction !== 'down') {
+      return res.status(400).json({ error: 'Направление должно быть up или down' });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const cur = (await client.query(
+        `SELECT id, entrance_id, sort_order
+         FROM ${table}
+         WHERE id = $1
+         FOR UPDATE`,
+        [id],
+      )).rows[0];
+      if (!cur) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Не найдено' });
+      }
+      await resequenceRangeLocations(client, table, cur.entrance_id);
+      const fresh = (await client.query(
+        `SELECT id, entrance_id, sort_order
+         FROM ${table}
+         WHERE id = $1
+         FOR UPDATE`,
+        [id],
+      )).rows[0];
+      const count = await getRangeLocationsCount(client, table, fresh.entrance_id);
+      const fromOrder = Number(fresh.sort_order || 1);
+      const candidateOrder = direction === 'up' ? fromOrder - 1 : fromOrder + 1;
+      const targetOrder = clampSortOrder(candidateOrder, 1, Math.max(1, count));
+      await moveRangeLocationWithinEntrance(client, table, {
+        entranceId: fresh.entrance_id,
+        itemId: id,
+        fromOrder,
+        toOrder: targetOrder,
+      });
+      await resequenceRangeLocations(client, table, fresh.entrance_id);
+      await client.query('COMMIT');
+      const row = await loadRangeLocationRow(pool, kind, id);
+      res.json(row);
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      client.release();
     }
   });
 
@@ -1719,8 +1918,9 @@ function registerRangeLocationRoutes({
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ error: 'Неверный id' });
     await pool.query('DELETE FROM work_location_systems WHERE location_kind = $1 AND location_id = $2', [kind, id]);
-    const deleted = await pool.query(`DELETE FROM ${table} WHERE id = $1 RETURNING id`, [id]);
+    const deleted = await pool.query(`DELETE FROM ${table} WHERE id = $1 RETURNING id, entrance_id`, [id]);
     if (!deleted.rowCount) return res.status(404).json({ error: notFoundReferenceMessage });
+    await resequenceRangeLocations(pool, table, deleted.rows[0].entrance_id);
     res.json({ ok: true });
   });
 }
@@ -1799,25 +1999,27 @@ router.get('/object-settings/layout', requirePermission('can_settings_work'), as
         `SELECT t.id, t.name, t.object_id, o.name AS object_name, t.entrance_id, e.name AS entrance_name,
                 t.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
                 t.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order,
+                t.sort_order,
                 t.created_at
          FROM work_transits t
          JOIN work_entrances e ON e.id = t.entrance_id
          JOIN work_floors ff ON ff.id = t.from_floor_id
          JOIN work_floors tf ON tf.id = t.to_floor_id
          LEFT JOIN warehouse_objects o ON o.id = t.object_id
-         ORDER BY o.name NULLS LAST, e.name, COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), t.name`,
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(t.sort_order, 2147483647), COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), t.name`,
       ),
       pool.query(
         `SELECT s.id, s.name, s.object_id, o.name AS object_name, s.entrance_id, e.name AS entrance_name,
                 s.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
                 s.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order,
+                s.sort_order,
                 s.created_at
          FROM work_stairwells s
          JOIN work_entrances e ON e.id = s.entrance_id
          JOIN work_floors ff ON ff.id = s.from_floor_id
          JOIN work_floors tf ON tf.id = s.to_floor_id
          LEFT JOIN warehouse_objects o ON o.id = s.object_id
-         ORDER BY o.name NULLS LAST, e.name, COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), s.name`,
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(s.sort_order, 2147483647), COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), s.name`,
       ),
       pool.query('SELECT id, name FROM material_systems ORDER BY name'),
       pool.query('SELECT id, name, icon_key FROM material_categories ORDER BY name'),
@@ -1855,12 +2057,17 @@ router.get('/object-settings/layout', requirePermission('can_settings_work'), as
       ),
       pool.query(
         `SELECT l.id, l.transit_id, l.from_location_system_id, l.to_location_system_id,
-                l.system_id, l.category_id, l.name, l.length_m, l.created_at, l.updated_at,
+                l.system_id, l.category_id, l.status_id, l.assigned_user_id, l.name, l.length_m, l.created_at, l.updated_at,
                 s.name AS system_name,
-                c.name AS category_name, c.icon_key AS category_icon_key
+                c.name AS category_name, c.icon_key AS category_icon_key,
+                bs.name AS status_name, bs.color AS status_color,
+                COALESCE(NULLIF(TRIM(u.display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.login) AS assigned_user_name,
+                u.login AS assigned_user_login
          FROM work_transit_cable_lines l
          LEFT JOIN material_systems s ON s.id = l.system_id
          LEFT JOIN material_categories c ON c.id = l.category_id
+         LEFT JOIN work_block_statuses bs ON bs.id = l.status_id
+         LEFT JOIN users u ON u.id = l.assigned_user_id
          ORDER BY l.transit_id, l.id`,
       ),
     ]);

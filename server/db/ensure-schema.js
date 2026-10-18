@@ -157,6 +157,7 @@ const statements = [
     entrance_id INTEGER NOT NULL REFERENCES work_entrances(id) ON DELETE RESTRICT,
     from_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
     to_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (entrance_id, name)
   )`,
@@ -167,9 +168,12 @@ const statements = [
     entrance_id INTEGER NOT NULL REFERENCES work_entrances(id) ON DELETE RESTRICT,
     from_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
     to_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (entrance_id, name)
   )`,
+  `ALTER TABLE work_transits ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE work_stairwells ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0`,
   `CREATE INDEX IF NOT EXISTS idx_work_floors_entrance ON work_floors(entrance_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_floors_sort_order ON work_floors(entrance_id, sort_order)`,
   `WITH ranked AS (
@@ -188,12 +192,38 @@ const statements = [
   `CREATE INDEX IF NOT EXISTS idx_work_rooms_apartment ON work_rooms(apartment_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_transits_object ON work_transits(object_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_transits_entrance ON work_transits(entrance_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_work_transits_sort_order ON work_transits(entrance_id, sort_order)`,
   `CREATE INDEX IF NOT EXISTS idx_work_transits_from_floor ON work_transits(from_floor_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_transits_to_floor ON work_transits(to_floor_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_stairwells_object ON work_stairwells(object_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_stairwells_entrance ON work_stairwells(entrance_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_work_stairwells_sort_order ON work_stairwells(entrance_id, sort_order)`,
   `CREATE INDEX IF NOT EXISTS idx_work_stairwells_from_floor ON work_stairwells(from_floor_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_stairwells_to_floor ON work_stairwells(to_floor_id)`,
+  `WITH ranked AS (
+     SELECT id, ROW_NUMBER() OVER (
+       PARTITION BY entrance_id
+       ORDER BY sort_order NULLS LAST, created_at, id
+     ) AS rn
+     FROM work_transits
+   )
+   UPDATE work_transits wt
+   SET sort_order = ranked.rn
+   FROM ranked
+   WHERE wt.id = ranked.id
+     AND (wt.sort_order IS NULL OR wt.sort_order <> ranked.rn)`,
+  `WITH ranked AS (
+     SELECT id, ROW_NUMBER() OVER (
+       PARTITION BY entrance_id
+       ORDER BY sort_order NULLS LAST, created_at, id
+     ) AS rn
+     FROM work_stairwells
+   )
+   UPDATE work_stairwells ws
+   SET sort_order = ranked.rn
+   FROM ranked
+   WHERE ws.id = ranked.id
+     AND (ws.sort_order IS NULL OR ws.sort_order <> ranked.rn)`,
   `CREATE TABLE IF NOT EXISTS work_block_statuses (
     id SERIAL PRIMARY KEY,
     name VARCHAR(200) NOT NULL UNIQUE,
@@ -243,12 +273,16 @@ const statements = [
   )`,
   `ALTER TABLE work_transit_cable_lines ADD COLUMN IF NOT EXISTS system_id INTEGER REFERENCES material_systems(id) ON DELETE SET NULL`,
   `ALTER TABLE work_transit_cable_lines ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES material_categories(id) ON DELETE SET NULL`,
+  `ALTER TABLE work_transit_cable_lines ADD COLUMN IF NOT EXISTS status_id INTEGER REFERENCES work_block_statuses(id) ON DELETE SET NULL`,
+  `ALTER TABLE work_transit_cable_lines ADD COLUMN IF NOT EXISTS assigned_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`,
   `ALTER TABLE work_transit_cable_lines ALTER COLUMN transit_id DROP NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_transit ON work_transit_cable_lines(transit_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_from_slot ON work_transit_cable_lines(from_location_system_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_to_slot ON work_transit_cable_lines(to_location_system_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_system ON work_transit_cable_lines(system_id)`,
   `CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_category ON work_transit_cable_lines(category_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_status ON work_transit_cable_lines(status_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_assigned_user ON work_transit_cable_lines(assigned_user_id)`,
   `CREATE TABLE IF NOT EXISTS work_location_system_materials (
     id SERIAL PRIMARY KEY,
     location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE CASCADE,
@@ -304,6 +338,7 @@ const statements = [
     id SERIAL PRIMARY KEY,
     issuance_id INTEGER NOT NULL REFERENCES issuances(id) ON DELETE CASCADE,
     location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE RESTRICT,
+    transit_cable_line_id INTEGER REFERENCES work_transit_cable_lines(id) ON DELETE RESTRICT,
     worker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     status_id INTEGER REFERENCES work_block_statuses(id) ON DELETE SET NULL,
     quantity DECIMAL(18,4) NOT NULL DEFAULT 0,
@@ -311,9 +346,19 @@ const statements = [
     created_at TIMESTAMPTZ DEFAULT NOW(),
     CHECK (quantity > 0)
   )`,
+  `ALTER TABLE issuance_production_allocations ADD COLUMN IF NOT EXISTS transit_cable_line_id INTEGER REFERENCES work_transit_cable_lines(id) ON DELETE RESTRICT`,
+  `ALTER TABLE issuance_production_allocations ALTER COLUMN location_system_id DROP NOT NULL`,
+  `ALTER TABLE issuance_production_allocations DROP CONSTRAINT IF EXISTS issuance_production_allocations_target_check`,
+  `ALTER TABLE issuance_production_allocations
+     ADD CONSTRAINT issuance_production_allocations_target_check
+     CHECK (
+       (location_system_id IS NOT NULL AND transit_cable_line_id IS NULL)
+       OR (location_system_id IS NULL AND transit_cable_line_id IS NOT NULL)
+     )`,
   `CREATE INDEX IF NOT EXISTS idx_ipa_issuance ON issuance_production_allocations(issuance_id, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_ipa_worker ON issuance_production_allocations(worker_user_id, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_ipa_location_system ON issuance_production_allocations(location_system_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_ipa_transit_cable_line ON issuance_production_allocations(transit_cable_line_id)`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS face_photo VARCHAR(255)`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data BYTEA`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_mime VARCHAR(64)`,

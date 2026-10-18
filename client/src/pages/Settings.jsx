@@ -624,6 +624,7 @@ export default function Settings({ user }) {
     const sortedTransits = [...catalog.work_transits].sort((a, b) => (
       naturalCompare(a.object_name, b.object_name)
       || naturalCompare(a.entrance_name, b.entrance_name)
+      || ((a.sort_order ?? Number.MAX_SAFE_INTEGER) - (b.sort_order ?? Number.MAX_SAFE_INTEGER))
       || ((a.from_floor_sort_order ?? Number.MAX_SAFE_INTEGER) - (b.from_floor_sort_order ?? Number.MAX_SAFE_INTEGER))
       || ((a.to_floor_sort_order ?? Number.MAX_SAFE_INTEGER) - (b.to_floor_sort_order ?? Number.MAX_SAFE_INTEGER))
       || naturalCompare(a.name, b.name)
@@ -631,6 +632,7 @@ export default function Settings({ user }) {
     const sortedStairwells = [...catalog.work_stairwells].sort((a, b) => (
       naturalCompare(a.object_name, b.object_name)
       || naturalCompare(a.entrance_name, b.entrance_name)
+      || ((a.sort_order ?? Number.MAX_SAFE_INTEGER) - (b.sort_order ?? Number.MAX_SAFE_INTEGER))
       || ((a.from_floor_sort_order ?? Number.MAX_SAFE_INTEGER) - (b.from_floor_sort_order ?? Number.MAX_SAFE_INTEGER))
       || ((a.to_floor_sort_order ?? Number.MAX_SAFE_INTEGER) - (b.to_floor_sort_order ?? Number.MAX_SAFE_INTEGER))
       || naturalCompare(a.name, b.name)
@@ -860,6 +862,20 @@ export default function Settings({ user }) {
     setError('');
     try {
       await settingsApi.workFloors.move(row.id, direction);
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleMoveRangeLocation = async (row, direction) => {
+    setError('');
+    try {
+      if (effectiveWorkTab === 'transits') {
+        await settingsApi.workTransits.move(row.id, direction);
+      } else if (effectiveWorkTab === 'stairwells') {
+        await settingsApi.workStairwells.move(row.id, direction);
+      }
       load();
     } catch (err) {
       setError(err.message);
@@ -1606,6 +1622,26 @@ export default function Settings({ user }) {
             onEdit={startEdit}
             onDelete={handleDelete}
             extraCol={extraLabel}
+            renderActions={(row) => ((effectiveWorkTab === 'transits' || effectiveWorkTab === 'stairwells') ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleMoveRangeLocation(row, 'up')}
+                  className="px-2 py-1 rounded border border-white/20 text-zinc-200 hover:bg-white/10"
+                  title="Поднять выше"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleMoveRangeLocation(row, 'down')}
+                  className="px-2 py-1 rounded border border-white/20 text-zinc-200 hover:bg-white/10"
+                  title="Опустить ниже"
+                >
+                  ↓
+                </button>
+              </>
+            ) : null)}
             renderTitleLeading={tab === 'categories'
               ? (row) => (
                 <span

@@ -33,6 +33,9 @@ export async function loadUser(req, res, next) {
     req.user = null;
     return next();
   }
+  if (row) {
+    row.can_objects = !!(row.can_objects || row.can_settings_work);
+  }
   req.user = row;
   next();
   } catch (err) {

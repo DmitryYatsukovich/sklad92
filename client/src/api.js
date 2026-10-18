@@ -427,6 +427,7 @@ export const settings = {
     },
     create: (body) => request('/api/settings/work-transits', { method: 'POST', body: JSON.stringify(body) }),
     update: (id, body) => request(`/api/settings/work-transits/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    move: (id, direction) => request(`/api/settings/work-transits/${id}/move`, { method: 'POST', body: JSON.stringify({ direction }) }),
     delete: (id) => request(`/api/settings/work-transits/${id}`, { method: 'DELETE' }),
   },
   workStairwells: {
@@ -439,6 +440,7 @@ export const settings = {
     },
     create: (body) => request('/api/settings/work-stairwells', { method: 'POST', body: JSON.stringify(body) }),
     update: (id, body) => request(`/api/settings/work-stairwells/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    move: (id, direction) => request(`/api/settings/work-stairwells/${id}/move`, { method: 'POST', body: JSON.stringify({ direction }) }),
     delete: (id) => request(`/api/settings/work-stairwells/${id}`, { method: 'DELETE' }),
   },
   organizations: {
@@ -546,6 +548,17 @@ export const objectsView = {
       method: 'DELETE',
       body: JSON.stringify(issuanceId ? { issuance_id: issuanceId } : {}),
     }),
+  updateTransitCableLineStatusAssignment: (id, body) =>
+    request(`/api/objects/cable-lines/${id}/status-assignment`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  transitCableLineProduction: (id) => request(`/api/objects/cable-lines/${id}/production`),
+  cancelTransitCableLineProduction: (id, issuanceId) =>
+    request(`/api/objects/cable-lines/${id}/production`, {
+      method: 'DELETE',
+      body: JSON.stringify(issuanceId ? { issuance_id: issuanceId } : {}),
+    }),
 };
 
 export const operations = {
@@ -559,11 +572,15 @@ export const operations = {
     }),
   productionDistribution: (issuanceId) =>
     request(`/api/operations/issuances/${issuanceId}/production-distribution`),
-  cancelProductionDistribution: (issuanceId, locationSystemId) =>
-    request(`/api/operations/issuances/${issuanceId}/production-distribution`, {
+  cancelProductionDistribution: (issuanceId, payload) => {
+    const body = (payload && typeof payload === 'object')
+      ? payload
+      : { location_system_id: payload };
+    return request(`/api/operations/issuances/${issuanceId}/production-distribution`, {
       method: 'DELETE',
-      body: JSON.stringify({ location_system_id: locationSystemId }),
-    }),
+      body: JSON.stringify(body),
+    });
+  },
   setReturnedQuantity: (issuanceId, returned_quantity) =>
     request(`/api/operations/issuances/${issuanceId}/returned`, {
       method: 'PATCH',

@@ -11,6 +11,7 @@ const EMPTY_DATA = {
   transits: [],
   stairwells: [],
   location_systems: [],
+  transit_cable_lines: [],
   location_system_materials: [],
   location_system_equipment: [],
   location_system_works: [],
@@ -41,6 +42,7 @@ function normalizeHierarchy(value) {
     transits: normalizeList(safe.transits),
     stairwells: normalizeList(safe.stairwells),
     location_systems: normalizeList(safe.location_systems),
+    transit_cable_lines: normalizeList(safe.transit_cable_lines),
     location_system_materials: normalizeList(safe.location_system_materials),
     location_system_equipment: normalizeList(safe.location_system_equipment),
     location_system_works: normalizeList(safe.location_system_works),
@@ -127,6 +129,12 @@ function formatEntryLabel(entry) {
 function floorSortRank(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+}
+
+function makeTargetKey(targetType, targetId) {
+  const id = Number(targetId || 0);
+  if (!id) return '';
+  return `${targetType === 'line' ? 'line' : 'slot'}:${id}`;
 }
 
 function getVisibleRangeSpanRows(visibleFloors, minRank, maxRank) {
@@ -290,7 +298,8 @@ export default function ObjectsOverview() {
   const [expandedEntrance, setExpandedEntrance] = useState(null);
   const [editor, setEditor] = useState({
     open: false,
-    slotId: null,
+    targetType: 'slot',
+    targetId: null,
     statusId: '',
     assigneeId: '',
   });
@@ -331,10 +340,18 @@ export default function ObjectsOverview() {
       const grouped = {};
       (Array.isArray(rows) ? rows : []).forEach((row) => {
         const slotId = Number(row?.location_system_id || 0);
-        if (!slotId) return;
-        if (!grouped[slotId]) {
-          grouped[slotId] = {
-            locationSystemId: slotId,
+        const lineId = Number(row?.transit_cable_line_id || 0);
+        const targetType = lineId ? 'line' : 'slot';
+        const targetId = lineId || slotId;
+        if (!targetId) return;
+        const targetKey = makeTargetKey(targetType, targetId);
+        if (!targetKey) return;
+        if (!grouped[targetKey]) {
+          grouped[targetKey] = {
+            targetType,
+            targetId,
+            locationSystemId: slotId || null,
+            transitCableLineId: lineId || null,
             statusId: row?.status_id == null ? null : Number(row.status_id),
             statusName: row?.status_name || '',
             statusColor: row?.status_color || '',
@@ -344,7 +361,7 @@ export default function ObjectsOverview() {
           };
           return;
         }
-        const current = grouped[slotId];
+        const current = grouped[targetKey];
         current.quantity += Number(row?.quantity || 0);
         current.workerUserIds = normalizeIdList([...current.workerUserIds, ...(row?.worker_user_ids || [])]);
         current.workerNames = [...new Set([...current.workerNames, ...((Array.isArray(row?.worker_names) ? row.worker_names : []).filter(Boolean))])];
@@ -435,6 +452,7 @@ export default function ObjectsOverview() {
     () => [...data.transits].sort((a, b) => (
       naturalCompare(a.object_name, b.object_name)
       || naturalCompare(a.entrance_name, b.entrance_name)
+      || (floorSortRank(a.sort_order) - floorSortRank(b.sort_order))
       || (floorSortRank(a.from_floor_sort_order) - floorSortRank(b.from_floor_sort_order))
       || (floorSortRank(a.to_floor_sort_order) - floorSortRank(b.to_floor_sort_order))
       || naturalCompare(a.name, b.name)
@@ -445,11 +463,21 @@ export default function ObjectsOverview() {
     () => [...data.stairwells].sort((a, b) => (
       naturalCompare(a.object_name, b.object_name)
       || naturalCompare(a.entrance_name, b.entrance_name)
+      || (floorSortRank(a.sort_order) - floorSortRank(b.sort_order))
       || (floorSortRank(a.from_floor_sort_order) - floorSortRank(b.from_floor_sort_order))
       || (floorSortRank(a.to_floor_sort_order) - floorSortRank(b.to_floor_sort_order))
       || naturalCompare(a.name, b.name)
     )),
     [data.stairwells],
+  );
+  const cableLines = useMemo(
+    () => [...data.transit_cable_lines].sort((a, b) => (
+      naturalCompare(a.system_name, b.system_name)
+      || naturalCompare(a.category_name, b.category_name)
+      || naturalCompare(a.name, b.name)
+      || (Number(a.id || 0) - Number(b.id || 0))
+    )),
+    [data.transit_cable_lines],
   );
   const apartmentsById = useMemo(() => {
     const map = new Map();
@@ -471,6 +499,11 @@ export default function ObjectsOverview() {
     stairwells.forEach((row) => map.set(Number(row.id), row));
     return map;
   }, [stairwells]);
+  const cableLineById = useMemo(() => {
+    const map = new Map();
+    cableLines.forEach((row) => map.set(Number(row.id), row));
+    return map;
+  }, [cableLines]);
   const blockStatuses = useMemo(
     () => [...data.block_statuses].sort((a, b) => (
       Number(a.sort_order || 0) - Number(b.sort_order || 0)
@@ -578,6 +611,17 @@ export default function ObjectsOverview() {
     });
     return map;
   }, [transits]);
+  const cableLinesByTransit = useMemo(() => {
+    const map = new Map();
+    cableLines.forEach((row) => {
+      const transitId = Number(row.transit_id || 0);
+      if (!transitId) return;
+      const list = map.get(transitId) || [];
+      list.push(row);
+      map.set(transitId, list);
+    });
+    return map;
+  }, [cableLines]);
   const stairwellsByEntrance = useMemo(() => {
     const map = new Map();
     stairwells.forEach((row) => {
@@ -605,6 +649,26 @@ export default function ObjectsOverview() {
     });
     return map;
   }, [data.location_systems]);
+  const cableLinesByLocation = useMemo(() => {
+    const map = new Map();
+    cableLines.forEach((line) => {
+      const transitId = Number(line.transit_id || 0);
+      if (!transitId) return;
+      const key = `transit:${transitId}`;
+      const list = map.get(key) || [];
+      list.push(line);
+      map.set(key, list);
+    });
+    map.forEach((list, key) => {
+      map.set(key, [...list].sort((a, b) => (
+        naturalCompare(a.system_name, b.system_name)
+        || naturalCompare(a.category_name, b.category_name)
+        || naturalCompare(a.name, b.name)
+        || (Number(a.id || 0) - Number(b.id || 0))
+      )));
+    });
+    return map;
+  }, [cableLines]);
 
   const entriesBySlot = useMemo(() => {
     const map = new Map();
@@ -643,7 +707,7 @@ export default function ObjectsOverview() {
     data.location_system_equipment,
     data.location_system_works,
   ]);
-  const productionEligibleSlotIds = useMemo(() => {
+  const productionEligibleTargetKeys = useMemo(() => {
     const set = new Set();
     if (!productionMode) return set;
     const targetSystemId = productionMode.materialSystemId;
@@ -651,12 +715,17 @@ export default function ObjectsOverview() {
     data.location_systems.forEach((slot) => {
       if (!idsEqualNullable(slot.system_id, targetSystemId)) return;
       if (!idsEqualNullable(slot.category_id, targetCategoryId)) return;
-      set.add(Number(slot.id));
+      set.add(makeTargetKey('slot', slot.id));
+    });
+    cableLines.forEach((line) => {
+      if (!idsEqualNullable(line.system_id, targetSystemId)) return;
+      if (!idsEqualNullable(line.category_id, targetCategoryId)) return;
+      set.add(makeTargetKey('line', line.id));
     });
     return set;
-  }, [data.location_systems, productionMode]);
+  }, [data.location_systems, cableLines, productionMode]);
 
-  const productionMaterialEntryBySlot = useMemo(() => {
+  const productionMaterialEntryByTarget = useMemo(() => {
     const map = new Map();
     if (!productionMode) return map;
     const materialId = Number(productionMode.materialId || 0);
@@ -667,7 +736,8 @@ export default function ObjectsOverview() {
     const acc = new Map();
     data.location_system_materials.forEach((row) => {
       const slotId = Number(row.location_system_id || 0);
-      if (!productionEligibleSlotIds.has(slotId)) return;
+      const targetKey = makeTargetKey('slot', slotId);
+      if (!productionEligibleTargetKeys.has(targetKey)) return;
       const current = acc.get(slotId) || {
         exactQty: 0,
         fallbackQty: 0,
@@ -692,7 +762,8 @@ export default function ObjectsOverview() {
 
     data.location_system_equipment.forEach((row) => {
       const slotId = Number(row.location_system_id || 0);
-      if (!productionEligibleSlotIds.has(slotId)) return;
+      const targetKey = makeTargetKey('slot', slotId);
+      if (!productionEligibleTargetKeys.has(targetKey)) return;
       if (!materialNameKey) return;
       if (normalizeNameKey(row.name) !== materialNameKey) return;
       const current = acc.get(slotId) || {
@@ -708,7 +779,8 @@ export default function ObjectsOverview() {
 
     data.location_system_works.forEach((row) => {
       const slotId = Number(row.location_system_id || 0);
-      if (!productionEligibleSlotIds.has(slotId)) return;
+      const targetKey = makeTargetKey('slot', slotId);
+      if (!productionEligibleTargetKeys.has(targetKey)) return;
       if (!materialNameKey) return;
       if (normalizeNameKey(row.name) !== materialNameKey) return;
       const current = acc.get(slotId) || {
@@ -729,11 +801,24 @@ export default function ObjectsOverview() {
       else if (value.equipmentQty > 0) quantity = value.equipmentQty;
       else if (value.worksQty > 0) quantity = value.worksQty;
       if (!(quantity > 0)) return;
-      map.set(slotId, {
+      map.set(makeTargetKey('slot', slotId), {
         materialId,
         name: productionMode.materialName || '',
         quantity,
         unit: value.unit || productionMode.unit || '',
+      });
+    });
+
+    cableLines.forEach((line) => {
+      const lineKey = makeTargetKey('line', line.id);
+      if (!productionEligibleTargetKeys.has(lineKey)) return;
+      const lineQty = Number(line.length_m || 0);
+      if (!(lineQty > 0)) return;
+      map.set(lineKey, {
+        materialId,
+        name: line.name || productionMode.materialName || `Линия #${line.id}`,
+        quantity: lineQty,
+        unit: productionMode.unit || 'м',
       });
     });
     return map;
@@ -741,10 +826,11 @@ export default function ObjectsOverview() {
     data.location_system_materials,
     data.location_system_equipment,
     data.location_system_works,
+    cableLines,
     productionMode,
-    productionEligibleSlotIds,
+    productionEligibleTargetKeys,
   ]);
-  const productionEligibleSlotsCount = productionEligibleSlotIds.size;
+  const productionEligibleSlotsCount = productionEligibleTargetKeys.size;
   const isProductionMode = !!productionMode;
 
   const objectOptions = objects;
@@ -799,8 +885,17 @@ export default function ObjectsOverview() {
         });
       }
     });
+    cableLines.forEach((line) => {
+      const key = toNullableFilterKey(line.system_id);
+      if (!map.has(key)) {
+        map.set(key, {
+          id: key,
+          name: String(line.system_name || '').trim() || 'Без системы',
+        });
+      }
+    });
     return [...map.values()].sort((a, b) => naturalCompare(a.name, b.name));
-  }, [data.location_systems]);
+  }, [data.location_systems, cableLines]);
   const categoryOptions = useMemo(() => {
     const map = new Map();
     data.location_systems.forEach((slot) => {
@@ -812,15 +907,25 @@ export default function ObjectsOverview() {
         });
       }
     });
+    cableLines.forEach((line) => {
+      const key = toNullableFilterKey(line.category_id);
+      if (!map.has(key)) {
+        map.set(key, {
+          id: key,
+          name: String(line.category_name || '').trim() || 'Без категории',
+        });
+      }
+    });
     return [...map.values()].sort((a, b) => naturalCompare(a.name, b.name));
-  }, [data.location_systems]);
+  }, [data.location_systems, cableLines]);
   const statusOptions = useMemo(() => {
     const options = blockStatuses.map((status) => ({
       id: String(status.id),
       name: status.name,
       color: status.color || DEFAULT_STATUS_COLOR,
     }));
-    const hasNone = data.location_systems.some((slot) => slot.status_id == null);
+    const hasNone = data.location_systems.some((slot) => slot.status_id == null)
+      || cableLines.some((line) => line.status_id == null);
     if (hasNone) {
       options.push({
         id: 'none',
@@ -829,7 +934,7 @@ export default function ObjectsOverview() {
       });
     }
     return options;
-  }, [blockStatuses, data.location_systems]);
+  }, [blockStatuses, data.location_systems, cableLines]);
 
   const slotLocationMetaById = useMemo(() => {
     const map = new Map();
@@ -879,20 +984,58 @@ export default function ObjectsOverview() {
     entranceById,
   ]);
 
+  const cableLineMetaById = useMemo(() => {
+    const map = new Map();
+    cableLines.forEach((line) => {
+      const lineId = Number(line.id || 0);
+      if (!lineId) return;
+      const transit = transitsById.get(Number(line.transit_id || 0)) || null;
+      if (!transit) return;
+      const entrance = entranceById.get(Number(transit.entrance_id || 0)) || null;
+      const fromFloor = floorById.get(Number(transit.from_floor_id || 0)) || null;
+      const toFloor = floorById.get(Number(transit.to_floor_id || 0)) || null;
+      const fromRankRaw = floorSortRank(fromFloor?.sort_order);
+      const toRankRaw = floorSortRank(toFloor?.sort_order);
+      const fromFloorRank = Math.min(fromRankRaw, toRankRaw);
+      const toFloorRank = Math.max(fromRankRaw, toRankRaw);
+      map.set(lineId, {
+        objectId: entrance ? Number(entrance.object_id || 0) : 0,
+        entranceId: entrance ? Number(entrance.id || 0) : 0,
+        fromFloorRank: Number.isFinite(fromFloorRank) ? fromFloorRank : null,
+        toFloorRank: Number.isFinite(toFloorRank) ? toFloorRank : null,
+      });
+    });
+    return map;
+  }, [cableLines, transitsById, entranceById, floorById]);
+
   const slotFiltersActive = isProductionMode
     || !!selectedSystems.length
     || !!selectedCategories.length
     || !!selectedStatuses.length;
 
   const slotMatchesFilters = useCallback((slot) => {
-    if (isProductionMode && !productionEligibleSlotIds.has(Number(slot.id))) return false;
+    if (isProductionMode && !productionEligibleTargetKeys.has(makeTargetKey('slot', slot.id))) return false;
     if (systemFilterSet.size && !systemFilterSet.has(toNullableFilterKey(slot.system_id))) return false;
     if (categoryFilterSet.size && !categoryFilterSet.has(toNullableFilterKey(slot.category_id))) return false;
     if (statusFilterSet.size && !statusFilterSet.has(toNullableFilterKey(slot.status_id))) return false;
     return true;
   }, [
     isProductionMode,
-    productionEligibleSlotIds,
+    productionEligibleTargetKeys,
+    systemFilterSet,
+    categoryFilterSet,
+    statusFilterSet,
+  ]);
+
+  const cableLineMatchesFilters = useCallback((line) => {
+    if (isProductionMode && !productionEligibleTargetKeys.has(makeTargetKey('line', line.id))) return false;
+    if (systemFilterSet.size && !systemFilterSet.has(toNullableFilterKey(line.system_id))) return false;
+    if (categoryFilterSet.size && !categoryFilterSet.has(toNullableFilterKey(line.category_id))) return false;
+    if (statusFilterSet.size && !statusFilterSet.has(toNullableFilterKey(line.status_id))) return false;
+    return true;
+  }, [
+    isProductionMode,
+    productionEligibleTargetKeys,
     systemFilterSet,
     categoryFilterSet,
     statusFilterSet,
@@ -921,11 +1064,40 @@ export default function ObjectsOverview() {
     return true;
   }, [slotLocationMetaById, objectIdSet, entranceIdSet, floorIdSet, floorById]);
 
-  const hasVisibleLocationSlots = useCallback((locationKind, locationId) => {
+  const cableLineMatchesLayoutFilters = useCallback((line) => {
+    const lineId = Number(line?.id || 0);
+    if (!lineId) return false;
+    const meta = cableLineMetaById.get(lineId);
+    if (!meta) return false;
+    if (objectIdSet.size && !objectIdSet.has(Number(meta.objectId || 0))) return false;
+    if (entranceIdSet.size && !entranceIdSet.has(Number(meta.entranceId || 0))) return false;
+    if (floorIdSet.size) {
+      const matchesRange = [...floorIdSet].some((floorId) => {
+        const floorRow = floorById.get(Number(floorId));
+        if (!floorRow) return false;
+        if (Number(floorRow.entrance_id || 0) !== Number(meta.entranceId || 0)) return false;
+        const rank = floorSortRank(floorRow.sort_order);
+        return rank >= Number(meta.fromFloorRank) && rank <= Number(meta.toFloorRank);
+      });
+      if (!matchesRange) return false;
+    }
+    return true;
+  }, [cableLineMetaById, objectIdSet, entranceIdSet, floorIdSet, floorById]);
+
+  const hasVisibleLocationContent = useCallback((locationKind, locationId) => {
     const slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
-    if (!slots.length) return false;
-    return slots.some((slot) => slotMatchesLayoutFilters(slot) && slotMatchesFilters(slot));
-  }, [slotsByLocation, slotMatchesLayoutFilters, slotMatchesFilters]);
+    const hasVisibleSlots = slots.some((slot) => slotMatchesLayoutFilters(slot) && slotMatchesFilters(slot));
+    if (hasVisibleSlots) return true;
+    const lines = cableLinesByLocation.get(`${locationKind}:${locationId}`) || [];
+    return lines.some((line) => cableLineMatchesLayoutFilters(line) && cableLineMatchesFilters(line));
+  }, [
+    slotsByLocation,
+    cableLinesByLocation,
+    slotMatchesLayoutFilters,
+    slotMatchesFilters,
+    cableLineMatchesLayoutFilters,
+    cableLineMatchesFilters,
+  ]);
 
   const isFloorVisible = useCallback((floorId) => {
     if (floorIdSet.size && !floorIdSet.has(Number(floorId))) return false;
@@ -945,23 +1117,23 @@ export default function ObjectsOverview() {
         return currentRank >= minRank && currentRank <= maxRank;
       };
       const hasTransitBlocks = entranceTransits.some((locationRow) => (
-        locationMatchesFloor(locationRow) && hasVisibleLocationSlots('transit', locationRow.id)
+        locationMatchesFloor(locationRow) && hasVisibleLocationContent('transit', locationRow.id)
       ));
       if (hasTransitBlocks) return true;
       const hasStairwellBlocks = entranceStairwells.some((locationRow) => (
-        locationMatchesFloor(locationRow) && hasVisibleLocationSlots('stairwell', locationRow.id)
+        locationMatchesFloor(locationRow) && hasVisibleLocationContent('stairwell', locationRow.id)
       ));
       if (hasStairwellBlocks) return true;
     }
     const floorApartments = apartmentsByFloor.get(Number(floorId)) || [];
     const floorRoomsBucket = floorApartments.find((apartment) => apartment.name === FLOOR_ROOMS_BUCKET_NAME);
     const floorOnlyRooms = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
-    if (floorOnlyRooms.some((room) => hasVisibleLocationSlots('room', room.id))) return true;
+    if (floorOnlyRooms.some((room) => hasVisibleLocationContent('room', room.id))) return true;
     return floorApartments
       .filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME)
       .some((apartment) => (
-        hasVisibleLocationSlots('apartment', apartment.id)
-        || (roomsByApartment.get(apartment.id) || []).some((room) => hasVisibleLocationSlots('room', room.id))
+        hasVisibleLocationContent('apartment', apartment.id)
+        || (roomsByApartment.get(apartment.id) || []).some((room) => hasVisibleLocationContent('room', room.id))
       ));
   }, [
     floorIdSet,
@@ -971,7 +1143,7 @@ export default function ObjectsOverview() {
     stairwellsByEntrance,
     apartmentsByFloor,
     roomsByApartment,
-    hasVisibleLocationSlots,
+    hasVisibleLocationContent,
   ]);
 
   const filteredObjects = useMemo(() => {
@@ -1115,6 +1287,15 @@ export default function ObjectsOverview() {
     });
     return ids;
   }, [data.location_systems, slotMatchesLayoutFilters, slotMatchesFilters]);
+  const visibleLineIds = useMemo(() => {
+    const ids = new Set();
+    cableLines.forEach((line) => {
+      if (!cableLineMatchesLayoutFilters(line)) return;
+      if (!cableLineMatchesFilters(line)) return;
+      ids.add(Number(line.id));
+    });
+    return ids;
+  }, [cableLines, cableLineMatchesLayoutFilters, cableLineMatchesFilters]);
 
   const needSummaryRows = useMemo(() => {
     const grouped = new Map();
@@ -1141,9 +1322,34 @@ export default function ObjectsOverview() {
       }
       grouped.set(key, existing);
     });
+    cableLines.forEach((line) => {
+      const lineId = Number(line?.id || 0);
+      if (!visibleLineIds.has(lineId)) return;
+      const lineName = String(line?.name || '').trim() || `Линия #${lineId}`;
+      const systemName = String(line?.system_name || '').trim() || 'Без системы';
+      const categoryName = String(line?.category_name || '').trim() || 'Без категории';
+      const key = `line:${normalizeNameKey(lineName)}:${toNullableFilterKey(line?.system_id)}:${toNullableFilterKey(line?.category_id)}`;
+      const existing = grouped.get(key) || {
+        materialId: key,
+        materialName: lineName,
+        materialUnit: 'м',
+        systemName,
+        categoryName,
+        requiredQuantity: 0,
+        producedQuantity: 0,
+      };
+      const quantity = Number(line?.length_m || 0);
+      existing.requiredQuantity += quantity;
+      const lineStatusId = Number(line?.status_id || 0);
+      if (producedStatusIdSet.has(lineStatusId)) {
+        existing.producedQuantity += quantity;
+      }
+      grouped.set(key, existing);
+    });
     return [...grouped.values()]
       .map((row) => {
-        const balances = materialBalanceById.get(Number(row.materialId)) || {
+        const numericMaterialId = Number(row.materialId || 0);
+        const balances = materialBalanceById.get(numericMaterialId) || {
           warehouseQuantity: 0,
           onHandsQuantity: 0,
         };
@@ -1163,7 +1369,15 @@ export default function ObjectsOverview() {
         || naturalCompare(a.categoryName, b.categoryName)
         || naturalCompare(a.materialName, b.materialName)
       ));
-  }, [data.location_system_materials, visibleSlotIds, materialBalanceById, producedStatusIdSet, slotById]);
+  }, [
+    data.location_system_materials,
+    cableLines,
+    visibleSlotIds,
+    visibleLineIds,
+    materialBalanceById,
+    producedStatusIdSet,
+    slotById,
+  ]);
 
   const needSummaryBySystemCategory = useMemo(() => {
     const map = new Map();
@@ -1184,19 +1398,26 @@ export default function ObjectsOverview() {
     ));
   }, [needSummaryRows]);
 
-  const openSlotEditor = (slot) => {
+  const openTargetEditor = (target, targetType = 'slot') => {
     setEditor({
       open: true,
-      slotId: slot.id,
-      statusId: slot.status_id == null ? '' : String(slot.status_id),
-      assigneeId: slot.assigned_user_id == null ? '' : String(slot.assigned_user_id),
+      targetType,
+      targetId: Number(target?.id || 0) || null,
+      statusId: target?.status_id == null ? '' : String(target.status_id),
+      assigneeId: target?.assigned_user_id == null ? '' : String(target.assigned_user_id),
     });
     setEditorError('');
     setEditorProductionMessage('');
   };
 
-  const closeSlotEditor = () => {
-    setEditor({ open: false, slotId: null, statusId: '', assigneeId: '' });
+  const closeTargetEditor = () => {
+    setEditor({
+      open: false,
+      targetType: 'slot',
+      targetId: null,
+      statusId: '',
+      assigneeId: '',
+    });
     setEditorBusy(false);
     setEditorError('');
     setEditorProductionRows([]);
@@ -1206,26 +1427,31 @@ export default function ObjectsOverview() {
     setEditorProductionMessage('');
   };
 
-  const saveSlotEditor = async (event) => {
+  const saveTargetEditor = async (event) => {
     event.preventDefault();
-    if (!editor.slotId) return;
+    if (!editor.targetId) return;
     setEditorBusy(true);
     setEditorError('');
     try {
-      await objectsApi.updateLocationSystemStatusAssignment(editor.slotId, {
+      const payload = {
         status_id: editor.statusId ? Number(editor.statusId) : null,
         assigned_user_id: editor.assigneeId ? Number(editor.assigneeId) : null,
-      });
-      closeSlotEditor();
+      };
+      if (editor.targetType === 'line') {
+        await objectsApi.updateTransitCableLineStatusAssignment(editor.targetId, payload);
+      } else {
+        await objectsApi.updateLocationSystemStatusAssignment(editor.targetId, payload);
+      }
+      closeTargetEditor();
       await load({ silent: true });
     } catch (e) {
-      setEditorError(e.message || 'Не удалось сохранить блок');
+      setEditorError(e.message || 'Не удалось сохранить изменения');
       setEditorBusy(false);
     }
   };
 
-  const loadEditorProduction = useCallback(async (slotId) => {
-    const id = Number(slotId || 0);
+  const loadEditorProduction = useCallback(async ({ targetType, targetId }) => {
+    const id = Number(targetId || 0);
     if (!id) {
       setEditorProductionRows([]);
       return;
@@ -1233,28 +1459,32 @@ export default function ObjectsOverview() {
     setEditorProductionLoading(true);
     setEditorProductionError('');
     try {
-      const rows = await objectsApi.locationSystemProduction(id);
+      const rows = targetType === 'line'
+        ? await objectsApi.transitCableLineProduction(id)
+        : await objectsApi.locationSystemProduction(id);
       setEditorProductionRows(Array.isArray(rows) ? rows : []);
     } catch (e) {
       setEditorProductionRows([]);
-      setEditorProductionError(e.message || 'Не удалось загрузить историю выработки по блоку');
+      setEditorProductionError(e.message || 'Не удалось загрузить историю выработки');
     } finally {
       setEditorProductionLoading(false);
     }
   }, []);
 
   const cancelEditorProduction = useCallback(async (issuanceId) => {
-    const slotId = Number(editor.slotId || 0);
-    if (!slotId) return;
+    const targetId = Number(editor.targetId || 0);
+    if (!targetId) return;
     setEditorProductionBusyIssuanceId(Number(issuanceId) || null);
     setEditorProductionError('');
     setEditorProductionMessage('');
     try {
-      const response = await objectsApi.cancelLocationSystemProduction(slotId, issuanceId);
+      const response = editor.targetType === 'line'
+        ? await objectsApi.cancelTransitCableLineProduction(targetId, issuanceId)
+        : await objectsApi.cancelLocationSystemProduction(targetId, issuanceId);
       const restoredQty = Number(response?.restored_quantity || 0);
       await Promise.all([
         load({ silent: true }),
-        loadEditorProduction(slotId),
+        loadEditorProduction({ targetType: editor.targetType, targetId }),
       ]);
       setEditorProductionMessage(
         `Выработка отменена. Возвращено: ${restoredQty.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}`,
@@ -1264,12 +1494,12 @@ export default function ObjectsOverview() {
     } finally {
       setEditorProductionBusyIssuanceId(null);
     }
-  }, [editor.slotId, load, loadEditorProduction]);
+  }, [editor.targetId, editor.targetType, load, loadEditorProduction]);
 
   useEffect(() => {
-    if (!editor.open || !editor.slotId) return;
-    void loadEditorProduction(editor.slotId);
-  }, [editor.open, editor.slotId, loadEditorProduction]);
+    if (!editor.open || !editor.targetId) return;
+    void loadEditorProduction({ targetType: editor.targetType, targetId: editor.targetId });
+  }, [editor.open, editor.targetId, editor.targetType, loadEditorProduction]);
 
   const productionCommittedRows = useMemo(
     () => Object.values(productionCommitted),
@@ -1302,15 +1532,19 @@ export default function ObjectsOverview() {
     setProductionPicker(null);
   };
 
-  const applyProductionDraft = ({ slotId, statusId, workerUserIds }) => {
-    const materialEntry = productionMaterialEntryBySlot.get(Number(slotId));
+  const applyProductionDraft = ({ targetType, targetId, statusId, workerUserIds }) => {
+    const targetKey = makeTargetKey(targetType, targetId);
+    const materialEntry = productionMaterialEntryByTarget.get(targetKey);
     if (!materialEntry) return;
     const normalizedWorkerIds = normalizeIdList(workerUserIds);
     if (!normalizedWorkerIds.length) return;
     setProductionDrafts((prev) => ({
       ...prev,
-      [slotId]: {
-        locationSystemId: Number(slotId),
+      [targetKey]: {
+        targetType,
+        targetId: Number(targetId),
+        locationSystemId: targetType === 'slot' ? Number(targetId) : null,
+        transitCableLineId: targetType === 'line' ? Number(targetId) : null,
         statusId: Number(statusId),
         workerUserIds: normalizedWorkerIds,
         quantity: Number(materialEntry.quantity || 0),
@@ -1318,18 +1552,19 @@ export default function ObjectsOverview() {
     }));
   };
 
-  const removeProductionDraft = (slotId) => {
+  const removeProductionDraft = (targetKey) => {
     setProductionDrafts((prev) => {
       const next = { ...prev };
-      delete next[slotId];
+      delete next[targetKey];
       return next;
     });
   };
 
-  const openProductionPickerForSlot = (slot) => {
-    const slotId = Number(slot.id);
-    const draft = productionDrafts[slotId] || null;
-    const committed = productionCommitted[slotId] || null;
+  const openProductionPickerForTarget = (target, targetType = 'slot') => {
+    const targetId = Number(target.id || 0);
+    const targetKey = makeTargetKey(targetType, targetId);
+    const draft = productionDrafts[targetKey] || null;
+    const committed = productionCommitted[targetKey] || null;
     const fallbackStatus = productionStatuses[0]?.id || '';
     const fallbackWorkers = normalizeIdList((productionMode?.selectedWorkers || []).map((row) => row.id));
     const pickerWorkerIds = draft
@@ -1338,7 +1573,9 @@ export default function ObjectsOverview() {
         ? normalizeIdList(committed.workerUserIds)
         : fallbackWorkers;
     setProductionPicker({
-      slotId,
+      targetType,
+      targetId,
+      targetKey,
       statusId: draft?.statusId || committed?.statusId || fallbackStatus,
       workerUserIds: pickerWorkerIds,
       canCancelCommitted: !!committed,
@@ -1346,18 +1583,20 @@ export default function ObjectsOverview() {
     });
   };
 
-  const handleProductionSlotClick = (slot) => {
+  const handleProductionTargetClick = (target) => {
+    const targetType = target?._targetType === 'line' ? 'line' : 'slot';
     if (!isProductionMode) {
-      openSlotEditor(slot);
+      openTargetEditor(target, targetType);
       return;
     }
     setProductionError('');
     setProductionMessage('');
-    const slotId = Number(slot.id);
-    const committed = productionCommitted[slotId] || null;
-    const materialEntry = productionMaterialEntryBySlot.get(slotId);
+    const targetId = Number(target.id || 0);
+    const targetKey = makeTargetKey(targetType, targetId);
+    const committed = productionCommitted[targetKey] || null;
+    const materialEntry = productionMaterialEntryByTarget.get(targetKey);
     if (!materialEntry && !committed) {
-      setProductionError('Для этого блока не найдено количество выбранного материала.');
+      setProductionError('Для этой позиции не найдено количество выбранного материала.');
       return;
     }
     if (!productionStatuses.length) {
@@ -1372,19 +1611,19 @@ export default function ObjectsOverview() {
     if (!committed && productionStatuses.length === 1) {
       const statusId = Number(productionStatuses[0].id);
       const workerUserIds = normalizeIdList(workers.map((row) => row.id));
-      const existing = productionDrafts[slotId];
+      const existing = productionDrafts[targetKey];
       if (
         existing
         && Number(existing.statusId) === statusId
         && areSameIdLists(existing.workerUserIds, workerUserIds)
       ) {
-        removeProductionDraft(slotId);
+        removeProductionDraft(targetKey);
       } else {
-        applyProductionDraft({ slotId, statusId, workerUserIds });
+        applyProductionDraft({ targetType, targetId, statusId, workerUserIds });
       }
       return;
     }
-    openProductionPickerForSlot(slot);
+    openProductionPickerForTarget(target, targetType);
   };
 
   const togglePickerWorker = (workerId) => {
@@ -1409,20 +1648,25 @@ export default function ObjectsOverview() {
       return;
     }
     applyProductionDraft({
-      slotId: productionPicker.slotId,
+      targetType: productionPicker.targetType,
+      targetId: productionPicker.targetId,
       statusId: Number(productionPicker.statusId),
       workerUserIds: normalizeIdList(productionPicker.workerUserIds),
     });
     setProductionPicker(null);
   };
 
-  const cancelProductionForSlot = async (slotId) => {
+  const cancelProductionForTarget = async ({ targetType, targetId, targetKey }) => {
     if (!productionMode?.issuanceId) return;
     setProductionBusy(true);
     setProductionError('');
     setProductionMessage('');
     try {
-      const response = await operationsApi.cancelProductionDistribution(productionMode.issuanceId, slotId);
+      const response = await operationsApi.cancelProductionDistribution(productionMode.issuanceId, (
+        targetType === 'line'
+          ? { transit_cable_line_id: Number(targetId) }
+          : { location_system_id: Number(targetId) }
+      ));
       const restoredQty = Number(response?.restored_quantity || 0);
       setProductionMode((prev) => (
         prev
@@ -1436,11 +1680,11 @@ export default function ObjectsOverview() {
         load({ silent: true }),
         loadProductionCommitted(productionMode.issuanceId),
       ]);
-      removeProductionDraft(slotId);
-      setProductionMessage('Выработка по блоку отменена. Количество возвращено во вкладку «Выдача».');
+      removeProductionDraft(targetKey);
+      setProductionMessage('Выработка по позиции отменена. Количество возвращено во вкладку «Выдача».');
       setProductionPicker(null);
     } catch (e) {
-      setProductionError(e.message || 'Не удалось отменить выработку по блоку');
+      setProductionError(e.message || 'Не удалось отменить выработку по позиции');
     } finally {
       setProductionBusy(false);
     }
@@ -1449,7 +1693,7 @@ export default function ObjectsOverview() {
   const saveProductionDistribution = async () => {
     if (!productionMode?.issuanceId) return;
     if (!productionDraftRows.length) {
-      setProductionError('Выберите хотя бы один блок для сохранения выработки.');
+      setProductionError('Выберите хотя бы одну позицию для сохранения выработки.');
       return;
     }
     if (plannedProductionQty > Number(productionMode.availableQty || 0) + 1e-9) {
@@ -1463,6 +1707,7 @@ export default function ObjectsOverview() {
       const response = await operationsApi.distributeProduction(productionMode.issuanceId, {
         assignments: productionDraftRows.map((row) => ({
           location_system_id: row.locationSystemId,
+          transit_cable_line_id: row.transitCableLineId,
           worker_user_ids: normalizeIdList(row.workerUserIds),
           status_id: row.statusId,
         })),
@@ -1480,7 +1725,7 @@ export default function ObjectsOverview() {
         load({ silent: true }),
         loadProductionCommitted(productionMode.issuanceId),
       ]);
-      setProductionMessage('Выработка сохранена и добавлена в блоки.');
+      setProductionMessage('Выработка сохранена и добавлена в позиции.');
     } catch (e) {
       setProductionError(e.message || 'Не удалось сохранить выработку');
     } finally {
@@ -1491,10 +1736,34 @@ export default function ObjectsOverview() {
   const renderLocationBlocks = (locationKind, locationId, { compact = false } = {}) => {
     let slots = slotsByLocation.get(`${locationKind}:${locationId}`) || [];
     slots = slots.filter((slot) => slotMatchesFilters(slot));
-    if (!slots.length) return null;
-    const groupedBySystem = slots.reduce((acc, slot) => {
-      const systemName = String(slot.system_name || '').trim() || 'Без системы';
-      const systemKey = `${String(slot.system_id || 'none')}::${systemName.toLowerCase()}`;
+    let lines = cableLinesByLocation.get(`${locationKind}:${locationId}`) || [];
+    lines = lines.filter((line) => cableLineMatchesFilters(line));
+
+    const entities = [
+      ...slots.map((slot) => ({
+        ...slot,
+        _targetType: 'slot',
+        _targetKey: makeTargetKey('slot', slot.id),
+        _entries: entriesBySlot.get(slot.id) || [],
+      })),
+      ...lines.map((line) => ({
+        ...line,
+        _targetType: 'line',
+        _targetKey: makeTargetKey('line', line.id),
+        _entries: [
+          {
+            name: line.name || `Линия #${line.id}`,
+            quantity: Number(line.length_m || 0),
+            unit: 'м',
+          },
+        ],
+      })),
+    ];
+
+    if (!entities.length) return null;
+    const groupedBySystem = entities.reduce((acc, entity) => {
+      const systemName = String(entity.system_name || '').trim() || 'Без системы';
+      const systemKey = `${String(entity.system_id || 'none')}::${systemName.toLowerCase()}`;
       if (!acc.has(systemKey)) {
         acc.set(systemKey, {
           key: systemKey,
@@ -1503,16 +1772,16 @@ export default function ObjectsOverview() {
         });
       }
       const systemBucket = acc.get(systemKey);
-      const categoryName = String(slot.category_name || '').trim() || 'Без категории';
-      const categoryKey = `${String(slot.category_id || 'none')}::${categoryName.toLowerCase()}`;
+      const categoryName = String(entity.category_name || '').trim() || 'Без категории';
+      const categoryKey = `${String(entity.category_id || 'none')}::${categoryName.toLowerCase()}`;
       if (!systemBucket.categories.has(categoryKey)) {
         systemBucket.categories.set(categoryKey, {
           key: categoryKey,
           categoryName,
-          slots: [],
+          entities: [],
         });
       }
-      systemBucket.categories.get(categoryKey).slots.push(slot);
+      systemBucket.categories.get(categoryKey).entities.push(entity);
       return acc;
     }, new Map());
 
@@ -1522,7 +1791,10 @@ export default function ObjectsOverview() {
         categories: [...systemRow.categories.values()]
           .map((categoryRow) => ({
             ...categoryRow,
-            slots: [...categoryRow.slots].sort((a, b) => Number(a.id || 0) - Number(b.id || 0)),
+            entities: [...categoryRow.entities].sort((a, b) => {
+              if (a._targetType !== b._targetType) return naturalCompare(a._targetType, b._targetType);
+              return Number(a.id || 0) - Number(b.id || 0);
+            }),
           }))
           .sort((a, b) => naturalCompare(a.categoryName, b.categoryName)),
       }))
@@ -1544,28 +1816,32 @@ export default function ObjectsOverview() {
                 >
                   <p className={`${compact ? 'text-[7px]' : 'text-[8px]'} text-zinc-400 truncate`}>{categoryRow.categoryName}</p>
                   <div className={`flex flex-wrap items-start w-fit max-w-full ${compact ? 'gap-0.5' : 'gap-1'}`}>
-                    {categoryRow.slots.map((slot) => {
-                      const entries = entriesBySlot.get(slot.id) || [];
-                      const draft = productionDrafts[slot.id] || null;
-                      const committed = productionCommitted[slot.id] || null;
+                    {categoryRow.entities.map((entity) => {
+                      const targetKey = entity._targetKey;
+                      const draft = productionDrafts[targetKey] || null;
+                      const committed = productionCommitted[targetKey] || null;
                       const activeStatusId = draft?.statusId ?? committed?.statusId ?? null;
                       const activeStatus = activeStatusId == null ? null : productionStatusById.get(Number(activeStatusId));
                       const activeWorkerNames = draft
                         ? normalizeIdList(draft.workerUserIds).map((id) => productionWorkersById.get(id) || `#${id}`).filter(Boolean)
                         : (committed?.workerNames || []);
                       const activeStatusName = activeStatus?.name || committed?.statusName || '';
-                      const hasMaterialQty = productionMaterialEntryBySlot.has(Number(slot.id));
+                      const hasMaterialQty = productionMaterialEntryByTarget.has(targetKey);
                       const selectionCaption = draft
                         ? [...activeWorkerNames, activeStatusName, 'черновик'].filter(Boolean).join(' · ')
                         : committed
                           ? [...activeWorkerNames, activeStatusName, 'выполнено'].filter(Boolean).join(' · ')
                           : (isProductionMode && !hasMaterialQty ? 'Нет количества материала' : '');
+                      const slotPayload = {
+                        ...entity,
+                        _targetType: entity._targetType,
+                      };
                       return (
                         <LocationSlotChip
-                          key={slot.id}
-                          slot={slot}
-                          entries={entries}
-                          onOpen={handleProductionSlotClick}
+                          key={targetKey}
+                          slot={slotPayload}
+                          entries={entity._entries}
+                          onOpen={handleProductionTargetClick}
                           selected={!!draft || !!committed}
                           selectionCaption={selectionCaption}
                           selectionColor={activeStatus?.color || ''}
@@ -1597,6 +1873,20 @@ export default function ObjectsOverview() {
           key,
           name: knownStatus?.name || slot.status_name || 'Без статуса',
           color: knownStatus?.color || slot.status_color || DEFAULT_STATUS_COLOR,
+          count: 0,
+        };
+        row.count += 1;
+        statusCounts.set(key, row);
+      });
+      const lines = cableLinesByLocation.get(`${locationKind}:${locationId}`) || [];
+      lines.forEach((line) => {
+        if (!cableLineMatchesFilters(line)) return;
+        const key = line.status_id == null ? 'none' : String(line.status_id);
+        const knownStatus = line.status_id == null ? null : statusesById.get(key);
+        const row = statusCounts.get(key) || {
+          key,
+          name: knownStatus?.name || line.status_name || 'Без статуса',
+          color: knownStatus?.color || line.status_color || DEFAULT_STATUS_COLOR,
           count: 0,
         };
         row.count += 1;
@@ -1660,12 +1950,12 @@ export default function ObjectsOverview() {
     const regularApartmentsRaw = floorApartments.filter((apartment) => apartment.name !== FLOOR_ROOMS_BUCKET_NAME);
     const floorOnlyRoomsRaw = floorRoomsBucket ? (roomsByApartment.get(floorRoomsBucket.id) || []) : [];
     const floorOnlyRooms = slotFiltersActive
-      ? floorOnlyRoomsRaw.filter((room) => hasVisibleLocationSlots('room', room.id))
+      ? floorOnlyRoomsRaw.filter((room) => hasVisibleLocationContent('room', room.id))
       : floorOnlyRoomsRaw;
     const regularApartments = slotFiltersActive
       ? regularApartmentsRaw.filter((apartment) => (
-        hasVisibleLocationSlots('apartment', apartment.id)
-          || (roomsByApartment.get(apartment.id) || []).some((room) => hasVisibleLocationSlots('room', room.id))
+        hasVisibleLocationContent('apartment', apartment.id)
+          || (roomsByApartment.get(apartment.id) || []).some((room) => hasVisibleLocationContent('room', room.id))
       ))
       : regularApartmentsRaw;
     const floorStatusStats = getFloorStatusStats(
@@ -1750,7 +2040,7 @@ export default function ObjectsOverview() {
                   {!apartmentsSectionCollapsed && regularApartments.map((apartment) => {
                     const apartmentRoomsRaw = roomsByApartment.get(apartment.id) || [];
                     const apartmentRooms = slotFiltersActive
-                      ? apartmentRoomsRaw.filter((room) => hasVisibleLocationSlots('room', room.id))
+                      ? apartmentRoomsRaw.filter((room) => hasVisibleLocationContent('room', room.id))
                       : apartmentRoomsRaw;
                     return (
                       <div key={apartment.id} className="rounded border border-white/10 bg-zinc-950/60 px-2 py-1.5 space-y-1">
@@ -1784,7 +2074,7 @@ export default function ObjectsOverview() {
     if (isProductionMode && productionEligibleSlotsCount === 0) {
       return (
         <p className="text-zinc-500 text-sm py-4">
-          Для выбранного материала не найдено блоков с такой системой и категорией.
+          Для выбранного материала не найдено позиций с такой системой и категорией.
         </p>
       );
     }
@@ -1904,7 +2194,7 @@ export default function ObjectsOverview() {
                         };
                       })
                       .filter(Boolean)
-                      .filter((row) => (!slotFiltersActive || hasVisibleLocationSlots(row._kind, row.id)));
+                      .filter((row) => (!slotFiltersActive || hasVisibleLocationContent(row._kind, row.id)));
                     const entranceCounts = entranceFloors.reduce((acc, floor) => {
                       const floorCounts = getFloorCounts(floor.id);
                       acc.apartmentsCount += floorCounts.apartmentsCount;
@@ -1950,11 +2240,13 @@ export default function ObjectsOverview() {
                                 const subtitle = `Этаж ${locationRow.from_floor_name}–${locationRow.to_floor_name}`;
                                 const blocks = renderLocationBlocks(locationRow._kind, locationRow.id, { compact: true });
                                 const hasSlots = (slotsByLocation.get(`${locationRow._kind}:${locationRow.id}`) || []).length > 0;
+                                const hasLines = (cableLinesByLocation.get(`${locationRow._kind}:${locationRow.id}`) || []).length > 0;
+                                const hasContent = hasSlots || hasLines;
                                 return (
                                   <div
                                     key={`${locationRow._kind}:${locationRow.id}`}
                                     className={`rounded-lg border px-1 py-1 space-y-1 shadow-[0_6px_14px_rgba(0,0,0,0.22)] ${
-                                      hasSlots
+                                      hasContent
                                         ? 'border-cyan-400/25 bg-gradient-to-b from-cyan-950/25 to-zinc-950/60'
                                         : 'border-white/10 bg-black/10'
                                     }`}
@@ -2012,7 +2304,11 @@ export default function ObjectsOverview() {
     );
   };
 
-  const activeSlot = editor.slotId ? slotById.get(editor.slotId) : null;
+  const activeTarget = useMemo(() => {
+    if (!editor.targetId) return null;
+    if (editor.targetType === 'line') return cableLineById.get(Number(editor.targetId)) || null;
+    return slotById.get(Number(editor.targetId)) || null;
+  }, [editor.targetType, editor.targetId, cableLineById, slotById]);
 
   return (
     <div className="space-y-4">
@@ -2020,11 +2316,11 @@ export default function ObjectsOverview() {
         <h2 className="page-title">Объекты</h2>
         {isProductionMode ? (
           <p className="text-zinc-300 text-xs mt-1 leading-relaxed">
-            Режим выработки: выберите блоки с материалом и назначьте сотрудника + статус для выработки, затем нажмите «Сохранить».
+            Режим выработки: выберите позиции (блоки и линии) с материалом и назначьте сотрудника + статус для выработки, затем нажмите «Сохранить».
           </p>
         ) : (
           <p className="text-zinc-400 text-xs mt-1 leading-relaxed">
-            Блоки сгруппированы как в настройках объектов (Система → Категория). Клик по блоку открывает выбор статуса и исполнителя.
+            Позиции сгруппированы как в настройках объектов (Система → Категория). Клик по позиции открывает выбор статуса и исполнителя.
           </p>
         )}
       </div>
@@ -2077,7 +2373,7 @@ export default function ObjectsOverview() {
       <div className="rounded-2xl border border-white/10 bg-zinc-900/65 p-3 space-y-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.22)]">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-zinc-300 text-xs font-semibold tracking-wide">
-            Фильтры по объектам, этажам и блокам
+            Фильтры по объектам, этажам и позициям
           </p>
           <button
             type="button"
@@ -2355,11 +2651,11 @@ export default function ObjectsOverview() {
           <div className="card p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-white font-medium text-lg">Параметры выработки</h3>
             <p className="text-zinc-400 text-xs mt-1">
-              Блок #{productionPicker.slotId}
+              {productionPicker.targetType === 'line' ? 'Линия' : 'Блок'} #{productionPicker.targetId}
             </p>
             {productionPicker.canCancelCommitted && (
               <p className="text-amber-300 text-2xs mt-1">
-                В блоке уже проведена выработка: {Number(productionPicker.committedQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {productionMode?.unit || 'шт'}
+                Уже проведена выработка: {Number(productionPicker.committedQuantity || 0).toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {productionMode?.unit || 'шт'}
               </p>
             )}
             <div className="space-y-3 mt-4">
@@ -2409,10 +2705,14 @@ export default function ObjectsOverview() {
                   className="btn-ghost text-rose-300"
                   onClick={() => {
                     if (productionPicker.canCancelCommitted) {
-                      void cancelProductionForSlot(productionPicker.slotId);
+                      void cancelProductionForTarget({
+                        targetType: productionPicker.targetType,
+                        targetId: productionPicker.targetId,
+                        targetKey: productionPicker.targetKey,
+                      });
                       return;
                     }
-                    removeProductionDraft(productionPicker.slotId);
+                    removeProductionDraft(productionPicker.targetKey);
                     setProductionPicker(null);
                   }}
                 >
@@ -2432,17 +2732,19 @@ export default function ObjectsOverview() {
         </div>
       )}
 
-      {editor.open && activeSlot && (
-        <div className="modal-backdrop z-50" onClick={closeSlotEditor} role="dialog" aria-modal="true">
+      {editor.open && activeTarget && (
+        <div className="modal-backdrop z-50" onClick={closeTargetEditor} role="dialog" aria-modal="true">
           <div className="card p-5 max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-white font-medium text-lg">Статус блока</h3>
+            <h3 className="text-white font-medium text-lg">
+              {editor.targetType === 'line' ? 'Статус линии' : 'Статус блока'}
+            </h3>
             <p className="text-zinc-400 text-sm mt-1">
-              {activeSlot.system_name || 'Без системы'}
-              {activeSlot.category_name ? ` · ${activeSlot.category_name}` : ''}
+              {activeTarget.system_name || 'Без системы'}
+              {activeTarget.category_name ? ` · ${activeTarget.category_name}` : ''}
             </p>
             {editorError && <p className="text-rose-400 text-sm mt-3">{editorError}</p>}
             <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3 space-y-2">
-              <p className="text-zinc-200 text-xs font-semibold">Проведенная выработка по блоку</p>
+              <p className="text-zinc-200 text-xs font-semibold">Проведенная выработка по позиции</p>
               {editorProductionLoading ? (
                 <p className="text-zinc-500 text-2xs">Загрузка…</p>
               ) : editorProductionRows.length ? (
@@ -2476,12 +2778,12 @@ export default function ObjectsOverview() {
                   ))}
                 </div>
               ) : (
-                <p className="text-zinc-500 text-2xs">По этому блоку проведенной выработки нет.</p>
+                <p className="text-zinc-500 text-2xs">По этой позиции проведенной выработки нет.</p>
               )}
               {editorProductionError && <p className="text-rose-400 text-2xs">{editorProductionError}</p>}
               {editorProductionMessage && <p className="text-emerald-300 text-2xs">{editorProductionMessage}</p>}
             </div>
-            <form className="space-y-3 mt-4" onSubmit={saveSlotEditor}>
+            <form className="space-y-3 mt-4" onSubmit={saveTargetEditor}>
               <div>
                 <label className="label">Статус</label>
                 <select
@@ -2529,7 +2831,7 @@ export default function ObjectsOverview() {
                 </div>
               )}
               <div className="flex justify-end gap-2 pt-1">
-                <button type="button" className="btn-secondary text-sm" onClick={closeSlotEditor} disabled={editorBusy}>
+                <button type="button" className="btn-secondary text-sm" onClick={closeTargetEditor} disabled={editorBusy}>
                   Отмена
                 </button>
                 <button type="submit" className="btn-primary text-sm" disabled={editorBusy}>

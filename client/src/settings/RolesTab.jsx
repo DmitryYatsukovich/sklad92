@@ -121,6 +121,10 @@ export default function RolesTab() {
       if (key === 'can_tools' && !value) {
         next.can_tools_delete = false;
       }
+      if (key === 'can_settings_work' && value) {
+        // Рабочие настройки предполагают доступ к вкладке «Объекты».
+        next.can_objects = true;
+      }
       if (key === 'can_face' && !value) {
         next.can_face_all = false;
         next.can_face_same_org = false;

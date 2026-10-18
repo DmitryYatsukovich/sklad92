@@ -39,6 +39,7 @@ async function ensureObjectStatusSchema() {
           entrance_id INTEGER NOT NULL REFERENCES work_entrances(id) ON DELETE RESTRICT,
           from_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
           to_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+          sort_order INTEGER NOT NULL DEFAULT 0,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           UNIQUE (entrance_id, name)
         )`,
@@ -51,18 +52,38 @@ async function ensureObjectStatusSchema() {
           entrance_id INTEGER NOT NULL REFERENCES work_entrances(id) ON DELETE RESTRICT,
           from_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
           to_floor_id INTEGER NOT NULL REFERENCES work_floors(id) ON DELETE RESTRICT,
+          sort_order INTEGER NOT NULL DEFAULT 0,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           UNIQUE (entrance_id, name)
         )`,
       );
+      await pool.query('ALTER TABLE work_transits ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0');
+      await pool.query('ALTER TABLE work_stairwells ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_object ON work_transits(object_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_entrance ON work_transits(entrance_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_sort_order ON work_transits(entrance_id, sort_order)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_from_floor ON work_transits(from_floor_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transits_to_floor ON work_transits(to_floor_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_object ON work_stairwells(object_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_entrance ON work_stairwells(entrance_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_sort_order ON work_stairwells(entrance_id, sort_order)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_from_floor ON work_stairwells(from_floor_id)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_work_stairwells_to_floor ON work_stairwells(to_floor_id)');
+      await pool.query(
+        `CREATE TABLE IF NOT EXISTS work_transit_cable_lines (
+          id SERIAL PRIMARY KEY,
+          transit_id INTEGER REFERENCES work_transits(id) ON DELETE CASCADE,
+          from_location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE CASCADE,
+          to_location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE CASCADE,
+          system_id INTEGER REFERENCES material_systems(id) ON DELETE SET NULL,
+          category_id INTEGER REFERENCES material_categories(id) ON DELETE SET NULL,
+          name VARCHAR(200) NOT NULL,
+          length_m NUMERIC(12,3) NOT NULL CHECK (length_m > 0),
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW(),
+          CHECK (from_location_system_id <> to_location_system_id)
+        )`,
+      );
       await pool.query(
         `CREATE TABLE IF NOT EXISTS work_block_statuses (
           id SERIAL PRIMARY KEY,
@@ -105,7 +126,8 @@ async function ensureObjectStatusSchema() {
         `CREATE TABLE IF NOT EXISTS issuance_production_allocations (
           id SERIAL PRIMARY KEY,
           issuance_id INTEGER NOT NULL REFERENCES issuances(id) ON DELETE CASCADE,
-          location_system_id INTEGER NOT NULL REFERENCES work_location_systems(id) ON DELETE RESTRICT,
+          location_system_id INTEGER REFERENCES work_location_systems(id) ON DELETE RESTRICT,
+          transit_cable_line_id INTEGER REFERENCES work_transit_cable_lines(id) ON DELETE RESTRICT,
           worker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
           status_id INTEGER REFERENCES work_block_statuses(id) ON DELETE SET NULL,
           quantity DECIMAL(18,4) NOT NULL DEFAULT 0,
@@ -115,11 +137,41 @@ async function ensureObjectStatusSchema() {
         )`,
       );
       await pool.query(
+        'ALTER TABLE issuance_production_allocations ADD COLUMN IF NOT EXISTS transit_cable_line_id INTEGER REFERENCES work_transit_cable_lines(id) ON DELETE RESTRICT',
+      );
+      await pool.query(
+        'ALTER TABLE issuance_production_allocations ALTER COLUMN location_system_id DROP NOT NULL',
+      );
+      await pool.query(
+        'ALTER TABLE issuance_production_allocations DROP CONSTRAINT IF EXISTS issuance_production_allocations_target_check',
+      );
+      await pool.query(
+        `ALTER TABLE issuance_production_allocations
+         ADD CONSTRAINT issuance_production_allocations_target_check
+         CHECK (
+           (location_system_id IS NOT NULL AND transit_cable_line_id IS NULL)
+           OR (location_system_id IS NULL AND transit_cable_line_id IS NOT NULL)
+         )`,
+      );
+      await pool.query(
         'CREATE INDEX IF NOT EXISTS idx_ipa_issuance ON issuance_production_allocations(issuance_id, created_at DESC)',
       );
       await pool.query(
         'CREATE INDEX IF NOT EXISTS idx_ipa_location_system ON issuance_production_allocations(location_system_id, created_at DESC)',
       );
+      await pool.query(
+        'CREATE INDEX IF NOT EXISTS idx_ipa_transit_cable_line ON issuance_production_allocations(transit_cable_line_id, created_at DESC)',
+      );
+      await pool.query(
+        `ALTER TABLE work_transit_cable_lines
+         ADD COLUMN IF NOT EXISTS status_id INTEGER REFERENCES work_block_statuses(id) ON DELETE SET NULL`,
+      );
+      await pool.query(
+        `ALTER TABLE work_transit_cable_lines
+         ADD COLUMN IF NOT EXISTS assigned_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`,
+      );
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_status ON work_transit_cable_lines(status_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_work_transit_cable_lines_assigned_user ON work_transit_cable_lines(assigned_user_id)');
     })().catch((error) => {
       ensureObjectStatusSchemaPromise = null;
       throw error;
@@ -143,6 +195,7 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
       locationSystemMaterials,
       locationSystemEquipment,
       locationSystemWorks,
+      transitCableLines,
       materialBalances,
       blockStatuses,
       assignableUsers,
@@ -190,24 +243,26 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
       pool.query(
         `SELECT t.id, t.name, t.object_id, o.name AS object_name, t.entrance_id, e.name AS entrance_name,
                 t.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
-                t.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order
+                t.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order,
+                t.sort_order
          FROM work_transits t
          JOIN work_entrances e ON e.id = t.entrance_id
          JOIN work_floors ff ON ff.id = t.from_floor_id
          JOIN work_floors tf ON tf.id = t.to_floor_id
          LEFT JOIN warehouse_objects o ON o.id = t.object_id
-         ORDER BY o.name NULLS LAST, e.name, COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), t.name`,
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(t.sort_order, 2147483647), COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), t.name`,
       ),
       pool.query(
         `SELECT s.id, s.name, s.object_id, o.name AS object_name, s.entrance_id, e.name AS entrance_name,
                 s.from_floor_id, ff.name AS from_floor_name, ff.sort_order AS from_floor_sort_order,
-                s.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order
+                s.to_floor_id, tf.name AS to_floor_name, tf.sort_order AS to_floor_sort_order,
+                s.sort_order
          FROM work_stairwells s
          JOIN work_entrances e ON e.id = s.entrance_id
          JOIN work_floors ff ON ff.id = s.from_floor_id
          JOIN work_floors tf ON tf.id = s.to_floor_id
          LEFT JOIN warehouse_objects o ON o.id = s.object_id
-         ORDER BY o.name NULLS LAST, e.name, COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), s.name`,
+         ORDER BY o.name NULLS LAST, e.name, COALESCE(s.sort_order, 2147483647), COALESCE(ff.sort_order, 2147483647), COALESCE(tf.sort_order, 2147483647), s.name`,
       ),
       pool.query(
         `SELECT ls.id, ls.location_kind, ls.location_id, ls.system_id, ls.category_id, ls.status_id, ls.assigned_user_id, ls.created_at, ls.updated_at,
@@ -243,6 +298,22 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
         `SELECT id, location_system_id, name, quantity, created_at, updated_at
          FROM work_location_system_works
          ORDER BY location_system_id, name, id`,
+      ),
+      pool.query(
+        `SELECT l.id, l.transit_id, l.from_location_system_id, l.to_location_system_id,
+                l.system_id, l.category_id, l.status_id, l.assigned_user_id,
+                l.name, l.length_m, l.created_at, l.updated_at,
+                s.name AS system_name,
+                c.name AS category_name,
+                bs.name AS status_name, bs.color AS status_color,
+                COALESCE(NULLIF(TRIM(u.display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.login) AS assigned_user_name,
+                u.login AS assigned_user_login
+         FROM work_transit_cable_lines l
+         LEFT JOIN material_systems s ON s.id = l.system_id
+         LEFT JOIN material_categories c ON c.id = l.category_id
+         LEFT JOIN work_block_statuses bs ON bs.id = l.status_id
+         LEFT JOIN users u ON u.id = l.assigned_user_id
+         ORDER BY l.transit_id, l.id`,
       ),
       pool.query(
         `WITH produced_by_issuance AS (
@@ -298,6 +369,7 @@ router.get('/hierarchy', requirePermission('can_objects'), async (_req, res) => 
       location_system_materials: locationSystemMaterials.rows,
       location_system_equipment: locationSystemEquipment.rows,
       location_system_works: locationSystemWorks.rows,
+      transit_cable_lines: transitCableLines.rows,
       material_balances: materialBalances.rows,
       block_statuses: blockStatuses.rows,
       assignable_users: assignableUsers.rows,
@@ -375,6 +447,77 @@ router.put('/location-systems/:id/status-assignment', requirePermission('can_obj
   res.json(updated);
 });
 
+router.put('/cable-lines/:id/status-assignment', requirePermission('can_objects'), async (req, res) => {
+  await ensureObjectStatusSchema();
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Неверный id линии' });
+
+  const hasStatus = Object.prototype.hasOwnProperty.call(req.body || {}, 'status_id');
+  const hasAssignee = Object.prototype.hasOwnProperty.call(req.body || {}, 'assigned_user_id');
+  if (!hasStatus && !hasAssignee) {
+    return res.status(400).json({ error: 'Нет данных для обновления' });
+  }
+
+  const line = (await pool.query(
+    'SELECT id, status_id, assigned_user_id FROM work_transit_cable_lines WHERE id = $1',
+    [id],
+  )).rows[0];
+  if (!line) return res.status(404).json({ error: 'Линия не найдена' });
+
+  let nextStatusId = line.status_id;
+  if (hasStatus) {
+    if (req.body?.status_id == null || req.body?.status_id === '') {
+      nextStatusId = null;
+    } else {
+      const parsedStatusId = parseId(req.body?.status_id);
+      if (!parsedStatusId) return res.status(400).json({ error: 'Неверный статус' });
+      const statusExists = (await pool.query('SELECT id FROM work_block_statuses WHERE id = $1', [parsedStatusId])).rows[0];
+      if (!statusExists) return res.status(400).json({ error: 'Статус не найден' });
+      nextStatusId = parsedStatusId;
+    }
+  }
+
+  let nextAssignedUserId = line.assigned_user_id;
+  if (hasAssignee) {
+    if (req.body?.assigned_user_id == null || req.body?.assigned_user_id === '') {
+      nextAssignedUserId = null;
+    } else {
+      const parsedAssigneeId = parseId(req.body?.assigned_user_id);
+      if (!parsedAssigneeId) return res.status(400).json({ error: 'Неверный исполнитель' });
+      const assigneeExists = (await pool.query('SELECT id FROM users WHERE id = $1', [parsedAssigneeId])).rows[0];
+      if (!assigneeExists) return res.status(400).json({ error: 'Исполнитель не найден' });
+      nextAssignedUserId = parsedAssigneeId;
+    }
+  }
+
+  await pool.query(
+    `UPDATE work_transit_cable_lines
+     SET status_id = $1,
+         assigned_user_id = $2,
+         updated_at = NOW()
+     WHERE id = $3`,
+    [nextStatusId, nextAssignedUserId, id],
+  );
+
+  const updated = (await pool.query(
+    `SELECT l.id, l.transit_id, l.from_location_system_id, l.to_location_system_id,
+            l.system_id, l.category_id, l.status_id, l.assigned_user_id, l.name, l.length_m, l.created_at, l.updated_at,
+            s.name AS system_name,
+            c.name AS category_name,
+            bs.name AS status_name, bs.color AS status_color,
+            COALESCE(NULLIF(TRIM(u.display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.login) AS assigned_user_name,
+            u.login AS assigned_user_login
+     FROM work_transit_cable_lines l
+     LEFT JOIN material_systems s ON s.id = l.system_id
+     LEFT JOIN material_categories c ON c.id = l.category_id
+     LEFT JOIN work_block_statuses bs ON bs.id = l.status_id
+     LEFT JOIN users u ON u.id = l.assigned_user_id
+     WHERE l.id = $1`,
+    [id],
+  )).rows[0];
+  res.json(updated);
+});
+
 router.get('/location-systems/:id/production', requirePermission('can_objects'), async (req, res) => {
   await ensureObjectStatusSchema();
   const slotId = parseId(req.params.id);
@@ -405,6 +548,54 @@ router.get('/location-systems/:id/production', requirePermission('can_objects'),
      GROUP BY ipa.issuance_id, m.id, m.name, m.code, m.unit
      ORDER BY MAX(ipa.created_at) DESC, ipa.issuance_id DESC`,
     [slotId],
+  )).rows.map((row) => ({
+    issuance_id: Number(row.issuance_id),
+    last_created_at: row.last_created_at,
+    quantity: Number(row.quantity || 0),
+    worker_user_ids: Array.isArray(row.worker_user_ids) ? row.worker_user_ids.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0) : [],
+    worker_names: Array.isArray(row.worker_names) ? row.worker_names.filter(Boolean) : [],
+    status_ids: Array.isArray(row.status_ids) ? row.status_ids.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0) : [],
+    status_names: Array.isArray(row.status_names) ? row.status_names.filter(Boolean) : [],
+    status_colors: Array.isArray(row.status_colors) ? row.status_colors.filter(Boolean) : [],
+    material_id: Number(row.material_id),
+    material_name: row.material_name || '',
+    material_code: row.material_code || '',
+    material_unit: row.material_unit || '',
+  }));
+
+  res.json(rows);
+});
+
+router.get('/cable-lines/:id/production', requirePermission('can_objects'), async (req, res) => {
+  await ensureObjectStatusSchema();
+  const lineId = parseId(req.params.id);
+  if (!lineId) return res.status(400).json({ error: 'Неверный id линии' });
+
+  const line = (await pool.query('SELECT id FROM work_transit_cable_lines WHERE id = $1', [lineId])).rows[0];
+  if (!line) return res.status(404).json({ error: 'Линия не найдена' });
+
+  const rows = (await pool.query(
+    `SELECT ipa.issuance_id,
+            MAX(ipa.created_at) AS last_created_at,
+            COALESCE(SUM(ipa.quantity), 0)::numeric AS quantity,
+            ARRAY_AGG(DISTINCT ipa.worker_user_id) AS worker_user_ids,
+            ARRAY_AGG(DISTINCT COALESCE(NULLIF(TRIM(u.display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.login)) AS worker_names,
+            ARRAY_AGG(DISTINCT ipa.status_id) FILTER (WHERE ipa.status_id IS NOT NULL) AS status_ids,
+            ARRAY_AGG(DISTINCT bs.name) FILTER (WHERE bs.name IS NOT NULL) AS status_names,
+            ARRAY_AGG(DISTINCT bs.color) FILTER (WHERE bs.color IS NOT NULL) AS status_colors,
+            m.id AS material_id,
+            m.name AS material_name,
+            m.code AS material_code,
+            m.unit AS material_unit
+     FROM issuance_production_allocations ipa
+     JOIN issuances i ON i.id = ipa.issuance_id
+     JOIN materials m ON m.id = i.material_id
+     LEFT JOIN users u ON u.id = ipa.worker_user_id
+     LEFT JOIN work_block_statuses bs ON bs.id = ipa.status_id
+     WHERE ipa.transit_cable_line_id = $1
+     GROUP BY ipa.issuance_id, m.id, m.name, m.code, m.unit
+     ORDER BY MAX(ipa.created_at) DESC, ipa.issuance_id DESC`,
+    [lineId],
   )).rows.map((row) => ({
     issuance_id: Number(row.issuance_id),
     last_created_at: row.last_created_at,
@@ -530,6 +721,118 @@ router.delete('/location-systems/:id/production', requirePermission('can_objects
     await client.query('ROLLBACK').catch(() => {});
     console.error('DELETE /objects/location-systems/:id/production:', e.message);
     res.status(500).json({ error: e.message || 'Ошибка отмены выработки по блоку' });
+  } finally {
+    client.release();
+  }
+});
+
+router.delete('/cable-lines/:id/production', requirePermission('can_objects'), async (req, res) => {
+  await ensureObjectStatusSchema();
+  const lineId = parseId(req.params.id);
+  const requestedIssuanceId = parseId(req.body?.issuance_id);
+  if (!lineId) return res.status(400).json({ error: 'Неверный id линии' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const line = (await client.query(
+      'SELECT id FROM work_transit_cable_lines WHERE id = $1 FOR UPDATE',
+      [lineId],
+    )).rows[0];
+    if (!line) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Линия не найдена' });
+    }
+
+    let issuanceId = requestedIssuanceId;
+    if (!issuanceId) {
+      const latest = (await client.query(
+        `SELECT issuance_id
+         FROM issuance_production_allocations
+         WHERE transit_cable_line_id = $1
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1`,
+        [lineId],
+      )).rows[0];
+      issuanceId = latest ? Number(latest.issuance_id) : null;
+    }
+    if (!issuanceId) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Для этой линии нет проведённой выработки' });
+    }
+
+    const issuance = (await client.query(
+      `SELECT id, note
+       FROM issuances
+       WHERE id = $1
+       FOR UPDATE`,
+      [issuanceId],
+    )).rows[0];
+    if (!issuance) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Выдача не найдена' });
+    }
+
+    const deleted = await client.query(
+      `DELETE FROM issuance_production_allocations
+       WHERE transit_cable_line_id = $1
+         AND issuance_id = $2
+       RETURNING quantity`,
+      [lineId, issuanceId],
+    );
+    if (!deleted.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'По этой линии нет выработки для отмены' });
+    }
+    const restoredQty = deleted.rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+
+    const latestLineAllocation = (await client.query(
+      `SELECT status_id, worker_user_id
+       FROM issuance_production_allocations
+       WHERE transit_cable_line_id = $1
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+      [lineId],
+    )).rows[0] || null;
+
+    await client.query(
+      `UPDATE work_transit_cable_lines
+       SET status_id = $1,
+           assigned_user_id = $2,
+           updated_at = NOW()
+       WHERE id = $3`,
+      [
+        latestLineAllocation?.status_id ?? null,
+        latestLineAllocation?.worker_user_id ?? null,
+        lineId,
+      ],
+    );
+
+    const cancelTag = makeIssuanceEventTag('production_cancel', {
+      qty: restoredQty,
+      blocks: 1,
+      at: new Date().toISOString(),
+    });
+    const nextNote = appendIssuanceEventTag(issuance.note, cancelTag);
+    await client.query(
+      `UPDATE issuances
+       SET note = $2,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [issuanceId, nextNote],
+    );
+
+    await client.query('COMMIT');
+    res.json({
+      ok: true,
+      transit_cable_line_id: lineId,
+      issuance_id: issuanceId,
+      restored_quantity: restoredQty,
+    });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('DELETE /objects/cable-lines/:id/production:', e.message);
+    res.status(500).json({ error: e.message || 'Ошибка отмены выработки по линии' });
   } finally {
     client.release();
   }
