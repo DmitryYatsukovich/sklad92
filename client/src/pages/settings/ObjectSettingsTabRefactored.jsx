@@ -2342,53 +2342,59 @@ export default function ObjectSettingsTabRefactored() {
     const actionsDisabled = !!pasteBusyKey || slotBusy || Boolean(activeCableTransitId);
     const pasteTitle = copiedSlotTemplate ? `Вставить блок: ${copiedSlotTemplate.systemName}` : 'Вставить блок';
     const floorHeights = entranceFloorHeights[Number(entranceId)] || {};
+    const resolveSegmentHeight = (floorId) => {
+      const measured = floorId ? Number(floorHeights[floorId] || 0) : 0;
+      if (!Number.isFinite(measured) || measured <= 0) return null;
+      return Math.max(24, Math.round(measured));
+    };
 
     if (locationRow._kind === 'transit') {
       return (
         <div className="space-y-1 rounded border border-cyan-300/20 bg-cyan-950/20 p-1">
           <p className="text-[8px] text-cyan-100 uppercase tracking-wide">Секции транзита по этажам</p>
-          {spanFloors.map((floorRow, index) => {
-            const floorId = Number.parseInt(floorRow?.id, 10);
-            const isCollapsed = floorId ? collapsedFloorSet.has(floorId) : false;
-            const measuredFloorHeight = floorId ? Number(floorHeights[floorId] || 0) : 0;
-            const segmentHeight = measuredFloorHeight ? Math.max(24, Math.round(measuredFloorHeight) - 6) : null;
-            return (
-              <div
-                key={`transit-floor-segment-${locationRow.id}-${floorRow.id}-${index}`}
-                className={`rounded border border-cyan-400/20 bg-black/25 p-1 overflow-auto ${isCollapsed ? 'opacity-75' : ''}`}
-                style={segmentHeight ? { height: `${segmentHeight}px` } : undefined}
-              >
-                <div className="flex items-center justify-between gap-1">
-                  <span className="text-[8px] text-zinc-200">Этаж {floorRow.name}</span>
-                  {isCollapsed ? (
-                    <span className="text-[8px] text-zinc-500">свернут</span>
-                  ) : (
-                    <div className="flex gap-1">
-                      <button
-                        type="button"
-                        onClick={() => openCreateSlotModal(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name}`)}
-                        className="px-1 py-0.5 rounded border border-cyan-300/35 text-[8px] text-cyan-100 hover:bg-cyan-900/35 disabled:opacity-50"
-                        disabled={actionsDisabled}
-                      >
-                        +Блок
-                      </button>
-                      {canPasteSlot && (
+          <div className="space-y-0">
+            {spanFloors.map((floorRow, index) => {
+              const floorId = Number.parseInt(floorRow?.id, 10);
+              const isCollapsed = floorId ? collapsedFloorSet.has(floorId) : false;
+              const segmentHeight = resolveSegmentHeight(floorId);
+              return (
+                <div
+                  key={`transit-floor-segment-${locationRow.id}-${floorRow.id}-${index}`}
+                  className={`rounded-none border-x border-b border-cyan-400/20 bg-black/25 p-1 overflow-hidden ${isCollapsed ? 'opacity-75' : ''}`}
+                  style={segmentHeight ? { height: `${segmentHeight}px` } : undefined}
+                >
+                  <div className="h-full flex items-center justify-between gap-1">
+                    <span className="text-[8px] text-zinc-200">Этаж {floorRow.name}</span>
+                    {isCollapsed ? (
+                      <span className="text-[8px] text-zinc-500">свернут</span>
+                    ) : (
+                      <div className="flex gap-1 shrink-0">
                         <button
                           type="button"
-                          onClick={() => handlePasteSlotToLocation(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name}`)}
-                          className="px-1 py-0.5 rounded border border-sky-400/35 text-[8px] text-sky-200 hover:bg-sky-900/30 disabled:opacity-50"
+                          onClick={() => openCreateSlotModal(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name}`)}
+                          className="px-1 py-0.5 rounded border border-cyan-300/35 text-[8px] text-cyan-100 hover:bg-cyan-900/35 disabled:opacity-50"
                           disabled={actionsDisabled}
-                          title={pasteTitle}
                         >
-                          Встав.
+                          +Блок
                         </button>
-                      )}
-                    </div>
-                  )}
+                        {canPasteSlot && (
+                          <button
+                            type="button"
+                            onClick={() => handlePasteSlotToLocation(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name}`)}
+                            className="px-1 py-0.5 rounded border border-sky-400/35 text-[8px] text-sky-200 hover:bg-sky-900/30 disabled:opacity-50"
+                            disabled={actionsDisabled}
+                            title={pasteTitle}
+                          >
+                            Встав.
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       );
     }
@@ -2396,56 +2402,61 @@ export default function ObjectSettingsTabRefactored() {
     if (locationRow._kind === 'stairwell') {
       return (
         <div className="space-y-1 rounded border border-emerald-300/20 bg-emerald-950/20 p-1">
-          <p className="text-[8px] text-emerald-100 uppercase tracking-wide">ЛК по этажам (площадка + межэтажье)</p>
-          {spanFloors.map((floorRow, index) => {
+          <p className="text-[8px] text-emerald-100 uppercase tracking-wide">ЛК по этажам (этаж + межэтаж)</p>
+          <div className="space-y-0">
+            {spanFloors.map((floorRow, index) => {
             const floorId = Number.parseInt(floorRow?.id, 10);
             const isCollapsed = floorId ? collapsedFloorSet.has(floorId) : false;
-            const measuredFloorHeight = floorId ? Number(floorHeights[floorId] || 0) : 0;
-            const segmentHeight = measuredFloorHeight ? Math.max(24, Math.round(measuredFloorHeight) - 6) : null;
+            const segmentHeight = resolveSegmentHeight(floorId);
             return (
               <div
                 key={`stair-floor-segment-${locationRow.id}-${floorRow.id}-${index}`}
-                className={`relative rounded border border-emerald-400/20 bg-black/25 p-1 space-y-1 overflow-auto ${isCollapsed ? 'opacity-75' : ''}`}
+                className={`relative border-x border-b border-emerald-400/20 bg-black/25 overflow-hidden ${isCollapsed ? 'opacity-75' : ''}`}
                 style={{
-                  marginLeft: `${(index % 2) * 12}px`,
+                  marginLeft: `${(index % 2) * 10}px`,
                   ...(segmentHeight ? { height: `${segmentHeight}px` } : {}),
                 }}
               >
-                <div className="flex items-center justify-between gap-1">
-                  <span className="text-[8px] text-zinc-200">Этаж {floorRow.name}</span>
-                  <span className="text-[8px] text-zinc-500">{index % 2 === 0 ? '↗' : '↘'}</span>
-                </div>
-                {!isCollapsed ? (
-                  <div className="grid grid-cols-2 gap-1">
-                    <button
-                      type="button"
-                      onClick={() => openCreateSlotModal(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name} · площадка`)}
-                      className="rounded border border-emerald-300/30 bg-emerald-900/20 px-1 py-0.5 text-[8px] text-emerald-100 hover:bg-emerald-800/30 disabled:opacity-50 text-left"
-                      disabled={actionsDisabled}
-                    >
-                      Площадка +блок
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openCreateSlotModal(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name} · межэтажье`)}
-                      className="rounded border border-emerald-200/25 bg-emerald-900/15 px-1 py-0.5 text-[8px] text-emerald-50 hover:bg-emerald-800/25 disabled:opacity-50 text-left"
-                      disabled={actionsDisabled}
-                    >
-                      Межэтажье +блок
-                    </button>
+                <div className="h-full grid grid-rows-2">
+                  <div className="border-b border-emerald-300/20 px-1 py-0.5 flex items-center justify-between gap-1">
+                    <span className="text-[8px] text-zinc-200 truncate">Этаж {floorRow.name}</span>
+                    {!isCollapsed && (
+                      <button
+                        type="button"
+                        onClick={() => openCreateSlotModal(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name} · этаж`)}
+                        className="px-1 py-0.5 rounded border border-emerald-300/35 text-[8px] text-emerald-100 hover:bg-emerald-900/30 disabled:opacity-50"
+                        disabled={actionsDisabled}
+                      >
+                        +Блок
+                      </button>
+                    )}
                   </div>
-                ) : (
-                  <p className="text-[8px] text-zinc-500">Секция свернута вместе с этажом</p>
-                )}
+                  <div className="px-1 py-0.5 flex items-center justify-between gap-1">
+                    <span className="text-[8px] text-zinc-400 truncate">Межэтаж</span>
+                    {!isCollapsed ? (
+                    <button
+                      type="button"
+                      onClick={() => openCreateSlotModal(locationRow._kind, locationRow.id, `${locationTitle} · эт. ${floorRow.name} · межэтаж`)}
+                      className="px-1 py-0.5 rounded border border-emerald-200/25 text-[8px] text-emerald-50 hover:bg-emerald-900/25 disabled:opacity-50"
+                      disabled={actionsDisabled}
+                    >
+                      +Блок
+                    </button>
+                    ) : (
+                      <span className="text-[8px] text-zinc-500">свернут</span>
+                    )}
+                  </div>
+                </div>
                 {index < spanFloors.length - 1 && (
                   <div
-                    className="pointer-events-none absolute -bottom-1.5 left-2 h-3 w-[calc(100%-1rem)] border-b border-dashed border-emerald-300/25"
+                    className="pointer-events-none absolute -bottom-1 left-2 h-2.5 w-[calc(100%-1rem)] border-b border-dashed border-emerald-300/25"
                     style={{ transform: index % 2 === 0 ? 'skewX(18deg)' : 'skewX(-18deg)' }}
                   />
                 )}
               </div>
             );
-          })}
+            })}
+          </div>
         </div>
       );
     }
