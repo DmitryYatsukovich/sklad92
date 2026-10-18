@@ -2771,23 +2771,19 @@ export default function ObjectSettingsTabRefactored() {
                 preferredDirection: laneShift <= 0 ? 'left' : 'right',
                 excludeSlotIds,
               });
-              const fromSplitX = fromJunction.x + (((laneX - fromJunction.x) >= 0 ? 1 : -1) * 2.5);
-              const toSplitX = toJunction.x + (((laneX - toJunction.x) >= 0 ? 1 : -1) * 2.5);
               pushPoint(points, fromTerminal);
               pushPoint(points, fromJunction);
-              pushPoint(points, { x: fromSplitX, y: fromJunction.y });
               if (Math.abs(fromY - fromJunction.y) > 0.5) {
-                pushPoint(points, { x: fromSplitX, y: fromY });
+                pushPoint(points, { x: fromJunction.x, y: fromY });
               }
               pushPoint(points, { x: laneX, y: fromY });
               if (Math.abs(toY - fromY) > 0.5) {
                 pushPoint(points, { x: laneX, y: toY });
               }
-              pushPoint(points, { x: toSplitX, y: toY });
+              pushPoint(points, { x: toJunction.x, y: toY });
               if (Math.abs(toY - toJunction.y) > 0.5) {
-                pushPoint(points, { x: toSplitX, y: toJunction.y });
+                pushPoint(points, { x: toJunction.x, y: toJunction.y });
               }
-              pushPoint(points, { x: toJunction.x, y: toJunction.y });
               pushPoint(points, toTerminal);
             } else {
               const directionRight = item.to.center.x >= item.from.center.x;
@@ -2843,23 +2839,19 @@ export default function ObjectSettingsTabRefactored() {
                 preferredDirection: useRight ? 'right' : 'left',
                 excludeSlotIds,
               });
-              const fromSplitX = fromJunction.x + (((corridorX - fromJunction.x) >= 0 ? 1 : -1) * 2.5);
-              const toSplitX = toJunction.x + (((corridorX - toJunction.x) >= 0 ? 1 : -1) * 2.5);
               pushPoint(points, fromTerminal);
               pushPoint(points, fromJunction);
-              pushPoint(points, { x: fromSplitX, y: fromJunction.y });
               if (Math.abs(fromY - fromJunction.y) > 0.5) {
-                pushPoint(points, { x: fromSplitX, y: fromY });
+                pushPoint(points, { x: fromJunction.x, y: fromY });
               }
               pushPoint(points, { x: corridorX, y: fromY });
               if (Math.abs(toY - fromY) > 0.5) {
                 pushPoint(points, { x: corridorX, y: toY });
               }
-              pushPoint(points, { x: toSplitX, y: toY });
+              pushPoint(points, { x: toJunction.x, y: toY });
               if (Math.abs(toY - toJunction.y) > 0.5) {
-                pushPoint(points, { x: toSplitX, y: toJunction.y });
+                pushPoint(points, { x: toJunction.x, y: toJunction.y });
               }
-              pushPoint(points, { x: toJunction.x, y: toJunction.y });
               pushPoint(points, toTerminal);
             }
             const d = points.map((point, idx) => `${idx === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
@@ -2901,7 +2893,7 @@ export default function ObjectSettingsTabRefactored() {
                 const x = vertical.x1;
                 const y = horizontal.y1;
                 if (!segmentContains(horizontal, x, y) || !segmentContains(vertical, x, y)) return;
-                if (!farFromEndpoints(horizontal, x, y, 1.1) || !farFromEndpoints(vertical, x, y, 1.1)) return;
+                if (!farFromEndpoints(horizontal, x, y, 2.2) || !farFromEndpoints(vertical, x, y, 2.2)) return;
                 const jumperPath = (() => {
                   const scoreA = Number(pathA.priorityScore || 0);
                   const scoreB = Number(pathB.priorityScore || 0);
@@ -4012,34 +4004,34 @@ export default function ObjectSettingsTabRefactored() {
                                       {jump.orientation === 'vertical' ? (
                                         <>
                                           <path
-                                            d={`M ${jump.x} ${jump.y - 5.5} L ${jump.x} ${jump.y + 5.5}`}
+                                            d={`M ${jump.x} ${jump.y - 3.7} L ${jump.x} ${jump.y + 3.7}`}
                                             fill="none"
                                             stroke="#0B1220"
-                                            strokeWidth="2.7"
+                                            strokeWidth="2.25"
                                             strokeLinecap="round"
                                           />
                                           <path
-                                            d={`M ${jump.x} ${jump.y - 5.5} Q ${jump.x + 6.3} ${jump.y} ${jump.x} ${jump.y + 5.5}`}
+                                            d={`M ${jump.x} ${jump.y - 3.7} Q ${jump.x + 4.1} ${jump.y} ${jump.x} ${jump.y + 3.7}`}
                                             fill="none"
                                             stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
-                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '1.35' : '1.15'}
+                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '1.22' : '1.0'}
                                             strokeLinecap="round"
                                           />
                                         </>
                                       ) : (
                                         <>
                                           <path
-                                            d={`M ${jump.x - 5.5} ${jump.y} L ${jump.x + 5.5} ${jump.y}`}
+                                            d={`M ${jump.x - 3.7} ${jump.y} L ${jump.x + 3.7} ${jump.y}`}
                                             fill="none"
                                             stroke="#0B1220"
-                                            strokeWidth="2.7"
+                                            strokeWidth="2.25"
                                             strokeLinecap="round"
                                           />
                                           <path
-                                            d={`M ${jump.x - 5.5} ${jump.y} Q ${jump.x} ${jump.y - 6.3} ${jump.x + 5.5} ${jump.y}`}
+                                            d={`M ${jump.x - 3.7} ${jump.y} Q ${jump.x} ${jump.y - 4.1} ${jump.x + 3.7} ${jump.y}`}
                                             fill="none"
                                             stroke={hoveredCableLine?.pathKey === jump.pathKey ? '#FFFFFF' : '#F8FAFC'}
-                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '1.35' : '1.15'}
+                                            strokeWidth={hoveredCableLine?.pathKey === jump.pathKey ? '1.22' : '1.0'}
                                             strokeLinecap="round"
                                           />
                                         </>
