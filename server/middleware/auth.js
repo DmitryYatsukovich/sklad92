@@ -2,6 +2,27 @@ import pool from '../db/pool.js';
 import { PERMISSIONS_SELECT } from '../lib/permissions-sql.js';
 import { userAccessBlockReason } from '../lib/user-access.js';
 
+const WAREHOUSE_GRANULAR_KEYS = [
+  'can_warehouse_view',
+  'can_warehouse_edit',
+  'can_warehouse_qr_scan',
+  'can_warehouse_issue',
+  'can_warehouse_move',
+  'can_warehouse_split',
+];
+
+function applyLegacyWarehousePermissions(user) {
+  if (!user || user.role === 'admin') return user;
+  if (!user.can_warehouse) return user;
+  const hasGranularWarehouseAccess = WAREHOUSE_GRANULAR_KEYS.some((key) => !!user[key]);
+  if (hasGranularWarehouseAccess) return user;
+  // Обратная совместимость: старые роли имели только can_warehouse.
+  WAREHOUSE_GRANULAR_KEYS.forEach((key) => {
+    user[key] = true;
+  });
+  return user;
+}
+
 export function requireAuth(req, res, next) {
   if (!req.session?.userId) {
     return res.status(401).json({ error: 'Требуется авторизация' });
@@ -35,6 +56,7 @@ export async function loadUser(req, res, next) {
   }
   if (row) {
     row.can_objects = !!(row.can_objects || row.can_settings_work);
+    applyLegacyWarehousePermissions(row);
   }
   req.user = row;
   next();

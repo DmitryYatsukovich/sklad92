@@ -221,12 +221,21 @@ export default function Warehouse({ user }) {
   const fileInputRef = useRef(null);
   const pendingMutations = usePendingMutations();
   const isAdmin = user?.role === 'admin';
-  const canWarehouseView = isAdmin || !!user?.can_warehouse_view;
-  const canWarehouseEdit = isAdmin || !!user?.can_warehouse_edit;
-  const canWarehouseQrScan = isAdmin || !!user?.can_warehouse_qr_scan;
-  const canWarehouseIssue = isAdmin || !!user?.can_warehouse_issue;
-  const canWarehouseMove = isAdmin || !!user?.can_warehouse_move;
-  const canWarehouseSplit = isAdmin || !!user?.can_warehouse_split;
+  const hasAnyGranularWarehousePermission = [
+    user?.can_warehouse_view,
+    user?.can_warehouse_edit,
+    user?.can_warehouse_qr_scan,
+    user?.can_warehouse_issue,
+    user?.can_warehouse_move,
+    user?.can_warehouse_split,
+  ].some(Boolean);
+  const hasLegacyWarehouseFallback = !isAdmin && !!user?.can_warehouse && !hasAnyGranularWarehousePermission;
+  const canWarehouseView = isAdmin || !!user?.can_warehouse_view || hasLegacyWarehouseFallback;
+  const canWarehouseEdit = isAdmin || !!user?.can_warehouse_edit || hasLegacyWarehouseFallback;
+  const canWarehouseQrScan = isAdmin || !!user?.can_warehouse_qr_scan || hasLegacyWarehouseFallback;
+  const canWarehouseIssue = isAdmin || !!user?.can_warehouse_issue || hasLegacyWarehouseFallback;
+  const canWarehouseMove = isAdmin || !!user?.can_warehouse_move || hasLegacyWarehouseFallback;
+  const canWarehouseSplit = isAdmin || !!user?.can_warehouse_split || hasLegacyWarehouseFallback;
   const canOpenMaterialMenu = canWarehouseEdit || canWarehouseIssue || canWarehouseMove || canWarehouseSplit;
 
   const displayList = useMemo(
