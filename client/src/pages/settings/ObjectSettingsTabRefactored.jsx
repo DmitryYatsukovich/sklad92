@@ -555,6 +555,15 @@ export default function ObjectSettingsTabRefactored() {
     });
     return map;
   }, [data.transitCableLines]);
+  const transitLaneDemandById = useMemo(() => {
+    const map = new Map();
+    data.transitCableLines.forEach((line) => {
+      const transitId = Number.parseInt(line.transit_id, 10);
+      if (!transitId) return;
+      map.set(transitId, (map.get(transitId) || 0) + 1);
+    });
+    return map;
+  }, [data.transitCableLines]);
   const cableEndpointSlotIdSet = useMemo(() => {
     const set = new Set();
     data.transitCableLines.forEach((line) => {
@@ -2383,16 +2392,23 @@ export default function ObjectSettingsTabRefactored() {
         if (!gridEl) return;
         const gridRect = gridEl.getBoundingClientRect();
         if (!gridRect.width || !gridRect.height) return;
-        const pointFromRectCenter = (rect) => ({
-          x: rect.left - gridRect.left + (rect.width / 2),
-          y: rect.top - gridRect.top + (rect.height / 2),
+        const rectToAnchor = (rect) => ({
+          center: {
+            x: rect.left - gridRect.left + (rect.width / 2),
+            y: rect.top - gridRect.top + (rect.height / 2),
+          },
+          left: rect.left - gridRect.left,
+          right: rect.right - gridRect.left,
+          top: rect.top - gridRect.top,
+          bottom: rect.bottom - gridRect.top,
         });
-        const resolveSlotPoint = (slotIdValue, transitPoint) => {
+        const pointFromRectCenter = (rect) => rectToAnchor(rect).center;
+        const resolveSlotAnchor = (slotIdValue, transitPoint) => {
           const slotId = Number.parseInt(slotIdValue, 10);
           if (!slotId) return null;
           const slotEl = gridEl.querySelector(`[data-slot-id="${slotId}"]`);
           if (slotEl instanceof HTMLElement) {
-            return pointFromRectCenter(slotEl.getBoundingClientRect());
+            return rectToAnchor(slotEl.getBoundingClientRect());
           }
           const placement = slotPlacementById.get(slotId);
           const floorId = Number.parseInt(placement?.location?.floor_id, 10);
@@ -2400,6 +2416,7 @@ export default function ObjectSettingsTabRefactored() {
           const floorEl = gridEl.querySelector(`[data-floor-id="${floorId}"]`);
           if (!(floorEl instanceof HTMLElement)) return null;
           const floorRect = floorEl.getBoundingClientRect();
+          const floorCenterX = floorRect.left - gridRect.left + (floorRect.width / 2);
           const floorCenterY = floorRect.top - gridRect.top + (floorRect.height / 2);
           const floorLeft = floorRect.left - gridRect.left;
           const floorRight = floorLeft + floorRect.width;
@@ -2407,9 +2424,34 @@ export default function ObjectSettingsTabRefactored() {
             ? Math.max(floorLeft + 8, floorRight - 12)
             : floorLeft + 12;
           return {
-            x: fallbackX,
-            y: floorCenterY,
+            center: { x: floorCenterX, y: floorCenterY },
+            left: fallbackX - 1,
+            right: fallbackX + 1,
+            top: floorCenterY - 1,
+            bottom: floorCenterY + 1,
           };
+        };
+        const buildSegments = (points) => points.slice(0, -1).map((point, idx) => {
+          const nextPoint = points[idx + 1];
+          const horizontal = Math.abs(nextPoint.y - point.y) < 0.01;
+          return {
+            x1: point.x,
+            y1: point.y,
+            x2: nextPoint.x,
+            y2: nextPoint.y,
+            horizontal,
+          };
+        });
+        const segmentContains = (segment, x, y) => (
+          x >= Math.min(segment.x1, segment.x2) - 0.01
+          && x <= Math.max(segment.x1, segment.x2) + 0.01
+          && y >= Math.min(segment.y1, segment.y2) - 0.01
+          && y <= Math.max(segment.y1, segment.y2) + 0.01
+        );
+        const farFromEndpoints = (segment, x, y) => {
+          const d1 = Math.hypot(x - segment.x1, y - segment.y1);
+          const d2 = Math.hypot(x - segment.x2, y - segment.y2);
+          return d1 > 4 && d2 > 4;
         };
 
         const itemsByTransit = new Map();
@@ -2422,17 +2464,17 @@ export default function ObjectSettingsTabRefactored() {
               transitPoint = pointFromRectCenter(transitEl.getBoundingClientRect());
             }
           }
-          const fromPoint = resolveSlotPoint(line.from_location_system_id, transitPoint);
-          const toPoint = resolveSlotPoint(line.to_location_system_id, transitPoint);
-          if (!fromPoint || !toPoint) return;
+          const fromAnchor = resolveSlotAnchor(line.from_location_system_id, transitPoint);
+          const toAnchor = resolveSlotAnchor(line.to_location_system_id, transitPoint);
+          if (!fromAnchor || !toAnchor) return;
 
           const groupKey = transitPoint ? `transit:${transitId}` : 'direct';
           const list = itemsByTransit.get(groupKey) || [];
           list.push({
             key: String(line.id),
             line,
-            from: fromPoint,
-            to: toPoint,
+            from: fromAnchor,
+            to: toAnchor,
             transit: transitPoint,
           });
           itemsByTransit.set(groupKey, list);
@@ -2441,8 +2483,8 @@ export default function ObjectSettingsTabRefactored() {
         const paths = [];
         itemsByTransit.forEach((items) => {
           if (!items.length) return;
-          const fromOrdered = [...items].sort((a, b) => (a.from.y - b.from.y) || naturalCompare(a.key, b.key));
-          const toOrdered = [...items].sort((a, b) => (a.to.y - b.to.y) || naturalCompare(a.key, b.key));
+          const fromOrdered = [...items].sort((a, b) => (a.from.center.y - b.from.center.y) || naturalCompare(a.key, b.key));
+          const toOrdered = [...items].sort((a, b) => (a.to.center.y - b.to.center.y) || naturalCompare(a.key, b.key));
           const fromOrder = new Map(fromOrdered.map((item, index) => [item.key, index]));
           const toOrder = new Map(toOrdered.map((item, index) => [item.key, index]));
           const arranged = [...items].sort((a, b) => {
@@ -2458,55 +2500,88 @@ export default function ObjectSettingsTabRefactored() {
           });
 
           const hasTransitRoute = Boolean(arranged[0]?.transit);
-          let upLane = 0;
-          let downLane = 0;
           arranged.forEach((item, index) => {
-            let d = '';
+            const points = [];
             if (hasTransitRoute && item.transit) {
-              const goingUp = item.to.y < item.from.y;
-              const laneOffset = 16 + (goingUp ? upLane++ : downLane++) * 9;
-              const transitX = item.transit.x;
-              const liftRaw = goingUp
-                ? (Math.min(item.from.y, item.to.y) - laneOffset)
-                : (Math.max(item.from.y, item.to.y) + laneOffset);
-              const liftY = Math.max(6, Math.min(gridRect.height - 6, liftRaw));
-              d = [
-                `M ${item.from.x} ${item.from.y}`,
-                `L ${transitX} ${item.from.y}`,
-                `L ${transitX} ${liftY}`,
-                `L ${item.to.x} ${liftY}`,
-                `L ${item.to.x} ${item.to.y}`,
-              ].join(' ');
+              const laneShift = (index - ((arranged.length - 1) / 2)) * 6;
+              const laneX = item.transit.x + laneShift;
+              const fromY = item.from.center.y;
+              const toY = item.to.center.y;
+              const fromEdgeX = laneX >= item.from.center.x ? item.from.right : item.from.left;
+              const toEdgeX = laneX <= item.to.center.x ? item.to.left : item.to.right;
+              points.push(
+                { x: fromEdgeX, y: fromY },
+                { x: laneX, y: fromY },
+                { x: laneX, y: toY },
+                { x: toEdgeX, y: toY },
+              );
             } else {
-              const laneOffset = (index - ((arranged.length - 1) / 2)) * 8;
-              const midYRaw = ((item.from.y + item.to.y) / 2) + laneOffset;
-              const midY = Math.max(6, Math.min(gridRect.height - 6, midYRaw));
-              d = [
-                `M ${item.from.x} ${item.from.y}`,
-                `L ${item.from.x} ${midY}`,
-                `L ${item.to.x} ${midY}`,
-                `L ${item.to.x} ${item.to.y}`,
-              ].join(' ');
+              const directionRight = item.to.center.x >= item.from.center.x;
+              const fromY = item.from.center.y;
+              const toY = item.to.center.y;
+              const fromEdgeX = directionRight ? item.from.right : item.from.left;
+              const toEdgeX = directionRight ? item.to.left : item.to.right;
+              const corridorBase = directionRight
+                ? Math.max(item.from.right, item.to.right) + 10
+                : Math.min(item.from.left, item.to.left) - 10;
+              const laneShift = (index - ((arranged.length - 1) / 2)) * 7;
+              const corridorX = corridorBase + laneShift;
+              points.push(
+                { x: fromEdgeX, y: fromY },
+                { x: corridorX, y: fromY },
+                { x: corridorX, y: toY },
+                { x: toEdgeX, y: toY },
+              );
             }
-            const hueSeed = Number(item.line.system_id || item.line.id || 1);
+            const d = points.map((point, idx) => `${idx === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
+            const segments = buildSegments(points);
             const optimistic = Boolean(item.line.__optimistic);
-            const color = item.line.__overlay_preview
-              ? '#7DD3FC'
-              : (optimistic ? '#67E8F9' : `hsl(${(hueSeed * 37) % 360} 85% 66%)`);
             paths.push({
               key: `${item.key}:${item.line.transit_id}`,
               lineId: item.line.__overlay_preview || optimistic ? null : item.line.id,
               d,
-              color,
+              color: '#F8FAFC',
               preview: Boolean(item.line.__overlay_preview || optimistic),
+              segments,
             });
           });
         });
+
+        const jumps = [];
+        const jumpSeen = new Set();
+        for (let i = 0; i < paths.length; i += 1) {
+          for (let j = i + 1; j < paths.length; j += 1) {
+            const pathA = paths[i];
+            const pathB = paths[j];
+            if (pathA.preview || pathB.preview) continue;
+            pathA.segments?.forEach((segmentA) => {
+              pathB.segments?.forEach((segmentB) => {
+                if (segmentA.horizontal === segmentB.horizontal) return;
+                const horizontal = segmentA.horizontal ? segmentA : segmentB;
+                const vertical = segmentA.horizontal ? segmentB : segmentA;
+                const x = vertical.x1;
+                const y = horizontal.y1;
+                if (!segmentContains(horizontal, x, y) || !segmentContains(vertical, x, y)) return;
+                if (!farFromEndpoints(horizontal, x, y) || !farFromEndpoints(vertical, x, y)) return;
+                const key = `${pathB.key}:${Math.round(x)}:${Math.round(y)}`;
+                if (jumpSeen.has(key)) return;
+                jumpSeen.add(key);
+                jumps.push({
+                  key,
+                  pathKey: pathB.key,
+                  x,
+                  y,
+                });
+              });
+            });
+          }
+        }
 
         next[entranceId] = {
           width: gridRect.width,
           height: gridRect.height,
           paths,
+          jumps,
         };
       });
       setEntranceCableOverlay(next);
@@ -3235,6 +3310,16 @@ export default function ObjectSettingsTabRefactored() {
                         return slots.some((slot) => slotMatchesFilters(slot));
                       });
                     const entranceOverlay = entranceCableOverlay[entrance.id] || null;
+                    const linearColumnsTemplate = entranceLinearLayoutRows.map((row) => {
+                      if (row._kind === 'transit') {
+                        const lineCount = transitLaneDemandById.get(Number(row.id)) || 0;
+                        const extra = Math.min(Math.max(lineCount - 1, 0), 16) * 0.24;
+                        const minRem = (4.25 + extra).toFixed(2);
+                        const maxRem = (5.1 + (extra * 1.4)).toFixed(2);
+                        return `minmax(${minRem}rem, ${maxRem}rem)`;
+                      }
+                      return 'minmax(3.8rem, 4.4rem)';
+                    }).join(' ');
                     return (
                       <section key={entrance.id} className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-2.5 space-y-2 shadow-[0_8px_20px_rgba(0,0,0,0.22)]">
                         <p className="text-emerald-200 text-xs font-semibold tracking-wide">Подъезд {entrance.name}</p>
@@ -3245,7 +3330,7 @@ export default function ObjectSettingsTabRefactored() {
                                 ref={(node) => setEntranceGridRef(entrance.id, node)}
                                 className="grid gap-1.5 min-w-0 relative z-10"
                                 style={{
-                                  gridTemplateColumns: `${entranceLinearLayoutRows.length ? `repeat(${entranceLinearLayoutRows.length}, minmax(4.75rem, 5.5rem)) ` : ''}minmax(18rem, 1fr)`,
+                                  gridTemplateColumns: `${linearColumnsTemplate ? `${linearColumnsTemplate} ` : ''}minmax(18rem, 1fr)`,
                                   alignItems: 'stretch',
                                 }}
                               >
@@ -3468,10 +3553,11 @@ export default function ObjectSettingsTabRefactored() {
                                       d={pathItem.d}
                                       fill="none"
                                       stroke={pathItem.color}
-                                      strokeWidth={pathItem.preview ? 2.2 : 1.8}
+                                      strokeWidth={pathItem.preview ? 1.6 : 1.8}
                                       strokeLinecap="round"
                                       strokeLinejoin="round"
-                                      opacity={pathItem.preview ? 0.98 : 0.85}
+                                      strokeDasharray={pathItem.preview ? '4 3' : undefined}
+                                      opacity={pathItem.preview ? 0.75 : 0.95}
                                       className={pathItem.preview || activeCableTransitId ? '' : 'cursor-pointer'}
                                       pointerEvents={pathItem.preview || activeCableTransitId ? 'none' : 'stroke'}
                                       onClick={() => {
@@ -3482,6 +3568,18 @@ export default function ObjectSettingsTabRefactored() {
                                         openCableEditModal(line);
                                       }}
                                     />
+                                  ))}
+                                  {(entranceOverlay.jumps || []).map((jump) => (
+                                    <g key={`jump-${jump.key}`} pointerEvents="none">
+                                      <circle cx={jump.x} cy={jump.y} r="3" fill="#0B1220" />
+                                      <path
+                                        d={`M ${jump.x - 3} ${jump.y} Q ${jump.x} ${jump.y - 4} ${jump.x + 3} ${jump.y}`}
+                                        fill="none"
+                                        stroke="#F8FAFC"
+                                        strokeWidth="1.3"
+                                        strokeLinecap="round"
+                                      />
+                                    </g>
                                   ))}
                                 </svg>
                               ) : null}
