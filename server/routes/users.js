@@ -33,6 +33,7 @@ import {
 } from '../lib/user-labor-contract.js';
 import { parseHourlyRate } from '../lib/hourly-rate.js';
 import { resolveEmploymentForSave } from '../lib/organization-employment.js';
+import { hasAdminPermissionBypass } from '../lib/admin-bypass.js';
 import {
   buildTemplateBuffer,
   buildExportBuffer,
@@ -364,6 +365,8 @@ router.post('/', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const isAdminBypass = hasAdminPermissionBypass(req.user);
+    const nextSystemRole = isAdminBypass && role === 'admin' ? 'admin' : 'user';
     const employment = await resolveEmploymentForSave(client, { organization_id, employment_org });
     if (employment?.error) {
       await client.query('ROLLBACK');
@@ -385,7 +388,7 @@ router.post('/', async (req, res) => {
         birth_date || null, (passport_number || '').trim() || null, (snils || '').trim() || null, (inn || '').trim() || null,
         employment_date || null, orgId, orgName, (phone || '').trim() || null,
         parseHourlyRate(hourly_rate) ?? null,
-        role === 'admin' ? 'admin' : 'user',
+        nextSystemRole,
         role_id && !isNaN(role_id) ? parseInt(role_id, 10) : null,
         (internal_uid || '').toString().trim() || null,
         (kig_card_number || '').toString().trim() || null,
@@ -397,7 +400,6 @@ router.post('/', async (req, res) => {
     );
     const user = u.rows[0];
     const perms = await resolveUserPermissionsForSave(client, {
-      systemRole: role === 'admin' ? 'admin' : 'user',
       role_id,
     });
     await upsertUserPermissions(client, user.id, perms);
@@ -436,7 +438,7 @@ router.put('/:id', async (req, res) => {
       client.release();
       return res.status(400).json({ error: employmentResolved.error });
     }
-    const isAdmin = req.user.role === 'admin';
+    const isAdmin = hasAdminPermissionBypass(req.user);
     const target = (await client.query(
       'SELECT id, role, (face_descriptor IS NOT NULL) AS has_face FROM users WHERE id = $1',
       [id],
@@ -521,8 +523,6 @@ router.put('/:id', async (req, res) => {
       ]);
     }
 
-    const effectiveRole =
-      role !== undefined && isAdmin ? (role === 'admin' ? 'admin' : 'user') : target.role;
     let effectiveRoleId = null;
     if (role_id !== undefined) {
       effectiveRoleId = role_id && !isNaN(role_id) ? parseInt(role_id, 10) : null;
@@ -531,7 +531,6 @@ router.put('/:id', async (req, res) => {
       effectiveRoleId = cr?.role_id ?? null;
     }
     const perms = await resolveUserPermissionsForSave(client, {
-      systemRole: effectiveRole,
       role_id: effectiveRoleId,
     });
     await upsertUserPermissions(client, id, perms);

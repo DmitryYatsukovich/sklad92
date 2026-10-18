@@ -1,15 +1,10 @@
 import {
   PERMISSION_KEYS,
-  fullPermissionFlags,
   permissionsFromBody,
 } from './app-permissions.js';
 
-/** Права пользователя: системный admin — всё; иначе из роли в справочнике */
-export async function resolveUserPermissionsForSave(client, { systemRole, role_id }) {
-  if (systemRole === 'admin') {
-    return fullPermissionFlags(true);
-  }
-
+/** Права пользователя: только из выбранной роли в справочнике. */
+export async function resolveUserPermissionsForSave(client, { role_id }) {
   const rid = role_id != null && role_id !== '' && !Number.isNaN(Number(role_id))
     ? parseInt(role_id, 10)
     : null;
@@ -45,12 +40,11 @@ export async function upsertUserPermissions(client, userId, perms) {
 /** Синхронизировать user_permissions у всех пользователей с данной ролью */
 export async function syncUsersPermissionsFromRole(client, roleId, rolePerms) {
   const { rows } = await client.query(
-    'SELECT id, role FROM users WHERE role_id = $1',
+    'SELECT id FROM users WHERE role_id = $1',
     [roleId],
   );
   for (const u of rows) {
-    const perms = u.role === 'admin' ? fullPermissionFlags(true) : { ...rolePerms };
-    await upsertUserPermissions(client, u.id, perms);
+    await upsertUserPermissions(client, u.id, { ...rolePerms });
   }
 }
 

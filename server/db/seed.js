@@ -2,21 +2,38 @@ import 'dotenv/config';
 import pool from './pool.js';
 import bcrypt from 'bcryptjs';
 
+const ADMIN_ROLE_NAME = 'Администратор';
+
+async function ensureAdminRoleId(client) {
+  const existing = (await client.query(
+    'SELECT id FROM roles WHERE LOWER(TRIM(name)) = LOWER($1) LIMIT 1',
+    [ADMIN_ROLE_NAME],
+  )).rows[0];
+  if (existing?.id) return Number(existing.id);
+  const created = (await client.query(
+    'INSERT INTO roles (name, warehouse_permissions_customized) VALUES ($1, true) RETURNING id',
+    [ADMIN_ROLE_NAME],
+  )).rows[0];
+  return Number(created.id);
+}
+
 async function seed() {
   const client = await pool.connect();
   try {
+    const adminRoleId = await ensureAdminRoleId(client);
     const adminLogin = process.env.ADMIN_LOGIN || 'admin';
     const adminPassword = process.env.ADMIN_PASSWORD || 'admin';
     const hash = await bcrypt.hash(adminPassword, 10);
 
     await client.query(
-      `INSERT INTO users (login, password_hash, display_name, role)
-       VALUES ($1, $2, 'Администратор', 'admin')
+      `INSERT INTO users (login, password_hash, display_name, role, role_id)
+       VALUES ($1, $2, 'Администратор', 'admin', $3)
        ON CONFLICT (login) DO UPDATE SET
          password_hash = EXCLUDED.password_hash,
          display_name = EXCLUDED.display_name,
-         role = 'admin'`,
-      [adminLogin, hash]
+         role = 'admin',
+         role_id = EXCLUDED.role_id`,
+      [adminLogin, hash, adminRoleId]
     );
 
     const { rows: [admin] } = await client.query(

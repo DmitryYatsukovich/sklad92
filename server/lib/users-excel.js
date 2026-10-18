@@ -18,6 +18,7 @@ import {
   facePhotoBufferFromRow,
   extFromMime,
 } from './user-images.js';
+import { hasAdminPermissionBypass } from './admin-bypass.js';
 
 export const TEMPLATE_HEADERS = [
   'Логин',
@@ -882,7 +883,7 @@ async function upsertUserRow(client, item, editorSession) {
     );
   }
 
-  if (systemRole !== undefined && editorSession?.role === 'admin') {
+  if (systemRole !== undefined && hasAdminPermissionBypass(editorSession)) {
     await client.query('UPDATE users SET role = $2 WHERE id = $1', [userId, systemRole]);
   }
 
@@ -909,13 +910,9 @@ async function upsertUserRow(client, item, editorSession) {
     await client.query('UPDATE users SET display_name = $2 WHERE id = $1', [userId, displayName]);
   }
 
-  const effectiveRole = systemRole !== undefined && editorSession?.role === 'admin'
-    ? systemRole
-    : target.role;
   const cr = (await client.query('SELECT role_id FROM users WHERE id = $1', [userId])).rows[0];
   const effectiveRoleId = item.role_name !== undefined ? roleId : cr?.role_id;
   let perms = await resolveUserPermissionsForSave(client, {
-    systemRole: effectiveRole,
     role_id: effectiveRoleId,
   });
   perms = mergePermsFromExcelItem(perms, item);

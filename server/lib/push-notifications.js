@@ -42,7 +42,6 @@ function parseSubscriptionInput(input) {
 
 function hasTaskNotificationsPermission(row) {
   if (!row) return false;
-  if (row.role === 'admin' && row.role_id == null) return true;
   if (row.role_id != null) return !!row.role_can_task_notifications;
   return !!row.user_can_task_notifications;
 }
