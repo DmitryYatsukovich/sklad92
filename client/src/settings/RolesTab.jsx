@@ -253,6 +253,7 @@ export default function RolesTab() {
     try {
       if (editing) await rolesApi.update(editing.id, body);
       else await rolesApi.create(body);
+      window.dispatchEvent(new CustomEvent('auth:permissions-changed'));
       closeForm();
       load();
     } catch (err) {
@@ -266,6 +267,7 @@ export default function RolesTab() {
     setError('');
     try {
       await rolesApi.delete(row.id);
+      window.dispatchEvent(new CustomEvent('auth:permissions-changed'));
       load();
     } catch (err) {
       setError(err.message);

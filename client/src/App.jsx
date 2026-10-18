@@ -550,6 +550,21 @@ export default function App() {
     return () => clearInterval(t);
   }, [user?.id]);
 
+  useEffect(() => {
+    const onPermissionsChanged = () => {
+      auth.me()
+        .then(({ user: u }) => {
+          if (u) {
+            setUser(u);
+            setQuickDeviceEnabled(canUseOfflineMode(u));
+          }
+        })
+        .catch(() => {});
+    };
+    window.addEventListener('auth:permissions-changed', onPermissionsChanged);
+    return () => window.removeEventListener('auth:permissions-changed', onPermissionsChanged);
+  }, []);
+
   const onLogin = (u) => {
     setQuickDeviceEnabled(canUseOfflineMode(u));
     if (!canUseOfflineMode(u)) {

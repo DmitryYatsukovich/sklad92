@@ -315,7 +315,15 @@ export default function Warehouse({ user }) {
         }
         setError('');
       })
-      .catch((e) => setError(e.message || 'Не удалось загрузить материалы'))
+      .catch((e) => {
+        if (e?.httpStatus === 401 || e?.httpStatus === 403) {
+          setList([]);
+          setGroupPartsCache({});
+          setExpandedGroupIds(new Set());
+          setPageCache('warehouse:materials', []);
+        }
+        setError(e.message || 'Не удалось загрузить материалы');
+      })
       .finally(() => { if (!silent) setLoading(false); });
   };
 
