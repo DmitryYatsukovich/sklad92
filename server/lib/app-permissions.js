@@ -43,9 +43,33 @@ export const APP_PERMISSIONS = [
     group: 'Основные разделы',
   },
   {
+    key: 'can_warehouse_delete',
+    label: 'Склад: удаление материалов',
+    description: 'Удаление материалов и очистка склада',
+    group: 'Основные разделы',
+  },
+  {
     key: 'can_issuance',
     label: 'Выдача',
     description: 'Выдача материалов сотрудникам, возвраты, сканирование QR',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_issuance_return',
+    label: 'Выдача: кнопка «Возврат»',
+    description: 'Возврат материалов на склад',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_issuance_transfer',
+    label: 'Выдача: кнопка «Передать»',
+    description: 'Передача материала между сотрудниками',
+    group: 'Основные разделы',
+  },
+  {
+    key: 'can_issuance_production',
+    label: 'Выдача: кнопка «Выработать»',
+    description: 'Назначение выработки по выдаче',
     group: 'Основные разделы',
   },
   {
@@ -286,6 +310,9 @@ export function permissionsFromBody(body = {}) {
     perms.can_tasks_all = false;
   }
   if (!perms.can_issuance) {
+    perms.can_issuance_return = false;
+    perms.can_issuance_transfer = false;
+    perms.can_issuance_production = false;
     perms.can_issuance_all = false;
     perms.can_issuance_all_issued = false;
     perms.can_issuance_all_received = false;
@@ -309,6 +336,7 @@ export function permissionsFromBody(body = {}) {
     perms.can_warehouse_issue = false;
     perms.can_warehouse_move = false;
     perms.can_warehouse_split = false;
+    perms.can_warehouse_delete = false;
   }
   if (!perms.can_attendance) {
     perms.can_attendance_all = false;

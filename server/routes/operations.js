@@ -201,7 +201,7 @@ router.post('/issue', async (req, res) => {
 });
 
 // Вернуть на склад (частичный или полный возврат)
-router.post('/return', requirePermission('can_issuance'), async (req, res) => {
+router.post('/return', requirePermission('can_issuance_return'), async (req, res) => {
   const { issuance_id, returned_quantity } = req.body || {};
   const retQty = parseFloat(returned_quantity);
   if (!issuance_id || !(retQty > 0)) {
@@ -295,7 +295,7 @@ router.post('/return', requirePermission('can_issuance'), async (req, res) => {
 });
 
 // Передать материал от одного получателя другому (без изменения остатков склада)
-router.post('/transfer', requirePermission('can_issuance'), async (req, res) => {
+router.post('/transfer', requirePermission('can_issuance_transfer'), async (req, res) => {
   const { issuance_id, issued_to_user_id, quantity, note } = req.body || {};
   const issuanceId = Number(issuance_id);
   const toUserId = Number(issued_to_user_id);
@@ -411,7 +411,7 @@ router.post('/transfer', requirePermission('can_issuance'), async (req, res) => 
 });
 
 // Установить итоговое возвращённое количество (редактирование возврата)
-router.patch('/issuances/:id/returned', requirePermission('can_issuance'), async (req, res) => {
+router.patch('/issuances/:id/returned', requirePermission('can_issuance_return'), async (req, res) => {
   const issuanceId = parseInt(req.params.id, 10);
   const newReturned = parseFloat(req.body?.returned_quantity);
   if (!issuanceId || Number.isNaN(newReturned) || newReturned < 0) {
@@ -740,7 +740,7 @@ router.get('/issuances/:id/production-distribution', requirePermission('can_issu
   res.json(rows);
 });
 
-router.post('/issuances/:id/production-distribution', requirePermission('can_issuance'), async (req, res) => {
+router.post('/issuances/:id/production-distribution', requirePermission('can_issuance_production'), async (req, res) => {
   const issuanceId = parseId(req.params.id);
   if (!issuanceId) return res.status(400).json({ error: 'Неверный id выдачи' });
 
@@ -1082,7 +1082,7 @@ router.post('/issuances/:id/production-distribution', requirePermission('can_iss
   }
 });
 
-router.delete('/issuances/:id/production-distribution', requirePermission('can_issuance'), async (req, res) => {
+router.delete('/issuances/:id/production-distribution', requirePermission('can_issuance_production'), async (req, res) => {
   const issuanceId = parseId(req.params.id);
   const locationSystemId = parseId(req.body?.location_system_id);
   const transitCableLineId = parseId(req.body?.transit_cable_line_id);

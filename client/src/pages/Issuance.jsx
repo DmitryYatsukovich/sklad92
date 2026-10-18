@@ -314,6 +314,9 @@ export default function Issuance({ user }) {
   );
 
   const isAdminBypass = hasAdminPermissionBypass(user);
+  const canIssuanceReturn = isAdminBypass || !!user?.can_issuance_return;
+  const canIssuanceTransfer = isAdminBypass || !!user?.can_issuance_transfer;
+  const canIssuanceProduction = isAdminBypass || !!user?.can_issuance_production;
   const canViewAllIssuances = isAdminBypass || !!user?.can_issuance_all;
   const canViewAllIssued = isAdminBypass
     || !!user?.can_issuance_all
@@ -490,12 +493,14 @@ export default function Issuance({ user }) {
   };
 
   const openReturn = (row) => {
+    if (!canIssuanceReturn) return;
     setReturnRow(row);
     setReturnQuantity('');
     setError('');
   };
 
   const openTransfer = (row) => {
+    if (!canIssuanceTransfer) return;
     const available = Math.max(remainingQty(row), 0);
     setTransferRow(row);
     setTransferQuantity(available > 0 ? String(available) : '');
@@ -548,6 +553,7 @@ export default function Issuance({ user }) {
   }, [issueUsers, productionSelectedUserIds]);
 
   const openProduction = (row) => {
+    if (!canIssuanceProduction) return;
     setProductionRow(row);
     setProductionUserSearch('');
     setProductionSelectedUserIds([]);
@@ -648,6 +654,7 @@ export default function Issuance({ user }) {
 
   const handleReturn = async (e) => {
     e.preventDefault();
+    if (!canIssuanceReturn) return;
     if (!returnRow) return;
     const amountToReturn = parseFloat(returnQuantity);
     const onHands = Math.max(remainingQty(returnRow), 0);
@@ -679,6 +686,7 @@ export default function Issuance({ user }) {
 
   const handleTransfer = async (e) => {
     e.preventDefault();
+    if (!canIssuanceTransfer) return;
     if (!transferRow) return;
     const toUserId = Number(transferUserId);
     const qty = Number(transferQuantity);
@@ -961,21 +969,27 @@ export default function Issuance({ user }) {
                     <td className="text-right text-zinc-400 tabular-nums">{i._smr.toFixed(2)}</td>
                     <td className="text-right">
                       {canReturn ? (
-                        <div className="inline-flex items-center gap-1">
-                          <button type="button" onClick={() => openReturn(i)} className="btn-ghost px-1 text-xs">
-                            Возврат
-                          </button>
-                          {canReturn && (
-                            <button type="button" onClick={() => openTransfer(i)} className="btn-ghost px-1 text-xs">
-                              Передать
-                            </button>
-                          )}
-                          {canReturn && (
-                            <button type="button" onClick={() => openProduction(i)} className="btn-ghost px-1 text-xs text-sky-300">
-                              Выработать
-                            </button>
-                          )}
-                        </div>
+                        (canIssuanceReturn || canIssuanceTransfer || canIssuanceProduction) ? (
+                          <div className="inline-flex items-center gap-1">
+                            {canIssuanceReturn && (
+                              <button type="button" onClick={() => openReturn(i)} className="btn-ghost px-1 text-xs">
+                                Возврат
+                              </button>
+                            )}
+                            {canIssuanceTransfer && (
+                              <button type="button" onClick={() => openTransfer(i)} className="btn-ghost px-1 text-xs">
+                                Передать
+                              </button>
+                            )}
+                            {canIssuanceProduction && (
+                              <button type="button" onClick={() => openProduction(i)} className="btn-ghost px-1 text-xs text-sky-300">
+                                Выработать
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-2xs text-zinc-600">нет доступа</span>
+                        )
                       ) : (
                         <span className="text-2xs text-zinc-600">закрыто</span>
                       )}
@@ -999,7 +1013,7 @@ export default function Issuance({ user }) {
         <MaterialQrModal material={qrMaterial} onClose={() => setQrMaterial(null)} />
       )}
 
-      {returnRow && (
+      {canIssuanceReturn && returnRow && (
         <div className="modal-backdrop z-50" onClick={closeReturn}>
           <div className="card p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-white mb-1">Возврат на склад</h3>
@@ -1052,7 +1066,7 @@ export default function Issuance({ user }) {
         </div>
       )}
 
-      {transferRow && (
+      {canIssuanceTransfer && transferRow && (
         <div className="modal-backdrop z-50" onClick={closeTransfer}>
           <div className="card p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-white mb-1">Передать материал</h3>
@@ -1117,7 +1131,7 @@ export default function Issuance({ user }) {
         </div>
       )}
 
-      {productionRow && (
+      {canIssuanceProduction && productionRow && (
         <div className="modal-backdrop z-50" onClick={closeProduction}>
           <div className="card p-5 max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-white mb-1">Выработать материал</h3>

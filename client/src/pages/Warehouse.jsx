@@ -228,7 +228,8 @@ export default function Warehouse({ user }) {
   const canWarehouseIssue = isAdmin || !!user?.can_warehouse_issue;
   const canWarehouseMove = isAdmin || !!user?.can_warehouse_move;
   const canWarehouseSplit = isAdmin || !!user?.can_warehouse_split;
-  const canOpenMaterialMenu = canWarehouseEdit || canWarehouseIssue || canWarehouseMove || canWarehouseSplit;
+  const canWarehouseDelete = isAdmin || !!user?.can_warehouse_delete;
+  const canOpenMaterialMenu = canWarehouseEdit || canWarehouseIssue || canWarehouseMove || canWarehouseSplit || canWarehouseDelete;
 
   const displayList = useMemo(
     () => applyPendingToMaterials(list, pendingMutations, { catalog, issueUsers: users }),
@@ -702,8 +703,8 @@ export default function Warehouse({ user }) {
   };
 
   const handleDeleteMaterial = async () => {
-    if (!canWarehouseEdit) return;
-    if (!editing || !isAdmin) return;
+    if (!canWarehouseDelete) return;
+    if (!editing) return;
     const isPart = isMaterialPart(editing);
     const msg = isPart
       ? `Удалить часть «${editing.part_label || `Часть ${editing.part_index}`}»?`
@@ -1490,7 +1491,7 @@ export default function Warehouse({ user }) {
               + Материал
             </button>
           )}
-          {isAdmin && canWarehouseEdit && (
+          {canWarehouseDelete && (
             <button
               type="button"
               onClick={() => setDeleteAllConfirm(true)}
@@ -2492,7 +2493,7 @@ export default function Warehouse({ user }) {
                 </div>
               )}
               <div className="flex gap-2 justify-end flex-wrap">
-                {editing && isAdmin && (
+                {editing && canWarehouseDelete && (
                   <button
                     type="button"
                     onClick={handleDeleteMaterial}

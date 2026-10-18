@@ -550,6 +550,8 @@ const statements = [
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_warehouse_move BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_warehouse_split BOOLEAN DEFAULT false`,
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_warehouse_split BOOLEAN DEFAULT false`,
+  `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_warehouse_delete BOOLEAN DEFAULT false`,
+  `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_warehouse_delete BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS warehouse_permissions_customized BOOLEAN DEFAULT false`,
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS warehouse_permissions_customized BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_actions_all BOOLEAN DEFAULT false`,
@@ -570,6 +572,12 @@ const statements = [
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_tasks_all BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_issuance_all BOOLEAN DEFAULT false`,
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_issuance_all BOOLEAN DEFAULT false`,
+  `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_issuance_return BOOLEAN DEFAULT false`,
+  `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_issuance_return BOOLEAN DEFAULT false`,
+  `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_issuance_transfer BOOLEAN DEFAULT false`,
+  `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_issuance_transfer BOOLEAN DEFAULT false`,
+  `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_issuance_production BOOLEAN DEFAULT false`,
+  `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_issuance_production BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_issuance_all_issued BOOLEAN DEFAULT false`,
   `ALTER TABLE roles ADD COLUMN IF NOT EXISTS can_issuance_all_issued BOOLEAN DEFAULT false`,
   `ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS can_issuance_all_received BOOLEAN DEFAULT false`,
@@ -580,6 +588,18 @@ const statements = [
   `UPDATE user_permissions
    SET can_issuance_all_issued = true, can_issuance_all_received = true
    WHERE COALESCE(can_issuance_all, false) = true`,
+  `UPDATE roles
+   SET can_issuance_return = true, can_issuance_transfer = true, can_issuance_production = true
+   WHERE COALESCE(can_issuance, false) = true
+     AND COALESCE(can_issuance_return, false) = false
+     AND COALESCE(can_issuance_transfer, false) = false
+     AND COALESCE(can_issuance_production, false) = false`,
+  `UPDATE user_permissions
+   SET can_issuance_return = true, can_issuance_transfer = true, can_issuance_production = true
+   WHERE COALESCE(can_issuance, false) = true
+     AND COALESCE(can_issuance_return, false) = false
+     AND COALESCE(can_issuance_transfer, false) = false
+     AND COALESCE(can_issuance_production, false) = false`,
 ];
 
 export async function ensureSchema() {

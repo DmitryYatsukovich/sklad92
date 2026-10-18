@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { Router } from 'express';
 import multer from 'multer';
 import pool from '../db/pool.js';
-import { requireAuth, loadUser, requirePermission, requireAnyPermission, requireAdmin } from '../middleware/auth.js';
+import { requireAuth, loadUser, requirePermission, requireAnyPermission } from '../middleware/auth.js';
 import { hasAdminPermissionBypass } from '../lib/admin-bypass.js';
 import { MATERIAL_SELECT, MATERIAL_FROM } from '../lib/material-select.js';
 import {
@@ -1040,7 +1040,7 @@ router.put('/:id', requireAnyPermission('can_warehouse_edit', 'can_warehouse_mov
 });
 
 /** Удалить все материалы склада и связанные выдачи (только администратор). */
-router.delete('/all', requireAdmin, async (req, res) => {
+router.delete('/all', requireWarehouseFeature('can_warehouse_delete'), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1067,7 +1067,7 @@ router.delete('/all', requireAdmin, async (req, res) => {
   }
 });
 
-router.delete('/:id', requireAdmin, async (req, res) => {
+router.delete('/:id', requireWarehouseFeature('can_warehouse_delete'), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Неверный id' });
 

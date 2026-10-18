@@ -19,6 +19,27 @@ const emptyPerms = (permissionDefs = []) => Object.fromEntries(
   permissionDefs.map((p) => [p.key, false]),
 );
 
+const WAREHOUSE_SUBMENU_KEYS = [
+  'can_warehouse_view',
+  'can_warehouse_edit',
+  'can_warehouse_qr_scan',
+  'can_warehouse_issue',
+  'can_warehouse_move',
+  'can_warehouse_split',
+  'can_warehouse_delete',
+];
+
+const ISSUANCE_ACTION_SUBMENU_KEYS = [
+  'can_issuance_return',
+  'can_issuance_transfer',
+  'can_issuance_production',
+];
+
+const HIDDEN_SUBMENU_KEYS = new Set([
+  ...WAREHOUSE_SUBMENU_KEYS,
+  ...ISSUANCE_ACTION_SUBMENU_KEYS,
+]);
+
 function roleToForm(row, permissionDefs) {
   if (!row) {
     return { name: '', ...emptyPerms(permissionDefs) };
@@ -84,7 +105,11 @@ export default function RolesTab() {
       can_warehouse_issue: true,
       can_warehouse_move: true,
       can_warehouse_split: true,
+      can_warehouse_delete: true,
       can_issuance: true,
+      can_issuance_return: true,
+      can_issuance_transfer: true,
+      can_issuance_production: true,
       can_issuance_all_issued: false,
       can_issuance_all_received: false,
       can_production: true,
@@ -122,6 +147,7 @@ export default function RolesTab() {
         next.can_warehouse_issue = false;
         next.can_warehouse_move = false;
         next.can_warehouse_split = false;
+        next.can_warehouse_delete = false;
       } else if (key === 'can_warehouse' && value) {
         next.can_warehouse_view = true;
         next.can_warehouse_edit = true;
@@ -129,11 +155,19 @@ export default function RolesTab() {
         next.can_warehouse_issue = true;
         next.can_warehouse_move = true;
         next.can_warehouse_split = true;
+        next.can_warehouse_delete = true;
       }
       if (key === 'can_issuance' && !value) {
+        next.can_issuance_return = false;
+        next.can_issuance_transfer = false;
+        next.can_issuance_production = false;
         next.can_issuance_all = false;
         next.can_issuance_all_issued = false;
         next.can_issuance_all_received = false;
+      } else if (key === 'can_issuance' && value) {
+        next.can_issuance_return = true;
+        next.can_issuance_transfer = true;
+        next.can_issuance_production = true;
       }
       if (key === 'can_actions' && !value) {
         next.can_actions_all = false;
@@ -384,19 +418,11 @@ export default function RolesTab() {
                       <p className="text-slate-500 text-2xs uppercase tracking-wide mb-2">{groupName}</p>
                       <div className="space-y-2">
                         {items
-                          .filter((p) => !p.faceScopeOption && !p.attendanceScopeOption && !p.attendanceEditOption && !p.attendancePayOption && !p.attendanceRatesOption && !p.attendanceToolsOption && !p.attendanceMonthOption && !p.actionsScopeOption && !p.tasksScopeOption && !p.issuanceScopeOption)
+                          .filter((p) => !p.faceScopeOption && !p.attendanceScopeOption && !p.attendanceEditOption && !p.attendancePayOption && !p.attendanceRatesOption && !p.attendanceToolsOption && !p.attendanceMonthOption && !p.actionsScopeOption && !p.tasksScopeOption && !p.issuanceScopeOption && !HIDDEN_SUBMENU_KEYS.has(p.key))
                           .map((p) => {
                             const requiresTasks = p.key === 'can_task_notifications';
                             const requiresTools = p.key === 'can_tools_delete';
-                            const warehouseFeatureKeys = new Set([
-                              'can_warehouse_view',
-                              'can_warehouse_edit',
-                              'can_warehouse_qr_scan',
-                              'can_warehouse_issue',
-                              'can_warehouse_move',
-                              'can_warehouse_split',
-                            ]);
-                            const requiresWarehouse = warehouseFeatureKeys.has(p.key);
+                            const requiresWarehouse = WAREHOUSE_SUBMENU_KEYS.includes(p.key);
                             const disabledByDependencies = (
                               (requiresTasks && !(editing?.is_admin_role || form.can_tasks))
                               || (requiresTools && !(editing?.is_admin_role || form.can_tools))
@@ -421,6 +447,30 @@ export default function RolesTab() {
                                   <span className="text-slate-500 text-2xs">{p.description}</span>
                                 </span>
                               </label>
+                              {p.key === 'can_warehouse' && (editing?.is_admin_role || form.can_warehouse) && (
+                                <div className="ml-9 mt-1 mb-2 space-y-1.5 pl-3 border-l border-white/10">
+                                  <p className="text-slate-500 text-2xs">Доступ в разделе «Склад»</p>
+                                  {WAREHOUSE_SUBMENU_KEYS.map((subKey) => {
+                                    const subDef = permissionDefs.find((def) => def.key === subKey);
+                                    if (!subDef) return null;
+                                    return (
+                                      <label key={subKey} className="flex items-start gap-2 text-sm text-slate-300 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={editing?.is_admin_role ? true : !!form[subKey]}
+                                          disabled={!!editing?.is_admin_role}
+                                          onChange={(e) => setPerm(subKey, e.target.checked)}
+                                          className="mt-1 rounded border-slate-600 text-brand-600"
+                                        />
+                                        <span>
+                                          <span className="text-slate-200 text-sm block">{subDef.label}</span>
+                                          <span className="text-slate-500 text-2xs">{subDef.description}</span>
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              )}
                               {p.key === 'can_actions' && (editing?.is_admin_role || form.can_actions) && (
                                 <div className="ml-9 mt-1 mb-2 space-y-1.5 pl-3 border-l border-white/10">
                                   <p className="text-slate-500 text-2xs">Область журнала</p>
@@ -477,6 +527,26 @@ export default function RolesTab() {
                               )}
                               {p.key === 'can_issuance' && (editing?.is_admin_role || form.can_issuance) && (
                                 <div className="ml-9 mt-1 mb-2 space-y-1.5 pl-3 border-l border-white/10">
+                                  <p className="text-slate-500 text-2xs">Кнопки во вкладке «Выдача»</p>
+                                  {ISSUANCE_ACTION_SUBMENU_KEYS.map((subKey) => {
+                                    const subDef = permissionDefs.find((def) => def.key === subKey);
+                                    if (!subDef) return null;
+                                    return (
+                                      <label key={subKey} className="flex items-start gap-2 text-sm text-slate-300 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={editing?.is_admin_role ? true : !!form[subKey]}
+                                          disabled={!!editing?.is_admin_role}
+                                          onChange={(e) => setPerm(subKey, e.target.checked)}
+                                          className="mt-1 rounded border-slate-600 text-brand-600"
+                                        />
+                                        <span>
+                                          <span className="text-slate-200 text-sm block">{subDef.label}</span>
+                                          <span className="text-slate-500 text-2xs">{subDef.description}</span>
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
                                   <p className="text-slate-500 text-2xs">Область выдач (по выдавшему)</p>
                                   <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
                                     <input
