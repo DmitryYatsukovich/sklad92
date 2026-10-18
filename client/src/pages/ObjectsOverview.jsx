@@ -1299,28 +1299,128 @@ export default function ObjectsOverview() {
 
   const needSummaryRows = useMemo(() => {
     const grouped = new Map();
-    data.location_system_materials.forEach((row) => {
-      const slotId = Number(row?.location_system_id || 0);
-      if (!visibleSlotIds.has(slotId)) return;
-      const materialId = Number(row?.material_id || 0);
-      if (!materialId) return;
-      const key = String(materialId);
+    const slotHasExplicitEntries = new Set();
+    const getSlotSummaryMeta = (slotId, fallback = {}) => {
+      const slot = slotById.get(slotId) || {};
+      const systemName = String(fallback.systemName || slot.system_name || '').trim() || 'Без системы';
+      const categoryName = String(fallback.categoryName || slot.category_name || '').trim() || 'Без категории';
+      const systemKey = toNullableFilterKey(slot.system_id ?? fallback.systemId);
+      const categoryKey = toNullableFilterKey(slot.category_id ?? fallback.categoryId);
+      const statusId = Number(slot.status_id || 0);
+      return {
+        systemName,
+        categoryName,
+        systemKey,
+        categoryKey,
+        statusId,
+      };
+    };
+    const addNeedRow = ({
+      key,
+      materialId,
+      materialName,
+      materialUnit = '',
+      systemName,
+      categoryName,
+      quantity = 0,
+      produced = false,
+    }) => {
+      if (!(Number(quantity) > 0)) return;
       const existing = grouped.get(key) || {
         materialId,
-        materialName: row?.material_name || `Материал #${materialId}`,
-        materialUnit: row?.material_unit || '',
-        systemName: row?.material_system_name || 'Без системы',
-        categoryName: row?.material_category_name || 'Без категории',
+        materialName,
+        materialUnit,
+        systemName,
+        categoryName,
         requiredQuantity: 0,
         producedQuantity: 0,
       };
-      const quantity = Number(row?.quantity || 0);
-      existing.requiredQuantity += quantity;
-      const slotStatusId = Number(slotById.get(slotId)?.status_id || 0);
-      if (producedStatusIdSet.has(slotStatusId)) {
-        existing.producedQuantity += quantity;
-      }
+      existing.requiredQuantity += Number(quantity || 0);
+      if (produced) existing.producedQuantity += Number(quantity || 0);
       grouped.set(key, existing);
+    };
+
+    data.location_system_materials.forEach((row) => {
+      const slotId = Number(row?.location_system_id || 0);
+      if (!visibleSlotIds.has(slotId)) return;
+      slotHasExplicitEntries.add(slotId);
+      const meta = getSlotSummaryMeta(slotId, {
+        systemName: row?.material_system_name,
+        categoryName: row?.material_category_name,
+        systemId: row?.material_system_id,
+        categoryId: row?.material_category_id,
+      });
+      const materialId = Number(row?.material_id || 0);
+      const quantity = Number(row?.quantity || 0);
+      const key = materialId > 0
+        ? `material:${materialId}`
+        : `material-row:${Number(row?.id || 0)}:${slotId}`;
+      addNeedRow({
+        key,
+        materialId: materialId > 0 ? materialId : key,
+        materialName: String(row?.material_name || '').trim() || `Материал #${materialId || Number(row?.id || 0) || slotId}`,
+        materialUnit: row?.material_unit || '',
+        systemName: meta.systemName,
+        categoryName: meta.categoryName,
+        quantity,
+        produced: producedStatusIdSet.has(meta.statusId),
+      });
+    });
+    data.location_system_equipment.forEach((row) => {
+      const slotId = Number(row?.location_system_id || 0);
+      if (!visibleSlotIds.has(slotId)) return;
+      slotHasExplicitEntries.add(slotId);
+      const meta = getSlotSummaryMeta(slotId);
+      const name = String(row?.name || '').trim() || `Оборудование #${Number(row?.id || slotId)}`;
+      const key = `equipment:${normalizeNameKey(name)}:${meta.systemKey}:${meta.categoryKey}`;
+      addNeedRow({
+        key,
+        materialId: key,
+        materialName: name,
+        materialUnit: '',
+        systemName: meta.systemName,
+        categoryName: meta.categoryName,
+        quantity: Number(row?.quantity || 0),
+        produced: producedStatusIdSet.has(meta.statusId),
+      });
+    });
+    data.location_system_works.forEach((row) => {
+      const slotId = Number(row?.location_system_id || 0);
+      if (!visibleSlotIds.has(slotId)) return;
+      slotHasExplicitEntries.add(slotId);
+      const meta = getSlotSummaryMeta(slotId);
+      const name = String(row?.name || '').trim() || `Работа #${Number(row?.id || slotId)}`;
+      const key = `work:${normalizeNameKey(name)}:${meta.systemKey}:${meta.categoryKey}`;
+      addNeedRow({
+        key,
+        materialId: key,
+        materialName: name,
+        materialUnit: '',
+        systemName: meta.systemName,
+        categoryName: meta.categoryName,
+        quantity: Number(row?.quantity || 0),
+        produced: producedStatusIdSet.has(meta.statusId),
+      });
+    });
+
+    // Блоки без привязанных материалов/оборудования/работ тоже должны участвовать в подсчёте.
+    visibleSlotIds.forEach((slotId) => {
+      if (slotHasExplicitEntries.has(slotId)) return;
+      const meta = getSlotSummaryMeta(slotId);
+      const baseName = meta.categoryName !== 'Без категории'
+        ? meta.categoryName
+        : (meta.systemName !== 'Без системы' ? `${meta.systemName} (блок)` : 'Блок без категории');
+      const key = `slot:${normalizeNameKey(baseName)}:${meta.systemKey}:${meta.categoryKey}`;
+      addNeedRow({
+        key,
+        materialId: key,
+        materialName: baseName,
+        materialUnit: 'шт',
+        systemName: meta.systemName,
+        categoryName: meta.categoryName,
+        quantity: 1,
+        produced: producedStatusIdSet.has(meta.statusId),
+      });
     });
     cableLines.forEach((line) => {
       const lineId = Number(line?.id || 0);
@@ -1371,6 +1471,8 @@ export default function ObjectsOverview() {
       ));
   }, [
     data.location_system_materials,
+    data.location_system_equipment,
+    data.location_system_works,
     cableLines,
     visibleSlotIds,
     visibleLineIds,
