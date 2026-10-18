@@ -1025,7 +1025,9 @@ router.post('/:id/add', requirePermission('can_warehouse'), async (req, res) => 
 
 router.get('/users-for-issuance', async (req, res) => {
   const r = await pool.query(
-    'SELECT id, login, display_name FROM users ORDER BY COALESCE(display_name, login)'
+    `SELECT id, login, display_name, first_name, last_name
+     FROM users
+     ORDER BY COALESCE(NULLIF(TRIM(display_name), ''), NULLIF(TRIM(CONCAT_WS(' ', last_name, first_name)), ''), login)`
   );
   res.json(r.rows);
 });

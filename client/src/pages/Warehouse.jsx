@@ -188,6 +188,8 @@ export default function Warehouse({ user }) {
   const [issueQty, setIssueQty] = useState('');
   const [issueToUserId, setIssueToUserId] = useState('');
   const [issueUserQuery, setIssueUserQuery] = useState('');
+  const [issueUserDropdownOpen, setIssueUserDropdownOpen] = useState(false);
+  const [issueUserHighlightIndex, setIssueUserHighlightIndex] = useState(-1);
   const [users, setUsers] = useState([]);
   const [showQrMaterial, setShowQrMaterial] = useState(null);
   const [filters, setFilters] = useState(() => createEmptyFilters());
@@ -730,18 +732,39 @@ export default function Warehouse({ user }) {
     materialsApi.usersForIssuance().then(setUsers).catch(() => setUsers([]));
   };
 
+  const issueUserLabel = (u) => {
+    const display = (u?.display_name || '').trim();
+    if (display) return display;
+    const fullName = `${u?.last_name || ''} ${u?.first_name || ''}`.trim();
+    if (fullName) return fullName;
+    return u?.login || '';
+  };
+
   const filteredIssueUsers = useMemo(() => {
     const query = issueUserQuery.trim().toLowerCase();
-    const selectedUserId = String(issueToUserId || '');
     if (!query) return users;
-    const matched = users.filter((u) => {
-      const haystack = `${u.display_name || ''} ${u.login || ''}`.toLowerCase();
+    return users.filter((u) => {
+      const haystack = `${u.display_name || ''} ${u.first_name || ''} ${u.last_name || ''} ${u.login || ''}`.toLowerCase();
       return haystack.includes(query);
     });
-    if (!selectedUserId || matched.some((u) => String(u.id) === selectedUserId)) return matched;
-    const selected = users.find((u) => String(u.id) === selectedUserId);
-    return selected ? [selected, ...matched] : matched;
-  }, [users, issueUserQuery, issueToUserId]);
+  }, [users, issueUserQuery]);
+
+  const issueUserSuggestions = useMemo(
+    () => filteredIssueUsers.slice(0, 12),
+    [filteredIssueUsers],
+  );
+
+  const selectedIssueUser = useMemo(
+    () => users.find((u) => String(u.id) === String(issueToUserId || '')) || null,
+    [users, issueToUserId],
+  );
+
+  const selectIssueUser = (u) => {
+    setIssueToUserId(String(u.id));
+    setIssueUserQuery(issueUserLabel(u));
+    setIssueUserDropdownOpen(false);
+    setIssueUserHighlightIndex(-1);
+  };
 
   const openMaterialMenu = (m) => {
     if (!canOpenMaterialMenu) return;
@@ -751,6 +774,8 @@ export default function Warehouse({ user }) {
     setIssueQty('');
     setIssueToUserId('');
     setIssueUserQuery('');
+    setIssueUserDropdownOpen(false);
+    setIssueUserHighlightIndex(-1);
     setError('');
     if (canWarehouseIssue) loadUsers();
   };
@@ -762,6 +787,8 @@ export default function Warehouse({ user }) {
     setIssueQty('');
     setIssueToUserId('');
     setIssueUserQuery('');
+    setIssueUserDropdownOpen(false);
+    setIssueUserHighlightIndex(-1);
     setMoveForm(emptyMaterialForm());
     setActivePartGroupParts([]);
     setActivePartGroupLoading(false);
@@ -2788,23 +2815,71 @@ export default function Warehouse({ user }) {
                 <input
                   type="text"
                   value={issueUserQuery}
-                  onChange={(e) => setIssueUserQuery(e.target.value)}
+                  onChange={(e) => {
+                    setIssueUserQuery(e.target.value);
+                    setIssueToUserId('');
+                    setIssueUserDropdownOpen(true);
+                    setIssueUserHighlightIndex(0);
+                  }}
+                  onFocus={() => {
+                    setIssueUserDropdownOpen(true);
+                    if (issueUserHighlightIndex < 0) setIssueUserHighlightIndex(0);
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => setIssueUserDropdownOpen(false), 120);
+                  }}
+                  onKeyDown={(e) => {
+                    if (!issueUserDropdownOpen) return;
+                    if (!issueUserSuggestions.length) return;
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setIssueUserHighlightIndex((idx) => (idx + 1) % issueUserSuggestions.length);
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setIssueUserHighlightIndex((idx) => (idx <= 0 ? issueUserSuggestions.length - 1 : idx - 1));
+                    } else if (e.key === 'Enter') {
+                      const nextIdx = issueUserHighlightIndex >= 0 ? issueUserHighlightIndex : 0;
+                      const candidate = issueUserSuggestions[nextIdx];
+                      if (candidate) {
+                        e.preventDefault();
+                        selectIssueUser(candidate);
+                      }
+                    } else if (e.key === 'Escape') {
+                      setIssueUserDropdownOpen(false);
+                    }
+                  }}
                   className="input mb-2"
                   placeholder="Поиск по имени или логину"
                 />
-                <select
-                  value={issueToUserId}
-                  onChange={(e) => setIssueToUserId(e.target.value)}
-                  className="select"
-                  required
-                >
-                  <option value="">— Выберите —</option>
-                  {filteredIssueUsers.map((u) => (
-                    <option key={u.id} value={u.id}>{u.display_name || u.login}</option>
-                  ))}
-                </select>
-                {issueUserQuery && filteredIssueUsers.length === 0 && (
-                  <p className="text-2xs text-zinc-500 mt-2">Пользователи не найдены</p>
+                {issueUserDropdownOpen && (
+                  <div className="max-h-44 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950/95">
+                    {issueUserSuggestions.length > 0 ? (
+                      issueUserSuggestions.map((u, idx) => {
+                        const active = idx === issueUserHighlightIndex;
+                        return (
+                          <button
+                            key={u.id}
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => selectIssueUser(u)}
+                            className={`w-full text-left px-3 py-2 text-sm border-b border-zinc-800 last:border-b-0 ${
+                              active ? 'bg-brand-600/30 text-white' : 'text-zinc-200 hover:bg-zinc-800'
+                            }`}
+                          >
+                            <span className="block">{issueUserLabel(u)}</span>
+                            <span className="text-2xs text-zinc-500">{u.login}</span>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <p className="px-3 py-2 text-2xs text-zinc-500">Пользователи не найдены</p>
+                    )}
+                  </div>
+                )}
+                {selectedIssueUser && (
+                  <p className="text-2xs text-emerald-300 mt-2">
+                    Выбран: {issueUserLabel(selectedIssueUser)}
+                  </p>
                 )}
               </div>
               <div>
