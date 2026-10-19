@@ -5,18 +5,33 @@ export default function QrScanner({ onScan, onClose }) {
   const [error, setError] = useState('');
   const [supported, setSupported] = useState(true);
   const scannerRef = useRef(null);
-  const containerId = 'qr-reader-' + Math.random().toString(36).slice(2);
+  const containerIdRef = useRef(`qr-reader-${Math.random().toString(36).slice(2)}`);
+  const decodeHandledRef = useRef(false);
 
   useEffect(() => {
     if (!onScan) return;
-    const scanner = new Html5Qrcode(containerId);
+    decodeHandledRef.current = false;
+    const scanner = new Html5Qrcode(containerIdRef.current);
     scannerRef.current = scanner;
     scanner
       .start(
         { facingMode: 'environment' },
         { fps: 10, qrbox: { width: 250, height: 250 } },
         (decoded) => {
-          onScan(decoded);
+          if (decodeHandledRef.current) return;
+          decodeHandledRef.current = true;
+          const emitScan = () => {
+            try {
+              onScan(decoded);
+            } catch {
+              /* handled by parent */
+            }
+          };
+          if (scannerRef.current?.isScanning) {
+            scannerRef.current.stop().catch(() => {}).finally(emitScan);
+          } else {
+            emitScan();
+          }
         },
         () => {}
       )
@@ -25,11 +40,12 @@ export default function QrScanner({ onScan, onClose }) {
         setSupported(false);
       });
     return () => {
+      decodeHandledRef.current = true;
       if (scannerRef.current?.isScanning) {
         scannerRef.current.stop().catch(() => {});
       }
     };
-  }, [containerId]);
+  }, [onScan]);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 flex flex-col items-center justify-center p-4">
@@ -52,7 +68,7 @@ export default function QrScanner({ onScan, onClose }) {
               Наведите камеру на QR-код. Для работы камеры на телефоне нужен HTTPS.
             </p>
           )}
-          <div id={containerId} className="scanner-wrap rounded-xl overflow-hidden bg-black min-h-[240px]" />
+          <div id={containerIdRef.current} className="scanner-wrap rounded-xl overflow-hidden bg-black min-h-[240px]" />
         </div>
       </div>
     </div>

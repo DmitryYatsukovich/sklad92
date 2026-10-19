@@ -225,6 +225,8 @@ export default function Warehouse({ user }) {
   const [loadingPartsIds, setLoadingPartsIds] = useState(() => new Set());
   const expandedGroupIdsRef = useRef(expandedGroupIds);
   const fileInputRef = useRef(null);
+  const scanSessionRef = useRef(0);
+  const scanBusyRef = useRef(false);
   const pendingMutations = usePendingMutations();
   const isAdmin = hasAdminPermissionBypass(user);
   const canWarehouseView = isAdmin || !!user?.can_warehouse_view;
@@ -993,9 +995,15 @@ export default function Warehouse({ user }) {
     if (!canWarehouseQrScan) return;
     const code = (decoded || '').trim();
     if (!code) return;
+    if (scanBusyRef.current) return;
+    const session = scanSessionRef.current;
+    scanBusyRef.current = true;
     materialsApi
       .byCode(code)
       .then((m) => {
+        if (session !== scanSessionRef.current) return;
+        scanBusyRef.current = false;
+        scanSessionRef.current += 1;
         setShowScan(false);
         if (isMaterialGroupRow(m)) {
           openMaterialRowClick(m);
@@ -1003,10 +1011,16 @@ export default function Warehouse({ user }) {
           openMaterialMenu(m, { source: 'scan' });
         }
       })
-      .catch(() => setError('Материал не найден'));
+      .catch(() => {
+        if (session !== scanSessionRef.current) return;
+        scanBusyRef.current = false;
+        setError('Материал не найден');
+      });
   };
 
   const closeScan = () => {
+    scanSessionRef.current += 1;
+    scanBusyRef.current = false;
     setShowScan(false);
     closeMaterialAction();
     setError('');
@@ -1516,7 +1530,13 @@ export default function Warehouse({ user }) {
           {canWarehouseQrScan && (
             <button
               type="button"
-              onClick={() => { closeMaterialAction(); setShowScan(true); setError(''); }}
+              onClick={() => {
+                closeMaterialAction();
+                scanSessionRef.current += 1;
+                scanBusyRef.current = false;
+                setShowScan(true);
+                setError('');
+              }}
               className="btn-primary basis-full w-full sm:basis-auto sm:w-auto order-first py-3 sm:py-2 text-sm -mt-1 sm:mt-0"
             >
               Распознать QR код
